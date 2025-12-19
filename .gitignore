@@ -32,9 +32,17 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
+
+# Playwright MCP (browser automation tool)
+.playwright-mcp/
+
+# Test data files
+*.xlsx
+*.csv
 
 # typescript
 *.tsbuildinfo
