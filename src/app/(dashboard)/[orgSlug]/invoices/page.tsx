@@ -11,14 +11,14 @@ export default function InvoicesPage() {
         description="Create and manage invoices"
       />
       
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-4 lg:p-6">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <CardTitle>All Invoices</CardTitle>
               <CardDescription>Manage your invoices</CardDescription>
             </div>
-            <Button>
+            <Button size="sm" className="w-full sm:w-auto">
               <Plus className="mr-2 h-4 w-4" />
               Create Invoice
             </Button>
@@ -35,5 +35,6 @@ export default function InvoicesPage() {
     </div>
   )
 }
+
 
 

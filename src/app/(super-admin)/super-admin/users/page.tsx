@@ -51,9 +51,9 @@ export default async function UsersPage() {
         description="Manage users across all organizations"
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Users</CardTitle>
@@ -96,47 +96,52 @@ export default async function UsersPage() {
 
         {/* Users List */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 lg:px-6">
             <div>
               <CardTitle>All Users</CardTitle>
               <CardDescription>View and manage platform users</CardDescription>
             </div>
-            <Button>
+            <Button size="sm" className="w-full sm:w-auto">
               <Plus className="mr-2 h-4 w-4" />
               Add User
             </Button>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 lg:px-6">
             {allUsers.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {allUsers.map((user) => (
                   <div 
                     key={user.id} 
-                    className="flex items-center gap-4 p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                    className="p-4 rounded-lg border bg-card"
                   >
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={user.avatar_url || undefined} />
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        {user.name?.charAt(0).toUpperCase() || 'U'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{user.name}</p>
-                        {user.is_approved ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-yellow-500" />
-                        )}
+                    <div className="flex items-start gap-3">
+                      <Avatar className="h-10 w-10 shrink-0">
+                        <AvatarImage src={user.avatar_url || undefined} />
+                        <AvatarFallback className="bg-primary/10 text-primary">
+                          {user.name?.charAt(0).toUpperCase() || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate">{user.name}</p>
+                          {user.is_approved ? (
+                            <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                          ) : (
+                            <XCircle className="h-4 w-4 text-yellow-500 shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">{user.email}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {user.organizations?.name || 'No organization'} • {formatDistanceToNow(new Date(user.created_at), { addSuffix: true })}
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {user.email} • {user.organizations?.name || 'No organization'} • Joined {formatDistanceToNow(new Date(user.created_at), { addSuffix: true })}
-                      </p>
                     </div>
-                    {getRoleBadge(user.role)}
-                    <Button variant="ghost" size="icon">
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                      {getRoleBadge(user.role)}
+                      <Button variant="ghost" size="sm">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -153,6 +158,7 @@ export default async function UsersPage() {
     </div>
   )
 }
+
 
 
 

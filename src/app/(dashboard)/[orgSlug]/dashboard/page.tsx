@@ -14,6 +14,9 @@ import {
   Clock,
   CheckCircle2,
   XCircle,
+  Bell,
+  Video,
+  Phone,
 } from 'lucide-react'
 
 interface DashboardPageProps {
@@ -159,7 +162,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       .gte('next_followup', `${today}T00:00:00`)
       .lte('next_followup', `${today}T23:59:59`)
       .or(`leads.assigned_to.eq.${profile.id},leads.created_by.eq.${profile.id}`)
-      .limit(5)
+      .limit(10)
     
     todayFollowupsData = data as typeof todayFollowupsData
   } else {
@@ -173,7 +176,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       .eq('leads.org_id', org.id)
       .gte('next_followup', `${today}T00:00:00`)
       .lte('next_followup', `${today}T23:59:59`)
-      .limit(5)
+      .limit(10)
     
     todayFollowupsData = data as typeof todayFollowupsData
   }
@@ -181,12 +184,63 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   type FollowupData = { id: string; next_followup: string | null; leads: { id: string; name: string } }
   const todayFollowups = (todayFollowupsData || []) as FollowupData[]
 
+  // Get today's demos (filtered for sales users)
+  type TodayDemoData = { 
+    id: string; 
+    scheduled_at: string; 
+    google_meet_link: string | null;
+    leads: { id: string; name: string; assigned_to: string | null; created_by: string | null } 
+  }
+  let todayDemosData: TodayDemoData[] | null = null
+
+  if (profile?.role === 'sales' && profile?.id) {
+    const { data } = await supabase
+      .from('demos')
+      .select(`
+        id,
+        scheduled_at,
+        google_meet_link,
+        leads!inner(id, name, org_id, assigned_to, created_by)
+      `)
+      .eq('leads.org_id', org.id)
+      .eq('status', 'scheduled')
+      .gte('scheduled_at', `${today}T00:00:00`)
+      .lte('scheduled_at', `${today}T23:59:59`)
+      .or(`leads.assigned_to.eq.${profile.id},leads.created_by.eq.${profile.id}`)
+      .order('scheduled_at', { ascending: true })
+      .limit(10)
+    
+    todayDemosData = data as TodayDemoData[]
+  } else {
+    const { data } = await supabase
+      .from('demos')
+      .select(`
+        id,
+        scheduled_at,
+        google_meet_link,
+        leads!inner(id, name, org_id, assigned_to, created_by)
+      `)
+      .eq('leads.org_id', org.id)
+      .eq('status', 'scheduled')
+      .gte('scheduled_at', `${today}T00:00:00`)
+      .lte('scheduled_at', `${today}T23:59:59`)
+      .order('scheduled_at', { ascending: true })
+      .limit(10)
+    
+    todayDemosData = data as TodayDemoData[]
+  }
+
+  const todayDemos = (todayDemosData || []) as TodayDemoData[]
+  const hasReminders = todayDemos.length > 0 || todayFollowups.length > 0
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'new': return 'bg-blue-500'
-      case 'contacted': return 'bg-yellow-500'
-      case 'qualified': return 'bg-green-500'
+      case 'call_not_picked': return 'bg-yellow-500'
+      case 'not_interested': return 'bg-gray-500'
+      case 'follow_up_again': return 'bg-orange-500'
       case 'demo_booked': return 'bg-purple-500'
+      case 'demo_completed': return 'bg-indigo-500'
       case 'deal_won': return 'bg-emerald-500'
       case 'deal_lost': return 'bg-red-500'
       default: return 'bg-gray-500'
@@ -200,7 +254,87 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
         description={`Here's what's happening at ${org.name}`}
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
+        {/* Today's Reminders */}
+        {hasReminders && (
+          <Card className="border-orange-300 bg-orange-50/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2 text-orange-700">
+                <Bell className="h-5 w-5" />
+                Today&apos;s Reminders
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Today's Demos */}
+              {todayDemos.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-orange-700 flex items-center gap-1">
+                    <Video className="h-4 w-4" />
+                    Demos Scheduled ({todayDemos.length})
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {todayDemos.map((demo) => (
+                      <div 
+                        key={demo.id}
+                        className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{demo.leads?.name}</p>
+                          <p className="text-xs text-orange-600">
+                            {new Date(demo.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+                        {demo.google_meet_link && (
+                          <a 
+                            href={demo.google_meet_link} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-xs bg-orange-500 text-white px-2 py-1 rounded hover:bg-orange-600 transition-colors"
+                          >
+                            Join
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Today's Follow-ups */}
+              {todayFollowups.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-orange-700 flex items-center gap-1">
+                    <Phone className="h-4 w-4" />
+                    Follow-ups Due ({todayFollowups.length})
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {todayFollowups.slice(0, 4).map((followup) => (
+                      <div 
+                        key={followup.id}
+                        className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{followup.leads?.name}</p>
+                          <p className="text-xs text-orange-600">
+                            {followup.next_followup 
+                              ? new Date(followup.next_followup).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              : 'Today'}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {todayFollowups.length > 4 && (
+                    <Link href={`/${orgSlug}/follow-ups`} className="text-xs text-orange-600 hover:underline">
+                      +{todayFollowups.length - 4} more follow-ups
+                    </Link>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Stats Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {stats.map((stat, index) => (
@@ -271,52 +405,49 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
             </CardContent>
           </Card>
 
-          {/* Today's Follow-ups */}
+          {/* Lead Status Overview */}
           <Card className="animate-fade-in animate-delay-500">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Today&apos;s Follow-ups</CardTitle>
-                <CardDescription>Leads requiring attention today</CardDescription>
-              </div>
-              <Link href={`/${orgSlug}/follow-ups`}>
-                <Button variant="ghost" size="sm">
-                  View all
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </Link>
+            <CardHeader>
+              <CardTitle>Lead Status Overview</CardTitle>
+              <CardDescription>Quick breakdown of your pipeline</CardDescription>
             </CardHeader>
             <CardContent>
-              {todayFollowups && todayFollowups.length > 0 ? (
+              {leadsData.length > 0 ? (
                 <div className="space-y-3">
-                  {todayFollowups.map((followup) => (
-                    <div 
-                      key={followup.id}
-                      className="flex items-center gap-4 p-3 rounded-lg bg-muted/50"
-                    >
-                      <Clock className="h-5 w-5 text-amber-500" />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">
-                          {followup.leads?.name}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {followup.next_followup ? new Date(followup.next_followup).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Scheduled'}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600">
-                          <CheckCircle2 className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-red-600">
-                          <XCircle className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                  {(() => {
+                    const statusCounts = leadsData.reduce((acc, lead) => {
+                      acc[lead.status] = (acc[lead.status] || 0) + 1
+                      return acc
+                    }, {} as Record<string, number>)
+                    
+                    const statusOrder = ['new', 'call_not_picked', 'follow_up_again', 'demo_booked', 'demo_completed', 'deal_won', 'deal_lost', 'not_interested']
+                    
+                    return statusOrder
+                      .filter(status => statusCounts[status])
+                      .map(status => {
+                        const count = statusCounts[status]
+                        const percentage = Math.round((count / leadsData.length) * 100)
+                        return (
+                          <div key={status} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="capitalize">{status.replace(/_/g, ' ')}</span>
+                              <span className="text-muted-foreground">{count} ({percentage}%)</span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full ${getStatusColor(status)} transition-all`}
+                                style={{ width: `${percentage}%` }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })
+                  })()}
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
-                  <CalendarDays className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p>No follow-ups scheduled for today</p>
+                  <Target className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No leads to analyze</p>
                 </div>
               )}
             </CardContent>

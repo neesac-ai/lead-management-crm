@@ -88,12 +88,12 @@ export default async function TeamPage({
         description="Manage your team members and approval requests"
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         {/* Org Code Card */}
         <OrgCodeCard orgCode={org.org_code} />
 
         {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-3 grid-cols-3">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Team</CardTitle>
@@ -130,34 +130,41 @@ export default async function TeamPage({
               </CardTitle>
               <CardDescription>Review and approve team member requests</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
+            <CardContent className="px-4 lg:px-6">
+              <div className="space-y-3">
                 {pendingMembers.map((member) => (
                   <div 
                     key={member.id} 
-                    className="flex items-center gap-4 p-4 rounded-lg border border-yellow-500/30 bg-background"
+                    className="p-4 rounded-lg border border-yellow-500/30 bg-background"
                   >
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={member.avatar_url || undefined} />
-                      <AvatarFallback className="bg-yellow-500/20 text-yellow-600">
-                        {member.name?.charAt(0).toUpperCase() || 'U'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{member.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {member.email} • Applied {formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}
-                      </p>
+                    <div className="flex items-start gap-3 mb-3">
+                      <Avatar className="h-10 w-10 shrink-0">
+                        <AvatarImage src={member.avatar_url || undefined} />
+                        <AvatarFallback className="bg-yellow-500/20 text-yellow-600">
+                          {member.name?.charAt(0).toUpperCase() || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold truncate">{member.name}</p>
+                        <p className="text-sm text-muted-foreground truncate">{member.email}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Applied {formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}
+                        </p>
+                      </div>
                     </div>
-                    {getRoleBadge(member.role)}
-                    <Badge variant="secondary" className="bg-yellow-500/20 text-yellow-600">
-                      Pending
-                    </Badge>
-                    <TeamMemberActions 
-                      userId={member.id} 
-                      userName={member.name} 
-                      isApproved={member.is_approved} 
-                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {getRoleBadge(member.role)}
+                        <Badge variant="secondary" className="bg-yellow-500/20 text-yellow-600">
+                          Pending
+                        </Badge>
+                      </div>
+                      <TeamMemberActions 
+                        userId={member.id} 
+                        userName={member.name} 
+                        isApproved={member.is_approved} 
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -171,35 +178,40 @@ export default async function TeamPage({
             <CardTitle>Team Members</CardTitle>
             <CardDescription>Your active team members</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 lg:px-6">
             {approvedMembers.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {approvedMembers.map((member) => (
                   <div 
                     key={member.id} 
-                    className="flex items-center gap-4 p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                    className="p-4 rounded-lg border bg-card"
                   >
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={member.avatar_url || undefined} />
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        {member.name?.charAt(0).toUpperCase() || 'U'}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{member.name}</p>
-                        <CheckCircle className="h-4 w-4 text-green-500" />
+                    <div className="flex items-start gap-3 mb-3">
+                      <Avatar className="h-10 w-10 shrink-0">
+                        <AvatarImage src={member.avatar_url || undefined} />
+                        <AvatarFallback className="bg-primary/10 text-primary">
+                          {member.name?.charAt(0).toUpperCase() || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate">{member.name}</p>
+                          <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">{member.email}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Joined {formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        {member.email} • Joined {formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}
-                      </p>
                     </div>
-                    {getRoleBadge(member.role)}
-                    <TeamMemberActions 
-                      userId={member.id} 
-                      userName={member.name} 
-                      isApproved={member.is_approved} 
-                    />
+                    <div className="flex items-center justify-between gap-2">
+                      {getRoleBadge(member.role)}
+                      <TeamMemberActions 
+                        userId={member.id} 
+                        userName={member.name} 
+                        isApproved={member.is_approved} 
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

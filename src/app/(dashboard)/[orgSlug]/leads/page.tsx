@@ -52,13 +52,11 @@ type UserProfile = {
 
 const statusColors: Record<string, string> = {
   new: 'bg-blue-500',
-  contacted: 'bg-yellow-500',
-  qualified: 'bg-green-500',
+  call_not_picked: 'bg-yellow-500',
   not_interested: 'bg-gray-500',
   follow_up_again: 'bg-orange-500',
   demo_booked: 'bg-purple-500',
   demo_completed: 'bg-indigo-500',
-  negotiation: 'bg-pink-500',
   deal_won: 'bg-emerald-500',
   deal_lost: 'bg-red-500',
 }
@@ -256,18 +254,21 @@ export default function LeadsPage() {
         description={isAdmin ? "View all leads and assign to sales team" : "Manage your assigned leads"}
       />
       
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-4 lg:p-6">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <CardTitle>
                 {isAdmin ? 'All Leads' : 'My Leads'}
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="hidden sm:block">
                 {isAdmin 
                   ? 'View leads from all sources. Use Lead Assignment to distribute to sales team.'
                   : 'Leads assigned to you. Update status as you work on them.'
                 }
+              </CardDescription>
+              <CardDescription className="sm:hidden">
+                {isAdmin ? 'All leads from various sources' : 'Your assigned leads'}
               </CardDescription>
             </div>
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -350,22 +351,6 @@ export default function LeadsPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="space-y-2">
-                        <Label>Status</Label>
-                        <Select
-                          value={formData.status}
-                          onValueChange={(value) => setFormData({ ...formData, status: value })}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="new">New</SelectItem>
-                            <SelectItem value="contacted">Contacted</SelectItem>
-                            <SelectItem value="qualified">Qualified</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
                     </div>
                   </div>
                   <DialogFooter>
@@ -393,65 +378,58 @@ export default function LeadsPage() {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : leads.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {leads.map((lead) => (
                   <div 
                     key={lead.id} 
-                    className="flex items-center gap-4 p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors cursor-pointer"
+                    className="p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors cursor-pointer"
                     onClick={() => {
                       setSelectedLead(lead)
                       setIsDetailOpen(true)
                     }}
                   >
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <User className="w-5 h-5 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{lead.name}</p>
+                    {/* Top row: Name + Status */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-base truncate">{lead.name}</p>
                         {lead.custom_fields?.company && (
-                          <span className="text-sm text-muted-foreground">
-                            @ {lead.custom_fields.company}
-                          </span>
+                          <p className="text-sm text-muted-foreground truncate">
+                            {lead.custom_fields.company}
+                          </p>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                        {lead.email && (
-                          <span className="flex items-center gap-1">
-                            <Mail className="h-3 w-3" />
-                            {lead.email}
-                          </span>
-                        )}
-                        {lead.phone && (
-                          <span className="flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
-                            {lead.phone}
-                          </span>
-                        )}
+                      <Badge className={`${statusColors[lead.status] || 'bg-gray-500'} shrink-0`}>
+                        {lead.status.replace('_', ' ')}
+                      </Badge>
+                    </div>
+                    
+                    {/* Contact info */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-2">
+                      {lead.phone && (
+                        <span className="flex items-center gap-1">
+                          <Phone className="h-3.5 w-3.5" />
+                          <span className="truncate">{lead.phone}</span>
+                        </span>
+                      )}
+                      {lead.email && (
+                        <span className="flex items-center gap-1">
+                          <Mail className="h-3.5 w-3.5" />
+                          <span className="truncate max-w-[150px]">{lead.email}</span>
+                        </span>
+                      )}
+                    </div>
+                    
+                    {/* Bottom row: Source + Assignment */}
+                    <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
+                      <Badge variant="outline" className="text-xs">{lead.source}</Badge>
+                      <div className="text-right">
+                        {lead.assignee ? (
+                          <span className="text-primary">→ {lead.assignee.name}</span>
+                        ) : isAdmin ? (
+                          <span className="text-yellow-600">Unassigned</span>
+                        ) : null}
                       </div>
                     </div>
-                    {/* Creator/Assignee Info */}
-                    <div className="text-right text-xs text-muted-foreground">
-                      {lead.creator && (
-                        <div className="flex items-center gap-1 justify-end">
-                          <UserCircle className="h-3 w-3" />
-                          <span>Created by {lead.creator.name}</span>
-                        </div>
-                      )}
-                      {lead.assignee && (
-                        <div className="flex items-center gap-1 justify-end text-primary">
-                          <User className="h-3 w-3" />
-                          <span>Assigned to {lead.assignee.name}</span>
-                        </div>
-                      )}
-                      {!lead.assignee && isAdmin && (
-                        <span className="text-yellow-600">Unassigned</span>
-                      )}
-                    </div>
-                    <Badge variant="outline">{lead.source}</Badge>
-                    <Badge className={statusColors[lead.status] || 'bg-gray-500'}>
-                      {lead.status.replace('_', ' ')}
-                    </Badge>
                   </div>
                 ))}
               </div>

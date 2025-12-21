@@ -207,42 +207,42 @@ export default function AssignmentPage() {
         description="Assign leads to your sales team"
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         {/* Sales Team Allocation */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
+          <CardHeader className="px-4 lg:px-6">
+            <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
               <Users className="h-5 w-5" />
               Sales Team Allocation
             </CardTitle>
             <CardDescription>
-              Set percentage allocation for auto-assignment (must total 100%)
+              Set % allocation for auto-assignment
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 lg:px-6">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : salesTeam.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {salesTeam.map((sales) => (
-                  <div key={sales.id} className="flex items-center gap-4 p-3 border rounded-lg">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <div key={sales.id} className="flex items-center gap-3 p-3 border rounded-lg">
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                       <User className="w-4 h-4 text-primary" />
                     </div>
-                    <div className="flex-1">
-                      <p className="font-medium">{sales.name}</p>
-                      <p className="text-sm text-muted-foreground">{sales.email}</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{sales.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{sales.email}</p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 shrink-0">
                       <input
                         type="number"
                         min="0"
                         max="100"
                         value={sales.lead_allocation_percent || 0}
                         onChange={(e) => updateAllocation(sales.id, parseInt(e.target.value) || 0)}
-                        className="w-16 px-2 py-1 border rounded text-center"
+                        className="w-14 px-2 py-1 border rounded text-center text-sm"
                       />
                       <span className="text-sm text-muted-foreground">%</span>
                     </div>
@@ -270,28 +270,28 @@ export default function AssignmentPage() {
 
         {/* Unassigned Leads */}
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 lg:px-6">
             <div>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
                 <Target className="h-5 w-5" />
-                Unassigned Leads ({unassignedLeads.length})
+                Unassigned ({unassignedLeads.length})
               </CardTitle>
               <CardDescription>
-                Select leads and assign to sales team members
+                Assign leads to sales team
               </CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button 
-                variant="outline" 
-                onClick={handleAutoAssign}
-                disabled={isAssigning || unassignedLeads.length === 0 || salesTeam.length === 0}
-              >
-                {isAssigning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Auto-Assign All
-              </Button>
-            </div>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleAutoAssign}
+              disabled={isAssigning || unassignedLeads.length === 0 || salesTeam.length === 0}
+              className="w-full sm:w-auto"
+            >
+              {isAssigning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Auto-Assign All
+            </Button>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 lg:px-6">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -299,35 +299,38 @@ export default function AssignmentPage() {
             ) : unassignedLeads.length > 0 ? (
               <>
                 {/* Manual Assignment Controls */}
-                <div className="flex items-center gap-4 mb-4 p-3 bg-muted/50 rounded-lg">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4 p-3 bg-muted/50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Checkbox 
                       checked={selectedLeads.length === unassignedLeads.length}
                       onCheckedChange={handleSelectAll}
                     />
-                    <span className="text-sm">
+                    <span className="text-sm font-medium">
                       {selectedLeads.length} selected
                     </span>
                   </div>
-                  <Select value={selectedSales} onValueChange={setSelectedSales}>
-                    <SelectTrigger className="w-[200px]">
-                      <SelectValue placeholder="Select sales person" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {salesTeam.map((sales) => (
-                        <SelectItem key={sales.id} value={sales.id}>
-                          {sales.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button 
-                    onClick={handleAssign}
-                    disabled={isAssigning || selectedLeads.length === 0 || !selectedSales}
-                  >
-                    {isAssigning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
-                    Assign Selected
-                  </Button>
+                  <div className="flex flex-1 items-center gap-2">
+                    <Select value={selectedSales} onValueChange={setSelectedSales}>
+                      <SelectTrigger className="flex-1 sm:w-[180px]">
+                        <SelectValue placeholder="Select person" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {salesTeam.map((sales) => (
+                          <SelectItem key={sales.id} value={sales.id}>
+                            {sales.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button 
+                      size="sm"
+                      onClick={handleAssign}
+                      disabled={isAssigning || selectedLeads.length === 0 || !selectedSales}
+                    >
+                      {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+                      <span className="hidden sm:inline ml-2">Assign</span>
+                    </Button>
+                  </div>
                 </div>
 
                 {/* Leads List */}
@@ -335,27 +338,32 @@ export default function AssignmentPage() {
                   {unassignedLeads.map((lead) => (
                     <div 
                       key={lead.id} 
-                      className={`flex items-center gap-4 p-3 border rounded-lg cursor-pointer transition-colors ${
-                        selectedLeads.includes(lead.id) ? 'bg-primary/10 border-primary' : 'hover:bg-muted/50'
+                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                        selectedLeads.includes(lead.id) ? 'bg-primary/10 border-primary' : ''
                       }`}
                       onClick={() => handleSelectLead(lead.id)}
                     >
-                      <Checkbox 
-                        checked={selectedLeads.includes(lead.id)}
-                        onCheckedChange={() => handleSelectLead(lead.id)}
-                      />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium">{lead.name}</p>
-                          {lead.custom_fields?.company && (
-                            <span className="text-sm text-muted-foreground">
-                              @ {lead.custom_fields.company}
-                            </span>
-                          )}
+                      <div className="flex items-start gap-3">
+                        <Checkbox 
+                          checked={selectedLeads.includes(lead.id)}
+                          onCheckedChange={() => handleSelectLead(lead.id)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-medium truncate">{lead.name}</p>
+                              {lead.custom_fields?.company && (
+                                <p className="text-sm text-muted-foreground truncate">
+                                  {lead.custom_fields.company}
+                                </p>
+                              )}
+                            </div>
+                            <Badge variant="outline" className="shrink-0">{lead.status}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1 truncate">{lead.email || 'No email'}</p>
                         </div>
-                        <p className="text-sm text-muted-foreground">{lead.email || 'No email'}</p>
                       </div>
-                      <Badge variant="outline">{lead.status}</Badge>
                     </div>
                   ))}
                 </div>

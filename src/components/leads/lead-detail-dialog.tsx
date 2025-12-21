@@ -25,7 +25,6 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { 
   Loader2, 
-  Phone, 
   Mail, 
   Building2, 
   Calendar,
@@ -34,9 +33,13 @@ import {
   User,
   Video,
   ExternalLink,
+  Package,
+  CheckCircle2,
 } from 'lucide-react'
+import { ContactActions } from './contact-actions'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
+import { Product } from '@/types/database.types'
 
 type Lead = {
   id: string
@@ -70,18 +73,20 @@ interface LeadDetailDialogProps {
   isAdmin?: boolean // Admin can unassign leads
 }
 
+// All status options for display
 const statusOptions = [
   { value: 'new', label: 'New', color: 'bg-blue-500' },
-  { value: 'contacted', label: 'Contacted', color: 'bg-yellow-500' },
-  { value: 'qualified', label: 'Qualified', color: 'bg-green-500' },
+  { value: 'call_not_picked', label: 'Call Not Picked', color: 'bg-yellow-500' },
   { value: 'not_interested', label: 'Not Interested', color: 'bg-gray-500' },
   { value: 'follow_up_again', label: 'Follow Up Again', color: 'bg-orange-500' },
   { value: 'demo_booked', label: 'Demo Booked', color: 'bg-purple-500' },
   { value: 'demo_completed', label: 'Demo Completed', color: 'bg-indigo-500' },
-  { value: 'negotiation', label: 'Negotiation', color: 'bg-pink-500' },
   { value: 'deal_won', label: 'Deal Won', color: 'bg-emerald-500' },
   { value: 'deal_lost', label: 'Deal Lost', color: 'bg-red-500' },
 ]
+
+// Status options available for selection (excludes 'new' - leads start as new automatically)
+const selectableStatusOptions = statusOptions.filter(s => s.value !== 'new')
 
 export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditStatus = true, isAdmin = false }: LeadDetailDialogProps) {
   const [isSaving, setIsSaving] = useState(false)
@@ -98,6 +103,33 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   const [isGoogleConnected, setIsGoogleConnected] = useState<boolean | null>(null)
   const [meetLink, setMeetLink] = useState<string | null>(null)
   const [isCreatingMeet, setIsCreatingMeet] = useState(false)
+  const [products, setProducts] = useState<Product[]>([])
+  const [selectedProductId, setSelectedProductId] = useState<string>('na')
+  const [initialStatus, setInitialStatus] = useState<string>('')
+  const [initialProductId, setInitialProductId] = useState<string>('na')
+  
+  // Deal Won fields
+  const [dealValue, setDealValue] = useState<string>('')
+  const [validity, setValidity] = useState<string>('30')
+  const [subscriptionStartDate, setSubscriptionStartDate] = useState<string>('')
+  const [amountCredited, setAmountCredited] = useState<string>('')
+  const [existingSubscriptionId, setExistingSubscriptionId] = useState<string | null>(null)
+  
+  // Calculate end date and pending amount
+  const calculateEndDate = (startDate: string, validityDays: string): string => {
+    if (!startDate || validityDays === 'lifetime') return ''
+    const start = new Date(startDate)
+    start.setDate(start.getDate() + parseInt(validityDays))
+    return start.toISOString().split('T')[0]
+  }
+  
+  const subscriptionEndDate = validity === 'lifetime' 
+    ? 'Lifetime' 
+    : calculateEndDate(subscriptionStartDate, validity)
+  
+  const amountPending = dealValue && amountCredited 
+    ? Math.max(0, parseFloat(dealValue) - parseFloat(amountCredited || '0'))
+    : parseFloat(dealValue || '0')
 
   const fetchLeadData = async (leadId: string) => {
     const supabase = createClient()
@@ -121,11 +153,66 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
     const { data: profile } = await supabase
       .from('users')
-      .select('google_refresh_token')
+      .select('google_refresh_token, org_id')
       .eq('auth_id', user.id)
       .single()
 
     setIsGoogleConnected(!!profile?.google_refresh_token)
+
+    // Fetch products for the org
+    if (profile?.org_id) {
+      const { data: productsData } = await supabase
+        .from('products')
+        .select('*')
+        .eq('org_id', profile.org_id)
+        .eq('is_active', true)
+        .order('name')
+      
+      setProducts(productsData || [])
+    }
+  }
+
+  const fetchLastProduct = async (leadId: string) => {
+    const supabase = createClient()
+    // Get the most recent activity with a product for this lead
+    const { data } = await supabase
+      .from('lead_activities')
+      .select('product_id')
+      .eq('lead_id', leadId)
+      .not('product_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (data?.product_id) {
+      setSelectedProductId(data.product_id)
+      setInitialProductId(data.product_id)
+    } else {
+      setSelectedProductId('na')
+      setInitialProductId('na')
+    }
+  }
+
+  // Fetch existing subscription for a deal won lead
+  const fetchExistingSubscription = async (leadId: string) => {
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('customer_subscriptions')
+      .select('*')
+      .eq('lead_id', leadId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (data) {
+      setExistingSubscriptionId(data.id)
+      setDealValue(data.deal_value?.toString() || '')
+      setValidity(data.validity_days >= 36500 ? 'lifetime' : data.validity_days.toString())
+      setSubscriptionStartDate(data.start_date || '')
+      setAmountCredited(data.amount_credited?.toString() || '0')
+    } else {
+      setExistingSubscriptionId(null)
+    }
   }
 
   const connectGoogle = async () => {
@@ -228,14 +315,29 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       console.log('Dialog opened for lead:', lead.id, 'status:', lead.status)
       setCurrentLead(lead)
       setStatus(lead.status)
+      setInitialStatus(lead.status)
       setComment('')
       setFollowupDate('')
       setDemoDate('')
       setDemoDuration('30')
       setDemoAttendeeEmail(lead.email || '')
       setMeetLink(null)
+      // Reset deal won fields
+      setDealValue('')
+      setValidity('30')
+      setSubscriptionStartDate('')
+      setAmountCredited('')
+      setExistingSubscriptionId(null)
+      
       fetchActivities(lead.id)
       checkGoogleConnection()
+      // Fetch last product used for this lead
+      fetchLastProduct(lead.id)
+      
+      // If status is deal_won, fetch existing subscription data
+      if (lead.status === 'deal_won') {
+        fetchExistingSubscription(lead.id)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, lead?.id])
@@ -301,17 +403,24 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
     // Add activity log
     const statusLabel = statusOptions.find(s => s.value === status)?.label || status
-    const activityData: {
-      lead_id: string
-      user_id: string
-      action_type: string
-      comments: string | null
-      next_followup?: string
-    } = {
+    const productName = selectedProductId && selectedProductId !== 'na' 
+      ? products.find(p => p.id === selectedProductId)?.name 
+      : null
+    
+    // Build activity data - only include product_id if products table exists
+    // Note: action_type is VARCHAR(50), so keep it short. Put product info in comments.
+    const activityData: Record<string, unknown> = {
       lead_id: lead.id,
       user_id: profile.id,
-      action_type: `Status changed to ${statusLabel}`,
-      comments: comment || null,
+      action_type: `Status: ${statusLabel}`.substring(0, 50), // Ensure max 50 chars
+      comments: productName 
+        ? `${comment || ''}\n[Product: ${productName}]`.trim()
+        : (comment || null),
+    }
+
+    // Only add product_id if a product was selected (and products table/column exists)
+    if (selectedProductId && selectedProductId !== 'na' && products.length > 0) {
+      activityData.product_id = selectedProductId
     }
 
     if (followupDate) {
@@ -321,8 +430,11 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     console.log('Creating activity with data:', activityData)
     const { error: activityError, data: activityResult } = await supabase.from('lead_activities').insert(activityData).select()
     if (activityError) {
-      console.error('Failed to create activity:', activityError)
-      toast.error('Status updated but activity log failed')
+      console.error('Failed to create activity:', JSON.stringify(activityError, null, 2))
+      console.error('Activity error message:', activityError.message)
+      console.error('Activity error details:', activityError.details)
+      console.error('Activity error hint:', activityError.hint)
+      toast.error(`Activity log failed: ${activityError.message || 'Unknown error'}`)
     } else {
       console.log('Activity created successfully:', activityResult)
     }
@@ -353,22 +465,89 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       }
     }
 
-    toast.success('Lead updated successfully')
+    // If deal_won, create or update subscription entry
+    if (status === 'deal_won') {
+      if (!dealValue || !subscriptionStartDate) {
+        toast.error('Please fill in deal value and start date')
+        setIsSaving(false)
+        return
+      }
+
+      const validityDays = validity === 'lifetime' ? 36500 : parseInt(validity) // 100 years for lifetime
+      const endDateValue = validity === 'lifetime' 
+        ? new Date(new Date(subscriptionStartDate).getTime() + 36500 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        : calculateEndDate(subscriptionStartDate, validity)
+
+      if (existingSubscriptionId) {
+        // Update existing subscription
+        const { error: subError } = await supabase
+          .from('customer_subscriptions')
+          .update({
+            start_date: subscriptionStartDate,
+            end_date: endDateValue,
+            validity_days: validityDays,
+            deal_value: parseFloat(dealValue),
+            amount_credited: parseFloat(amountCredited || '0'),
+            notes: validity === 'lifetime' ? 'Lifetime subscription' : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingSubscriptionId)
+
+        if (subError) {
+          console.error('Failed to update subscription:', subError)
+          toast.error('Failed to update subscription')
+        } else {
+          toast.success('Subscription updated successfully!')
+        }
+      } else {
+        // Get org_id from lead for new subscription
+        const { data: leadData } = await supabase
+          .from('leads')
+          .select('org_id')
+          .eq('id', lead.id)
+          .single()
+
+        if (leadData?.org_id) {
+          const { error: subError } = await supabase
+            .from('customer_subscriptions')
+            .insert({
+              org_id: leadData.org_id,
+              lead_id: lead.id,
+              start_date: subscriptionStartDate,
+              end_date: endDateValue,
+              validity_days: validityDays,
+              status: 'active',
+              deal_value: parseFloat(dealValue),
+              amount_credited: parseFloat(amountCredited || '0'),
+              // amount_pending is auto-calculated by the database (deal_value - amount_credited)
+              notes: validity === 'lifetime' ? 'Lifetime subscription' : null,
+            })
+
+          if (subError) {
+            console.error('Failed to create subscription:', subError)
+            toast.error('Lead updated but subscription creation failed')
+          } else {
+            toast.success('Subscription created successfully!')
+          }
+        }
+      }
+    }
+
     setComment('')
     setFollowupDate('')
     setDemoDate('')
+    setSelectedProductId('na')
+    setDealValue('')
+    setValidity('30')
+    setSubscriptionStartDate('')
+    setAmountCredited('')
     setIsSaving(false)
     
-    // Refresh lead data and activities
-    if (lead) {
-      const updatedLead = await fetchLeadData(lead.id)
-      if (updatedLead) {
-        setCurrentLead(updatedLead)
-        setStatus(updatedLead.status) // Update the dropdown to show new status
-      }
-      fetchActivities(lead.id)
-    }
+    // Refresh the leads list
     onUpdate()
+    
+    // Close the dialog after successful save
+    onOpenChange(false)
   }
 
   if (!lead || !currentLead) return null
@@ -376,10 +555,18 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   // Use currentLead (which gets refreshed after save) for display
   const currentStatus = statusOptions.find(s => s.value === currentLead.status)
   const selectedStatus = statusOptions.find(s => s.value === status)
+  
+  // Check if there are unsaved changes
+  const hasChanges = status !== initialStatus || 
+                     selectedProductId !== initialProductId || 
+                     comment.trim() !== '' ||
+                     followupDate !== '' ||
+                     demoDate !== '' ||
+                     (status === 'deal_won' && dealValue !== '')
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
@@ -403,22 +590,30 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
           <TabsContent value="details" className="space-y-4 mt-4">
             {/* Lead Info */}
-            <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
-              <div className="flex items-center gap-2 text-sm">
-                <Mail className="h-4 w-4 text-muted-foreground" />
-                <span>{currentLead.email || 'No email'}</span>
+            <div className="space-y-3 p-4 bg-muted/50 rounded-lg">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="h-4 w-4 text-muted-foreground" />
+                  <span className="truncate">{currentLead.email || 'No email'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="truncate">{currentLead.custom_fields?.company || 'No company'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm col-span-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span>Added {formatDistanceToNow(new Date(currentLead.created_at), { addSuffix: true })}</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-sm">
-                <Phone className="h-4 w-4 text-muted-foreground" />
-                <span>{currentLead.phone || 'No phone'}</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <Building2 className="h-4 w-4 text-muted-foreground" />
-                <span>{currentLead.custom_fields?.company || 'No company'}</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                <span>Added {formatDistanceToNow(new Date(currentLead.created_at), { addSuffix: true })}</span>
+              
+              {/* Quick Contact Actions */}
+              <div className="pt-3 border-t border-border">
+                <p className="text-xs text-muted-foreground mb-2">Quick Actions</p>
+                <ContactActions 
+                  phone={currentLead.phone} 
+                  email={currentLead.email}
+                  name={currentLead.name}
+                />
               </div>
             </div>
 
@@ -466,23 +661,51 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
             {/* Update Status - Only for Sales */}
             {canEditStatus ? (
-              <div className="space-y-2">
-                <Label>Update Status</Label>
-                <Select value={status} onValueChange={setStatus}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${option.color}`} />
-                          {option.label}
-                        </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Update Status</Label>
+                  <Select value={status} onValueChange={setStatus}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectableStatusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                            {option.label}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Product Selection */}
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Product Discussed
+                  </Label>
+                  <Select value={selectedProductId} onValueChange={setSelectedProductId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="na">
+                        <span className="text-muted-foreground">N/A - No product</span>
                       </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      {products.map((product) => (
+                        <SelectItem key={product.id} value={product.id}>
+                          {product.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Select N/A if no specific product was discussed
+                  </p>
+                </div>
               </div>
             ) : (
               <div className="p-3 bg-muted/50 rounded-lg text-sm text-muted-foreground">
@@ -636,6 +859,87 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
               </div>
             )}
 
+            {/* Deal Won Fields */}
+            {canEditStatus && status === 'deal_won' && (
+              <div className="space-y-4 p-4 border rounded-lg bg-green-500/5 border-green-500/20">
+                <div className="flex items-center gap-2 text-green-600">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span className="font-medium">Deal Won - Create Subscription</span>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Deal Value (₹) *</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g., 50000"
+                      value={dealValue}
+                      onChange={(e) => setDealValue(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Validity *</Label>
+                    <Select value={validity} onValueChange={setValidity}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="30">30 Days</SelectItem>
+                        <SelectItem value="60">60 Days</SelectItem>
+                        <SelectItem value="90">90 Days</SelectItem>
+                        <SelectItem value="180">180 Days</SelectItem>
+                        <SelectItem value="365">365 Days (1 Year)</SelectItem>
+                        <SelectItem value="lifetime">Lifetime</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Start Date *</Label>
+                    <Input
+                      type="date"
+                      value={subscriptionStartDate}
+                      onChange={(e) => setSubscriptionStartDate(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>End Date</Label>
+                    <Input
+                      type="text"
+                      value={subscriptionEndDate}
+                      disabled
+                      className="bg-muted"
+                    />
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Amount Credited (₹)</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g., 25000"
+                      value={amountCredited}
+                      onChange={(e) => setAmountCredited(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Amount Pending (₹)</Label>
+                    <Input
+                      type="text"
+                      value={`₹${amountPending.toLocaleString()}`}
+                      disabled
+                      className="bg-muted"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Comments - Only for Sales */}
             {canEditStatus && (
               <div className="space-y-2">
@@ -699,7 +1003,11 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
             Close
           </Button>
           {canEditStatus && (
-            <Button onClick={handleUpdateStatus} disabled={isSaving}>
+            <Button 
+              onClick={handleUpdateStatus} 
+              disabled={isSaving || !hasChanges}
+              variant={hasChanges ? 'default' : 'secondary'}
+            >
               {isSaving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

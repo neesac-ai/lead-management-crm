@@ -13,17 +13,17 @@ export default function SettingsPage() {
         description="Manage organization settings"
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         <Card>
-          <CardHeader>
+          <CardHeader className="px-4 lg:px-6">
             <div className="flex items-center gap-2">
               <Building2 className="h-5 w-5" />
               <CardTitle>Organization</CardTitle>
             </div>
             <CardDescription>Basic organization information</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
+          <CardContent className="px-4 lg:px-6 space-y-4">
+            <div className="grid gap-4">
               <div className="space-y-2">
                 <Label>Organization Name</Label>
                 <Input placeholder="Your Organization" />
@@ -72,5 +72,6 @@ export default function SettingsPage() {
     </div>
   )
 }
+
 
 

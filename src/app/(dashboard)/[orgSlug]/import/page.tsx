@@ -174,15 +174,15 @@ export default function ImportPage() {
         description="Import leads from CSV, Excel, or integrations"
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         <Card>
-          <CardHeader>
+          <CardHeader className="px-4 lg:px-6">
             <CardTitle>Upload File</CardTitle>
             <CardDescription>Import leads from CSV or Excel files</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 lg:px-6">
             <div 
-              className={`border-2 border-dashed rounded-lg p-12 text-center transition-colors ${
+              className={`border-2 border-dashed rounded-lg p-6 lg:p-12 text-center transition-colors ${
                 isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
               }`}
               onDrop={handleDrop}
@@ -250,12 +250,12 @@ export default function ImportPage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="px-4 lg:px-6">
             <CardTitle>Integrations</CardTitle>
             <CardDescription>Connect to lead sources</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <CardContent className="px-4 lg:px-6">
+            <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               {['Facebook', 'Instagram', 'LinkedIn', 'WhatsApp'].map((platform) => (
                 <div 
                   key={platform}

@@ -61,9 +61,9 @@ export default async function OrganizationsPage() {
         description="Manage all organizations on the platform"
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
@@ -114,29 +114,28 @@ export default async function OrganizationsPage() {
               </CardTitle>
               <CardDescription>These organizations are waiting for your approval</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
+            <CardContent className="px-4 lg:px-6">
+              <div className="space-y-3">
                 {orgs.filter(o => o.status === 'pending').map((org) => (
                   <div 
                     key={org.id} 
-                    className="flex items-center gap-4 p-4 rounded-lg border border-yellow-500/30 bg-background hover:bg-muted/50 transition-colors"
+                    className="p-4 rounded-lg border border-yellow-500/30 bg-background"
                   >
-                    <div className="w-12 h-12 rounded-lg bg-yellow-500/20 flex items-center justify-center">
-                      <Building2 className="w-6 h-6 text-yellow-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{org.name}</p>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold truncate">{org.name}</p>
+                        <p className="text-sm text-muted-foreground truncate mt-1">
+                          Admin: {getAdminInfo(org.users)}
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        Admin: {getAdminInfo(org.users)} • Applied {formatDistanceToNow(new Date(org.created_at), { addSuffix: true })}
-                      </p>
-                      <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
-                        <Hash className="h-3 w-3" />
-                        <code className="font-mono">{org.org_code}</code>
-                      </div>
+                      {getStatusBadge(org.status)}
                     </div>
-                    {getStatusBadge(org.status)}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                      <Hash className="h-3 w-3" />
+                      <code className="font-mono">{org.org_code}</code>
+                      <span>•</span>
+                      <span>{formatDistanceToNow(new Date(org.created_at), { addSuffix: true })}</span>
+                    </div>
                     <OrgActions 
                       orgId={org.id} 
                       orgName={org.name} 
@@ -156,31 +155,32 @@ export default async function OrganizationsPage() {
             <CardTitle>All Organizations</CardTitle>
             <CardDescription>View and manage client organizations</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-4 lg:px-6">
             {orgs.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {orgs.filter(o => o.status !== 'pending').map((org) => (
                   <div 
                     key={org.id} 
-                    className="flex items-center gap-4 p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                    className="p-4 rounded-lg border bg-card"
                   >
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Building2 className="w-6 h-6 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{org.name}</p>
-                        {getStatusIcon(org.status)}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate">{org.name}</p>
+                          {getStatusIcon(org.status)}
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          {org.users?.length || 0} users • /{org.slug}
+                        </p>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        /{org.slug} • {org.users?.length || 0} users • Created {formatDistanceToNow(new Date(org.created_at), { addSuffix: true })}
-                      </p>
-                      <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground">
-                        <Hash className="h-3 w-3" />
-                        <code className="font-mono">{org.org_code}</code>
-                      </div>
+                      {getStatusBadge(org.status)}
                     </div>
-                    {getStatusBadge(org.status)}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                      <Hash className="h-3 w-3" />
+                      <code className="font-mono">{org.org_code}</code>
+                      <span>•</span>
+                      <span>{formatDistanceToNow(new Date(org.created_at), { addSuffix: true })}</span>
+                    </div>
                     <OrgActions 
                       orgId={org.id} 
                       orgName={org.name} 

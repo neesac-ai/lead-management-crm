@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { CalendarDays, User, Loader2, Clock } from 'lucide-react'
+import { CalendarDays, User, Loader2, Clock, Phone, Mail, Building2 } from 'lucide-react'
+import { ContactActions } from '@/components/leads/contact-actions'
 import { formatDistanceToNow } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
 
@@ -89,7 +90,7 @@ export default function FollowUpsPage() {
         description="Track leads that need follow-up"
       />
       
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-4 lg:p-6">
         <Card>
           <CardHeader>
             <CardTitle>Scheduled Follow-ups</CardTitle>
@@ -101,48 +102,77 @@ export default function FollowUpsPage() {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : followUps.length > 0 ? (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {followUps.map((followUp) => (
                   <div 
                     key={followUp.id} 
-                    className={`flex items-center gap-4 p-4 rounded-lg border bg-card ${
+                    className={`p-4 rounded-lg border bg-card ${
                       isOverdue(followUp.next_followup) ? 'border-red-500/50 bg-red-500/5' : 
                       isToday(followUp.next_followup) ? 'border-yellow-500/50 bg-yellow-500/5' : ''
                     }`}
                   >
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <User className="w-5 h-5 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium truncate">{followUp.leads?.name}</p>
+                    {/* Top row: Name + Badge */}
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold truncate text-lg">{followUp.leads?.name}</p>
                         {followUp.leads?.custom_fields?.company && (
-                          <span className="text-sm text-muted-foreground">
-                            @ {followUp.leads.custom_fields.company}
-                          </span>
+                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <Building2 className="h-3 w-3" />
+                            <span className="truncate">{followUp.leads.custom_fields.company}</span>
+                          </div>
                         )}
                       </div>
-                      {followUp.comments && (
-                        <p className="text-sm text-muted-foreground truncate">{followUp.comments}</p>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <div className="flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm">
-                          {formatInTimeZone(new Date(followUp.next_followup), userTimezone, 'MMM d, yyyy h:mm a')}
-                        </span>
-                      </div>
                       {isOverdue(followUp.next_followup) ? (
-                        <Badge variant="destructive" className="mt-1">Overdue</Badge>
+                        <Badge variant="destructive" className="shrink-0">Overdue</Badge>
                       ) : isToday(followUp.next_followup) ? (
-                        <Badge className="bg-yellow-500 mt-1">Today</Badge>
+                        <Badge className="bg-yellow-500 shrink-0">Today</Badge>
                       ) : (
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-muted-foreground shrink-0">
                           {formatDistanceToNow(new Date(followUp.next_followup), { addSuffix: true })}
                         </span>
                       )}
                     </div>
+
+                    {/* Contact Details */}
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-3">
+                      {followUp.leads?.phone && (
+                        <div className="flex items-center gap-1">
+                          <Phone className="h-3 w-3" />
+                          <span>{followUp.leads.phone}</span>
+                        </div>
+                      )}
+                      {followUp.leads?.email && (
+                        <div className="flex items-center gap-1">
+                          <Mail className="h-3 w-3" />
+                          <span className="truncate">{followUp.leads.email}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Contact Actions */}
+                    <div className="mb-3">
+                      <ContactActions 
+                        phone={followUp.leads?.phone || null}
+                        email={followUp.leads?.email || null}
+                        name={followUp.leads?.name || ''}
+                      />
+                    </div>
+                    
+                    {/* Date/Time */}
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                      <Clock className="h-4 w-4 shrink-0" />
+                      <span>{formatInTimeZone(new Date(followUp.next_followup), userTimezone, 'MMM d, yyyy')}</span>
+                      <span className="font-medium text-foreground">
+                        {formatInTimeZone(new Date(followUp.next_followup), userTimezone, 'h:mm a')}
+                      </span>
+                    </div>
+                    
+                    {/* Comment */}
+                    {followUp.comments && (
+                      <p className="text-sm text-muted-foreground bg-muted/50 rounded px-3 py-2">
+                        {followUp.comments}
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

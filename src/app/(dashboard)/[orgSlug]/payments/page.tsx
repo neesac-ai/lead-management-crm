@@ -10,7 +10,7 @@ export default function PaymentsPage() {
         description="Track and manage payments"
       />
       
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-4 lg:p-6">
         <Card>
           <CardHeader>
             <CardTitle>Payment History</CardTitle>
@@ -28,5 +28,6 @@ export default function PaymentsPage() {
     </div>
   )
 }
+
 
 

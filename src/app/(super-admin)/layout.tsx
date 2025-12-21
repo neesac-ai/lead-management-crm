@@ -30,7 +30,7 @@ export default async function SuperAdminLayout({
   return (
     <div className="min-h-screen bg-background">
       <Sidebar />
-      <main className="lg:pl-64">
+      <main className="pt-16 lg:pt-0 lg:pl-64">
         {children}
       </main>
     </div>

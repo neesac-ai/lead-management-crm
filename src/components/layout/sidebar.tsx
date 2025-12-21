@@ -8,6 +8,12 @@ import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -33,6 +39,8 @@ import {
   Bell,
   Upload,
   Loader2,
+  Menu,
+  Package,
 } from 'lucide-react'
 import type { AuthUser, UserRole } from '@/types'
 
@@ -53,6 +61,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [mounted, setMounted] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -97,6 +106,11 @@ export function Sidebar({ orgSlug }: SidebarProps) {
     fetchUser()
   }, [])
 
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [pathname])
+
   const baseUrl = orgSlug ? `/${orgSlug}` : '/super-admin'
 
   const handleLogout = async () => {
@@ -128,6 +142,8 @@ export function Sidebar({ orgSlug }: SidebarProps) {
         { title: 'Leads', href: `${baseUrl}/leads`, icon: <Target className="w-5 h-5" /> },
         { title: 'Follow-ups', href: `${baseUrl}/follow-ups`, icon: <CalendarDays className="w-5 h-5" /> },
         { title: 'Demos', href: `${baseUrl}/demos`, icon: <Zap className="w-5 h-5" /> },
+        { title: 'Products', href: `${baseUrl}/products`, icon: <Package className="w-5 h-5" /> },
+        { title: 'Analytics', href: `${baseUrl}/analytics`, icon: <BarChart3 className="w-5 h-5" /> },
       )
     }
 
@@ -161,114 +177,164 @@ export function Sidebar({ orgSlug }: SidebarProps) {
 
   const navItems = getNavItems()
 
-  // Show loading skeleton if still loading
+  // Sidebar content - shared between desktop and mobile
+  const SidebarContent = () => (
+    <div className="flex h-full flex-col">
+      {/* Logo */}
+      <div className="flex h-16 items-center gap-3 border-b px-6">
+        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+          <Zap className="w-5 h-5 text-primary-foreground" />
+        </div>
+        <span className="text-xl font-bold">LeadFlow</span>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
+        {navItems.map((item) => {
+          const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+          return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+              className={cn(
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+                isActive
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )}
+            >
+              {item.icon}
+              <span>{item.title}</span>
+              {item.badge && (
+                <Badge 
+                  variant={isActive ? 'secondary' : 'outline'} 
+                  className="ml-auto"
+                >
+                  {item.badge}
+                </Badge>
+              )}
+            </Link>
+          )
+        })}
+      </nav>
+
+      {/* User menu */}
+      <div className="border-t p-4">
+        {mounted && user ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="w-full justify-start gap-3 h-auto py-2">
+                <Avatar className="h-8 w-8">
+                  <AvatarImage src={user.avatar_url || undefined} />
+                  <AvatarFallback className="bg-primary/10 text-primary">
+                    {user.name?.charAt(0).toUpperCase() || 'U'}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 text-left min-w-0">
+                  <p className="text-sm font-medium truncate">{user.name}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{user.role?.replace('_', ' ')}</p>
+                </div>
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>My Account</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem>
+                <Bell className="mr-2 h-4 w-4" />
+                Notifications
+              </DropdownMenuItem>
+              <DropdownMenuItem>
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <div className="flex items-center gap-3 py-2 px-2">
+            <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+            <div className="flex-1 space-y-1">
+              <div className="h-4 w-24 bg-muted rounded animate-pulse" />
+              <div className="h-3 w-16 bg-muted rounded animate-pulse" />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  // Show loading skeleton
   if (isLoading) {
     return (
-      <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card">
-        <div className="flex h-full flex-col">
-          <div className="flex h-16 items-center gap-3 border-b px-6">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Zap className="w-5 h-5 text-primary-foreground" />
+      <>
+        {/* Mobile Header */}
+        <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b bg-card lg:hidden">
+          <div className="flex h-full items-center justify-between px-4">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+                <Zap className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <span className="text-lg font-bold">LeadFlow</span>
             </div>
-            <span className="text-xl font-bold">LeadFlow</span>
+            <div className="w-10 h-10 rounded bg-muted animate-pulse" />
           </div>
-          <div className="flex-1 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </header>
+
+        {/* Desktop Sidebar */}
+        <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card hidden lg:block">
+          <div className="flex h-full flex-col">
+            <div className="flex h-16 items-center gap-3 border-b px-6">
+              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+                <Zap className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <span className="text-xl font-bold">LeadFlow</span>
+            </div>
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </>
     )
   }
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card">
-      <div className="flex h-full flex-col">
-        {/* Logo */}
-        <div className="flex h-16 items-center gap-3 border-b px-6">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <Zap className="w-5 h-5 text-primary-foreground" />
-          </div>
-          <span className="text-xl font-bold">LeadFlow</span>
-        </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                  isActive
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                )}
-              >
-                {item.icon}
-                <span>{item.title}</span>
-                {item.badge && (
-                  <Badge 
-                    variant={isActive ? 'secondary' : 'outline'} 
-                    className="ml-auto"
-                  >
-                    {item.badge}
-                  </Badge>
-                )}
-              </Link>
-            )
-          })}
-        </nav>
-
-        {/* User menu */}
-        <div className="border-t p-4">
-          {mounted && user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="w-full justify-start gap-3 h-auto py-2">
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage src={user.avatar_url || undefined} />
-                    <AvatarFallback className="bg-primary/10 text-primary">
-                      {user.name?.charAt(0).toUpperCase() || 'U'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 text-left">
-                    <p className="text-sm font-medium truncate">{user.name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{user.role?.replace('_', ' ')}</p>
-                  </div>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuLabel>My Account</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem>
-                  <Bell className="mr-2 h-4 w-4" />
-                  Notifications
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Settings className="mr-2 h-4 w-4" />
-                  Settings
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <div className="flex items-center gap-3 py-2 px-2">
-              <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
-              <div className="flex-1 space-y-1">
-                <div className="h-4 w-24 bg-muted rounded animate-pulse" />
-                <div className="h-3 w-16 bg-muted rounded animate-pulse" />
-              </div>
+    <>
+      {/* Mobile Header */}
+      <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b bg-card lg:hidden">
+        <div className="flex h-full items-center justify-between px-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+              <Zap className="w-5 h-5 text-primary-foreground" />
             </div>
-          )}
+            <span className="text-lg font-bold">LeadFlow</span>
+          </div>
+          
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="lg:hidden">
+                <Menu className="h-6 w-6" />
+                <span className="sr-only">Open menu</span>
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 p-0">
+              <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+              <SidebarContent />
+            </SheetContent>
+          </Sheet>
         </div>
-      </div>
-    </aside>
+      </header>
+
+      {/* Desktop Sidebar */}
+      <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card hidden lg:block">
+        <SidebarContent />
+      </aside>
+    </>
   )
 }

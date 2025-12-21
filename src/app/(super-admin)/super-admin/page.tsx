@@ -69,9 +69,9 @@ export default async function SuperAdminDashboard() {
         description="Monitor and manage your entire platform"
       />
       
-      <div className="flex-1 p-6 space-y-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         {/* Stats Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
           {stats.map((stat, index) => (
             <Card key={index} className="animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
               <CardHeader className="flex flex-row items-center justify-between pb-2">

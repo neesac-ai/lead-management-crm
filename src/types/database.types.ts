@@ -11,13 +11,11 @@ export type UserRole = 'super_admin' | 'admin' | 'sales' | 'accountant'
 export type OrgStatus = 'pending' | 'active' | 'suspended' | 'deleted'
 export type LeadStatus = 
   | 'new' 
-  | 'contacted' 
-  | 'qualified' 
+  | 'call_not_picked' 
   | 'not_interested' 
   | 'follow_up_again' 
   | 'demo_booked' 
   | 'demo_completed' 
-  | 'negotiation' 
   | 'deal_won' 
   | 'deal_lost'
 export type DemoStatus = 'scheduled' | 'completed' | 'cancelled' | 'rescheduled'
@@ -307,6 +305,7 @@ export interface Database {
           comments: string | null
           action_date: string
           next_followup: string | null
+          product_id: string | null
           created_at: string
         }
         Insert: {
@@ -317,6 +316,7 @@ export interface Database {
           comments?: string | null
           action_date?: string
           next_followup?: string | null
+          product_id?: string | null
           created_at?: string
         }
         Update: {
@@ -327,7 +327,46 @@ export interface Database {
           comments?: string | null
           action_date?: string
           next_followup?: string | null
+          product_id?: string | null
           created_at?: string
+        }
+      }
+      products: {
+        Row: {
+          id: string
+          org_id: string
+          name: string
+          description: string | null
+          pitch_points: string[] | null
+          images: string[] | null
+          demo_link: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          org_id: string
+          name: string
+          description?: string | null
+          pitch_points?: string[] | null
+          images?: string[] | null
+          demo_link?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          org_id?: string
+          name?: string
+          description?: string | null
+          pitch_points?: string[] | null
+          images?: string[] | null
+          demo_link?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
         }
       }
       lead_sources: {
@@ -557,5 +596,4 @@ export type OrgSubscription = Tables<'org_subscriptions'>
 export type ImpersonationLog = Tables<'impersonation_logs'>
 export type PlatformSetting = Tables<'platform_settings'>
 export type LeadSource = Tables<'lead_sources'>
-
-
+export type Product = Tables<'products'>
