@@ -76,25 +76,27 @@ export default function AnalyticsPage() {
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (!authUser) return
 
-      const { data: userData } = await supabase
+      const { data: userDataRaw } = await supabase
         .from('users')
         .select('*')
         .eq('auth_id', authUser.id)
         .single()
 
-      if (!userData) return
-      setUser(userData)
+      if (!userDataRaw) return
+      
+      const currentUser = userDataRaw as { id: string; role: string; org_id: string }
+      setUser(currentUser)
 
       // Get organization
-      const { data: orgData } = await supabase
+      const { data: orgDataRaw } = await supabase
         .from('organizations')
         .select('id')
         .eq('slug', orgSlug)
         .single()
 
-      if (!orgData) return
+      if (!orgDataRaw) return
 
-      const orgId = (orgData as { id: string }).id
+      const orgId = (orgDataRaw as { id: string }).id
 
       // Fetch leads based on role
       let leadsQuery = supabase
@@ -102,16 +104,16 @@ export default function AnalyticsPage() {
         .select('*')
         .eq('org_id', orgId)
 
-      if (userData.role === 'sales') {
+      if (currentUser.role === 'sales') {
         // Sales can only see their assigned leads
-        leadsQuery = leadsQuery.eq('assigned_to', userData.id)
+        leadsQuery = leadsQuery.eq('assigned_to', currentUser.id)
       }
 
       const { data: leadsData } = await leadsQuery
       setLeads(leadsData || [])
 
       // Admin can see sales team performance
-      if (userData.role === 'admin' || userData.role === 'super_admin') {
+      if (currentUser.role === 'admin' || currentUser.role === 'super_admin') {
         const { data: teamData } = await supabase
           .from('users')
           .select('*')
