@@ -76,48 +76,49 @@ export default function AnalyticsPage() {
       const { data: { user: authUser } } = await supabase.auth.getUser()
       if (!authUser) return
 
-      const { data: userDataRaw } = await supabase
+      const { data: userData } = await supabase
         .from('users')
         .select('*')
         .eq('auth_id', authUser.id)
         .single()
 
-      if (!userDataRaw) return
+      if (!userData) return
       
-      const currentUser = userDataRaw as { id: string; role: string; org_id: string }
-      setUser(currentUser)
+      // Cast to access properties safely
+      const userWithRole = userData as unknown as { id: string; role: string; org_id: string }
+      setUser(userData)
 
       // Get organization
-      const { data: orgDataRaw } = await supabase
+      const { data: orgData } = await supabase
         .from('organizations')
         .select('id')
         .eq('slug', orgSlug)
         .single()
 
-      if (!orgDataRaw) return
+      if (!orgData) return
 
-      const orgId = (orgDataRaw as { id: string }).id
+      const org = orgData as unknown as { id: string }
 
       // Fetch leads based on role
       let leadsQuery = supabase
         .from('leads')
         .select('*')
-        .eq('org_id', orgId)
+        .eq('org_id', org.id)
 
-      if (currentUser.role === 'sales') {
+      if (userWithRole.role === 'sales') {
         // Sales can only see their assigned leads
-        leadsQuery = leadsQuery.eq('assigned_to', currentUser.id)
+        leadsQuery = leadsQuery.eq('assigned_to', userWithRole.id)
       }
 
       const { data: leadsData } = await leadsQuery
       setLeads(leadsData || [])
 
       // Admin can see sales team performance
-      if (currentUser.role === 'admin' || currentUser.role === 'super_admin') {
+      if (userWithRole.role === 'admin' || userWithRole.role === 'super_admin') {
         const { data: teamData } = await supabase
           .from('users')
           .select('*')
-          .eq('org_id', orgId)
+          .eq('org_id', org.id)
           .eq('role', 'sales')
           .eq('is_approved', true)
 
