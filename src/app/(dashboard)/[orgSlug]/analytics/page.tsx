@@ -94,11 +94,13 @@ export default function AnalyticsPage() {
 
       if (!orgData) return
 
+      const orgId = (orgData as { id: string }).id
+
       // Fetch leads based on role
       let leadsQuery = supabase
         .from('leads')
         .select('*')
-        .eq('org_id', orgData.id)
+        .eq('org_id', orgId)
 
       if (userData.role === 'sales') {
         // Sales can only see their assigned leads
@@ -113,7 +115,7 @@ export default function AnalyticsPage() {
         const { data: teamData } = await supabase
           .from('users')
           .select('*')
-          .eq('org_id', orgData.id)
+          .eq('org_id', orgId)
           .eq('role', 'sales')
           .eq('is_approved', true)
 
