@@ -6,13 +6,22 @@ import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { CalendarDays, User, Loader2, Clock, Phone, Mail, Building2 } from 'lucide-react'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { formatDistanceToNow } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
+import { toast } from 'sonner'
 
 type FollowUp = {
   id: string
+  lead_id: string
   next_followup: string
   comments: string | null
   leads: {
@@ -20,9 +29,21 @@ type FollowUp = {
     name: string
     email: string | null
     phone: string | null
+    status: string
     custom_fields: { company?: string } | null
   }
 }
+
+const statusOptions = [
+  { value: 'new', label: 'New', color: 'bg-blue-500' },
+  { value: 'call_not_picked', label: 'Call Not Picked', color: 'bg-yellow-500' },
+  { value: 'not_interested', label: 'Not Interested', color: 'bg-gray-500' },
+  { value: 'follow_up_again', label: 'Follow Up Again', color: 'bg-orange-500' },
+  { value: 'demo_booked', label: 'Demo Booked', color: 'bg-purple-500' },
+  { value: 'demo_completed', label: 'Demo Completed', color: 'bg-indigo-500' },
+  { value: 'deal_won', label: 'Deal Won', color: 'bg-emerald-500' },
+  { value: 'deal_lost', label: 'Deal Lost', color: 'bg-red-500' },
+]
 
 // Get user's timezone
 const getUserTimezone = () => {
@@ -36,6 +57,7 @@ export default function FollowUpsPage() {
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [userTimezone] = useState(getUserTimezone())
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
 
   useEffect(() => {
     fetchFollowUps()
@@ -65,7 +87,7 @@ export default function FollowUpsPage() {
         // Get activities with next_followup for these leads
         const { data } = await supabase
           .from('lead_activities')
-          .select('id, next_followup, comments, leads(id, name, email, phone, custom_fields)')
+          .select('id, lead_id, next_followup, comments, leads(id, name, email, phone, status, custom_fields)')
           .in('lead_id', leadIds)
           .not('next_followup', 'is', null)
           .order('next_followup', { ascending: true })
@@ -74,6 +96,26 @@ export default function FollowUpsPage() {
       }
     }
     setIsLoading(false)
+  }
+
+  const handleStatusChange = async (leadId: string, newStatus: string) => {
+    setUpdatingStatus(leadId)
+    const supabase = createClient()
+
+    const { error } = await supabase
+      .from('leads')
+      .update({ status: newStatus })
+      .eq('id', leadId)
+
+    if (error) {
+      toast.error('Failed to update status')
+      console.error(error)
+    } else {
+      toast.success('Status updated')
+      // Refresh follow-ups (lead may be removed from list if status changed)
+      fetchFollowUps()
+    }
+    setUpdatingStatus(null)
   }
 
   const isOverdue = (date: string) => new Date(date) < new Date()
@@ -111,12 +153,20 @@ export default function FollowUpsPage() {
                       isToday(followUp.next_followup) ? 'border-yellow-500/50 bg-yellow-500/5' : ''
                     }`}
                   >
-                    {/* Top row: Name + Badge */}
+                    {/* Top row: Phone (primary) + Time Badge */}
                     <div className="flex items-start justify-between gap-2 mb-3">
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold truncate text-lg">{followUp.leads?.name}</p>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-primary shrink-0" />
+                          <p className="font-semibold truncate text-lg">{followUp.leads?.phone}</p>
+                        </div>
+                        {followUp.leads?.name && followUp.leads.name !== followUp.leads.phone && (
+                          <p className="text-sm text-muted-foreground truncate mt-0.5">
+                            {followUp.leads.name}
+                          </p>
+                        )}
                         {followUp.leads?.custom_fields?.company && (
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Building2 className="h-3 w-3" />
                             <span className="truncate">{followUp.leads.custom_fields.company}</span>
                           </div>
@@ -133,21 +183,13 @@ export default function FollowUpsPage() {
                       )}
                     </div>
 
-                    {/* Contact Details */}
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-3">
-                      {followUp.leads?.phone && (
-                        <div className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          <span>{followUp.leads.phone}</span>
-                        </div>
-                      )}
-                      {followUp.leads?.email && (
-                        <div className="flex items-center gap-1">
-                          <Mail className="h-3 w-3" />
-                          <span className="truncate">{followUp.leads.email}</span>
-                        </div>
-                      )}
-                    </div>
+                    {/* Email */}
+                    {followUp.leads?.email && (
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-3">
+                        <Mail className="h-3 w-3" />
+                        <span className="truncate">{followUp.leads.email}</span>
+                      </div>
+                    )}
 
                     {/* Contact Actions */}
                     <div className="mb-3">
@@ -159,12 +201,36 @@ export default function FollowUpsPage() {
                     </div>
                     
                     {/* Date/Time */}
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
                       <Clock className="h-4 w-4 shrink-0" />
                       <span>{formatInTimeZone(new Date(followUp.next_followup), userTimezone, 'MMM d, yyyy')}</span>
                       <span className="font-medium text-foreground">
                         {formatInTimeZone(new Date(followUp.next_followup), userTimezone, 'h:mm a')}
                       </span>
+                    </div>
+
+                    {/* Status Change */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-sm text-muted-foreground">Status:</span>
+                      <Select
+                        value={followUp.leads?.status || 'follow_up_again'}
+                        onValueChange={(value) => handleStatusChange(followUp.leads?.id, value)}
+                        disabled={updatingStatus === followUp.leads?.id}
+                      >
+                        <SelectTrigger className="w-[180px] h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {statusOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                                {option.label}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     
                     {/* Comment */}

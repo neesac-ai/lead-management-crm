@@ -264,30 +264,25 @@ export default function SubscriptionsPage() {
                             <td className="py-3 px-2">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                  <User className="h-5 w-5 text-primary" />
+                                  <Phone className="h-5 w-5 text-primary" />
                                 </div>
                                 <div className="min-w-0">
-                                  <p className="font-medium">{sub.leads?.name || 'Unknown'}</p>
+                                  <p className="font-medium">{sub.leads?.phone || 'Unknown'}</p>
+                                  {sub.leads?.name && sub.leads.name !== sub.leads.phone && (
+                                    <p className="text-xs text-muted-foreground truncate">{sub.leads.name}</p>
+                                  )}
                                   {sub.leads?.custom_fields?.company && (
                                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                       <Building2 className="h-3 w-3" />
                                       <span className="truncate">{sub.leads.custom_fields.company}</span>
                                     </div>
                                   )}
-                                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground mt-1">
-                                    {sub.leads?.phone && (
-                                      <span className="flex items-center gap-1">
-                                        <Phone className="h-3 w-3" />
-                                        {sub.leads.phone}
-                                      </span>
-                                    )}
-                                    {sub.leads?.email && (
-                                      <span className="flex items-center gap-1">
-                                        <Mail className="h-3 w-3" />
-                                        {sub.leads.email}
-                                      </span>
-                                    )}
-                                  </div>
+                                  {sub.leads?.email && (
+                                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                      <Mail className="h-3 w-3" />
+                                      {sub.leads.email}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -353,12 +348,18 @@ export default function SubscriptionsPage() {
                     
                     return (
                       <div key={sub.id} className="border rounded-lg p-4 space-y-3">
-                        {/* Header: Name + Status */}
+                        {/* Header: Phone (primary) + Status */}
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-lg truncate">{sub.leads?.name || 'Unknown'}</p>
+                            <div className="flex items-center gap-2">
+                              <Phone className="h-4 w-4 text-primary shrink-0" />
+                              <p className="font-semibold text-lg truncate">{sub.leads?.phone || 'Unknown'}</p>
+                            </div>
+                            {sub.leads?.name && sub.leads.name !== sub.leads.phone && (
+                              <p className="text-sm text-muted-foreground truncate mt-0.5">{sub.leads.name}</p>
+                            )}
                             {sub.leads?.custom_fields?.company && (
-                              <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                 <Building2 className="h-3 w-3" />
                                 <span className="truncate">{sub.leads.custom_fields.company}</span>
                               </div>
@@ -369,21 +370,13 @@ export default function SubscriptionsPage() {
                           </Badge>
                         </div>
 
-                        {/* Contact Details */}
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                          {sub.leads?.phone && (
-                            <div className="flex items-center gap-1">
-                              <Phone className="h-3 w-3" />
-                              <span>{sub.leads.phone}</span>
-                            </div>
-                          )}
-                          {sub.leads?.email && (
-                            <div className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              <span className="truncate">{sub.leads.email}</span>
-                            </div>
-                          )}
-                        </div>
+                        {/* Email */}
+                        {sub.leads?.email && (
+                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <Mail className="h-3 w-3" />
+                            <span className="truncate">{sub.leads.email}</span>
+                          </div>
+                        )}
 
                         {/* Contact Actions */}
                         <ContactActions 

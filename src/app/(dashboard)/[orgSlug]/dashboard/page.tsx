@@ -204,7 +204,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const todayEndISO = todayEndIST.toISOString()
   const today = istDateStr
   
-  type FollowupDataRaw = { id: string; next_followup: string | null; leads: { id: string; name: string; assigned_to: string | null; created_by: string | null } }
+  type FollowupDataRaw = { id: string; next_followup: string | null; leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } }
   
   // Fetch all today's follow-ups and filter client-side for sales users
   const { data: allTodayFollowups } = await supabase
@@ -212,7 +212,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     .select(`
       id,
       next_followup,
-      leads!inner(id, name, org_id, assigned_to, created_by)
+      leads!inner(id, name, phone, org_id, assigned_to, created_by)
     `)
     .eq('leads.org_id', org.id)
     .gte('next_followup', todayStartISO)
@@ -228,7 +228,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     )
   }
 
-  type FollowupData = { id: string; next_followup: string | null; leads: { id: string; name: string } }
+  type FollowupData = { id: string; next_followup: string | null; leads: { id: string; name: string; phone: string | null } }
   const todayFollowups = todayFollowupsData.slice(0, 10) as FollowupData[]
 
   // Get today's demos (filtered for sales users)
@@ -236,7 +236,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     id: string; 
     scheduled_at: string; 
     google_meet_link: string | null;
-    leads: { id: string; name: string; assigned_to: string | null; created_by: string | null } 
+    leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } 
   }
 
   // Fetch all today's demos and filter client-side for sales users
@@ -246,7 +246,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       id,
       scheduled_at,
       google_meet_link,
-      leads!inner(id, name, org_id, assigned_to, created_by)
+      leads!inner(id, name, phone, org_id, assigned_to, created_by)
     `)
     .eq('leads.org_id', org.id)
     .eq('status', 'scheduled')
@@ -313,7 +313,10 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                         className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{demo.leads?.name}</p>
+                          <p className="font-medium text-sm truncate">{demo.leads?.phone || demo.leads?.name}</p>
+                          {demo.leads?.name && demo.leads.name !== demo.leads.phone && (
+                            <p className="text-xs text-muted-foreground truncate">{demo.leads.name}</p>
+                          )}
                           <p className="text-xs text-orange-600">
                             {new Date(demo.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </p>
@@ -348,7 +351,10 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                         className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{followup.leads?.name}</p>
+                          <p className="font-medium text-sm truncate">{followup.leads?.phone || followup.leads?.name}</p>
+                          {followup.leads?.name && followup.leads.name !== followup.leads.phone && (
+                            <p className="text-xs text-muted-foreground truncate">{followup.leads.name}</p>
+                          )}
                           <p className="text-xs text-orange-600">
                             {followup.next_followup 
                               ? new Date(followup.next_followup).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

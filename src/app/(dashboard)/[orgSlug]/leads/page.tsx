@@ -222,9 +222,9 @@ export default function LeadsPage() {
       .from('leads')
       .insert({
         org_id: orgId,
-        name: formData.name,
+        name: formData.name || formData.phone, // Use phone as name if name not provided
         email: formData.email || null,
-        phone: formData.phone || null,
+        phone: formData.phone,
         source: formData.source,
         status: formData.status,
         custom_fields: { company: formData.company || null },
@@ -289,15 +289,26 @@ export default function LeadsPage() {
                   <div className="space-y-4 py-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="name">Name *</Label>
+                        <Label htmlFor="phone">Phone *</Label>
+                        <Input
+                          id="phone"
+                          placeholder="+91 98765 43210"
+                          value={formData.phone}
+                          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="name">Name</Label>
                         <Input
                           id="name"
                           placeholder="John Doe"
                           value={formData.name}
                           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                          required
                         />
                       </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="company">Company</Label>
                         <Input
@@ -307,8 +318,6 @@ export default function LeadsPage() {
                           onChange={(e) => setFormData({ ...formData, company: e.target.value })}
                         />
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="email">Email</Label>
                         <Input
@@ -317,15 +326,6 @@ export default function LeadsPage() {
                           placeholder="john@example.com"
                           value={formData.email}
                           onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="phone">Phone</Label>
-                        <Input
-                          id="phone"
-                          placeholder="+1 234 567 890"
-                          value={formData.phone}
-                          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                         />
                       </div>
                     </div>
@@ -388,12 +388,20 @@ export default function LeadsPage() {
                       setIsDetailOpen(true)
                     }}
                   >
-                    {/* Top row: Name + Status */}
+                    {/* Top row: Phone (primary) + Status */}
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-base truncate">{lead.name}</p>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-primary shrink-0" />
+                          <p className="font-semibold text-base truncate">{lead.phone}</p>
+                        </div>
+                        {lead.name && lead.name !== lead.phone && (
+                          <p className="text-sm text-muted-foreground truncate mt-0.5">
+                            {lead.name}
+                          </p>
+                        )}
                         {lead.custom_fields?.company && (
-                          <p className="text-sm text-muted-foreground truncate">
+                          <p className="text-xs text-muted-foreground truncate">
                             {lead.custom_fields.company}
                           </p>
                         )}
@@ -403,18 +411,12 @@ export default function LeadsPage() {
                       </Badge>
                     </div>
                     
-                    {/* Contact info */}
+                    {/* Email */}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-2">
-                      {lead.phone && (
-                        <span className="flex items-center gap-1">
-                          <Phone className="h-3.5 w-3.5" />
-                          <span className="truncate">{lead.phone}</span>
-                        </span>
-                      )}
                       {lead.email && (
                         <span className="flex items-center gap-1">
                           <Mail className="h-3.5 w-3.5" />
-                          <span className="truncate max-w-[150px]">{lead.email}</span>
+                          <span className="truncate max-w-[200px]">{lead.email}</span>
                         </span>
                       )}
                     </div>

@@ -6,9 +6,17 @@ import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Zap, User, Loader2, Clock, Video, Phone, Mail, Building2 } from 'lucide-react'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { formatInTimeZone } from 'date-fns-tz'
+import { toast } from 'sonner'
 
 type Demo = {
   id: string
@@ -21,16 +29,28 @@ type Demo = {
     name: string
     email: string | null
     phone: string | null
+    lead_status: string
     custom_fields: { company?: string } | null
   }
 }
 
-const statusColors: Record<string, string> = {
+const demoStatusColors: Record<string, string> = {
   scheduled: 'bg-purple-500',
   completed: 'bg-green-500',
   cancelled: 'bg-red-500',
   rescheduled: 'bg-yellow-500',
 }
+
+const leadStatusOptions = [
+  { value: 'new', label: 'New', color: 'bg-blue-500' },
+  { value: 'call_not_picked', label: 'Call Not Picked', color: 'bg-yellow-500' },
+  { value: 'not_interested', label: 'Not Interested', color: 'bg-gray-500' },
+  { value: 'follow_up_again', label: 'Follow Up Again', color: 'bg-orange-500' },
+  { value: 'demo_booked', label: 'Demo Booked', color: 'bg-purple-500' },
+  { value: 'demo_completed', label: 'Demo Completed', color: 'bg-indigo-500' },
+  { value: 'deal_won', label: 'Deal Won', color: 'bg-emerald-500' },
+  { value: 'deal_lost', label: 'Deal Lost', color: 'bg-red-500' },
+]
 
 // Get user's timezone
 const getUserTimezone = () => {
@@ -44,6 +64,7 @@ export default function DemosPage() {
   const [demos, setDemos] = useState<Demo[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [userTimezone] = useState(getUserTimezone())
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
 
   useEffect(() => {
     fetchDemos()
@@ -69,17 +90,45 @@ export default function DemosPage() {
       if (leads && leads.length > 0) {
         const leadIds = leads.map(l => l.id)
         
-        // Get demos for these leads
+        // Get demos for these leads with lead status
         const { data } = await supabase
           .from('demos')
-          .select('id, scheduled_at, status, google_meet_link, notes, leads(id, name, email, phone, custom_fields)')
+          .select('id, scheduled_at, status, google_meet_link, notes, leads(id, name, email, phone, status, custom_fields)')
           .in('lead_id', leadIds)
           .order('scheduled_at', { ascending: true })
 
-        setDemos((data || []) as Demo[])
+        // Map the lead status field
+        const demosWithStatus = (data || []).map(demo => ({
+          ...demo,
+          leads: demo.leads ? {
+            ...demo.leads,
+            lead_status: (demo.leads as unknown as { status: string }).status
+          } : null
+        }))
+
+        setDemos(demosWithStatus as Demo[])
       }
     }
     setIsLoading(false)
+  }
+
+  const handleLeadStatusChange = async (leadId: string, newStatus: string) => {
+    setUpdatingStatus(leadId)
+    const supabase = createClient()
+
+    const { error } = await supabase
+      .from('leads')
+      .update({ status: newStatus })
+      .eq('id', leadId)
+
+    if (error) {
+      toast.error('Failed to update status')
+      console.error(error)
+    } else {
+      toast.success('Status updated')
+      fetchDemos()
+    }
+    setUpdatingStatus(null)
   }
 
   const isUpcoming = (date: string) => new Date(date) > new Date()
@@ -117,37 +166,37 @@ export default function DemosPage() {
                         ? 'border-purple-500/50 bg-purple-500/5' : ''
                     }`}
                   >
-                    {/* Top row: Name + Status */}
+                    {/* Top row: Phone (primary) + Demo Status */}
                     <div className="flex items-start justify-between gap-2 mb-3">
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold truncate text-lg">{demo.leads?.name}</p>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-primary shrink-0" />
+                          <p className="font-semibold truncate text-lg">{demo.leads?.phone}</p>
+                        </div>
+                        {demo.leads?.name && demo.leads.name !== demo.leads.phone && (
+                          <p className="text-sm text-muted-foreground truncate mt-0.5">
+                            {demo.leads.name}
+                          </p>
+                        )}
                         {demo.leads?.custom_fields?.company && (
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Building2 className="h-3 w-3" />
                             <span className="truncate">{demo.leads.custom_fields.company}</span>
                           </div>
                         )}
                       </div>
-                      <Badge className={`${statusColors[demo.status] || 'bg-gray-500'} shrink-0`}>
+                      <Badge className={`${demoStatusColors[demo.status] || 'bg-gray-500'} shrink-0`}>
                         {demo.status}
                       </Badge>
                     </div>
 
-                    {/* Contact Details */}
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-3">
-                      {demo.leads?.phone && (
-                        <div className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          <span>{demo.leads.phone}</span>
-                        </div>
-                      )}
-                      {demo.leads?.email && (
-                        <div className="flex items-center gap-1">
-                          <Mail className="h-3 w-3" />
-                          <span className="truncate">{demo.leads.email}</span>
-                        </div>
-                      )}
-                    </div>
+                    {/* Email */}
+                    {demo.leads?.email && (
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-3">
+                        <Mail className="h-3 w-3" />
+                        <span className="truncate">{demo.leads.email}</span>
+                      </div>
+                    )}
 
                     {/* Contact Actions */}
                     <div className="mb-3">
@@ -165,6 +214,30 @@ export default function DemosPage() {
                       <span className="font-medium text-foreground">
                         {formatInTimeZone(new Date(demo.scheduled_at), userTimezone, 'h:mm a')}
                       </span>
+                    </div>
+
+                    {/* Lead Status Change */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-sm text-muted-foreground">Lead Status:</span>
+                      <Select
+                        value={demo.leads?.lead_status || 'demo_booked'}
+                        onValueChange={(value) => handleLeadStatusChange(demo.leads?.id, value)}
+                        disabled={updatingStatus === demo.leads?.id}
+                      >
+                        <SelectTrigger className="w-[180px] h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {leadStatusOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                                {option.label}
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     
                     {/* Join button */}
