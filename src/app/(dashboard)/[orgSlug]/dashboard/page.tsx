@@ -53,22 +53,44 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   // Fetch stats based on user role
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
   
-  const leadsQuery = supabase
+  // Calculate current time in IST for filtering
+  const nowForStats = new Date()
+  const nowISO = nowForStats.toISOString()
+  
+  // Build leads query based on role
+  let leadsQuery = supabase
     .from('leads')
     .select('id, status', { count: 'exact' })
     .eq('org_id', org.id)
 
   if (!isAdmin && profile?.id) {
-    leadsQuery.eq('assigned_to', profile.id)
+    leadsQuery = supabase
+      .from('leads')
+      .select('id, status', { count: 'exact' })
+      .eq('org_id', org.id)
+      .or(`assigned_to.eq.${profile.id},created_by.eq.${profile.id}`)
   }
 
-  const [leadsResult, demosResult, subscriptionsResult] = await Promise.all([
+  // Build demos query - only future scheduled demos
+  let demosQuery = supabase
+    .from('demos')
+    .select('id, status, scheduled_at, leads!inner(org_id, assigned_to, created_by)')
+    .eq('leads.org_id', org.id)
+    .eq('status', 'scheduled')
+    .gte('scheduled_at', nowISO)
+
+  // Build follow-ups query - only future follow-ups
+  const followupsQuery = supabase
+    .from('lead_activities')
+    .select('id, leads!inner(org_id, assigned_to, created_by)')
+    .eq('leads.org_id', org.id)
+    .not('next_followup', 'is', null)
+    .gte('next_followup', nowISO)
+
+  const [leadsResult, demosResult, followupsResult, subscriptionsResult] = await Promise.all([
     leadsQuery,
-    supabase
-      .from('demos')
-      .select('id, status, leads!inner(org_id)')
-      .eq('leads.org_id', org.id)
-      .eq('status', 'scheduled'),
+    demosQuery,
+    followupsQuery,
     supabase
       .from('customer_subscriptions')
       .select('id, status, deal_value')
@@ -76,16 +98,36 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   ])
 
   type LeadData = { id: string; status: string }
-  type DemoData = { id: string; status: string }
+  type DemoData = { id: string; status: string; scheduled_at: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
+  type FollowupCountData = { id: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
   type SubscriptionData = { id: string; status: string; deal_value: number }
 
   const leadsData = (leadsResult.data || []) as LeadData[]
   const demosData = (demosResult.data || []) as DemoData[]
+  const followupsData = (followupsResult.data || []) as FollowupCountData[]
   const subscriptionsData = (subscriptionsResult.data || []) as SubscriptionData[]
 
   const totalLeads = leadsResult.count || 0
   const newLeads = leadsData.filter(l => l.status === 'new').length
-  const upcomingDemos = demosData.length
+  
+  // Filter demos for sales users (only their assigned/created leads)
+  let filteredDemos = demosData
+  if (!isAdmin && profile?.id) {
+    filteredDemos = demosData.filter(d => 
+      d.leads?.assigned_to === profile.id || d.leads?.created_by === profile.id
+    )
+  }
+  const upcomingDemos = filteredDemos.length
+  
+  // Filter follow-ups for sales users (only their assigned/created leads)
+  let filteredFollowups = followupsData
+  if (!isAdmin && profile?.id) {
+    filteredFollowups = followupsData.filter(f => 
+      f.leads?.assigned_to === profile.id || f.leads?.created_by === profile.id
+    )
+  }
+  const upcomingFollowups = filteredFollowups.length
+  
   const activeSubscriptions = subscriptionsData.filter(s => s.status === 'active').length
   const totalRevenue = subscriptionsData.reduce((sum, s) => sum + (s.deal_value || 0), 0)
 
@@ -101,8 +143,15 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       title: 'Upcoming Demos',
       value: upcomingDemos.toString(),
       icon: CalendarDays,
-      description: 'Scheduled this week',
+      description: 'Future scheduled',
       href: `/${orgSlug}/demos`,
+    },
+    {
+      title: 'Pending Follow-ups',
+      value: upcomingFollowups.toString(),
+      icon: Phone,
+      description: 'Need attention',
+      href: `/${orgSlug}/follow-ups`,
     },
     {
       title: 'Active Subscriptions',
@@ -110,13 +159,6 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       icon: Users,
       description: 'Currently active',
       href: `/${orgSlug}/subscriptions`,
-    },
-    {
-      title: 'Total Revenue',
-      value: `₹${totalRevenue.toLocaleString()}`,
-      icon: CreditCard,
-      description: 'All time',
-      href: `/${orgSlug}/payments`,
     },
   ]
 
@@ -145,44 +187,49 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const recentLeads = (recentLeadsData || []) as RecentLead[]
 
   // Get today's follow-ups (filtered for sales users)
-  const today = new Date().toISOString().split('T')[0]
+  // Calculate today's range in IST (UTC+5:30) for proper timezone handling
+  const now = new Date()
   
-  let todayFollowupsData: { id: string; next_followup: string | null; leads: { id: string; name: string; assigned_to: string | null; created_by: string | null } }[] | null = null
-
+  // Get today's date in IST (add 5.5 hours to UTC to get IST time, then get the date)
+  const istOffset = 5.5 * 60 * 60 * 1000 // 5.5 hours in milliseconds
+  const istNow = new Date(now.getTime() + istOffset)
+  const istDateStr = istNow.toISOString().split('T')[0]
+  
+  // Today in IST starts at 00:00 IST = previous day 18:30 UTC
+  // Today in IST ends at 23:59:59 IST = current day 18:29:59 UTC
+  const todayStartIST = new Date(`${istDateStr}T00:00:00+05:30`)
+  const todayEndIST = new Date(`${istDateStr}T23:59:59+05:30`)
+  
+  const todayStartISO = todayStartIST.toISOString()
+  const todayEndISO = todayEndIST.toISOString()
+  const today = istDateStr
+  
+  type FollowupDataRaw = { id: string; next_followup: string | null; leads: { id: string; name: string; assigned_to: string | null; created_by: string | null } }
+  
+  // Fetch all today's follow-ups and filter client-side for sales users
+  const { data: allTodayFollowups } = await supabase
+    .from('lead_activities')
+    .select(`
+      id,
+      next_followup,
+      leads!inner(id, name, org_id, assigned_to, created_by)
+    `)
+    .eq('leads.org_id', org.id)
+    .gte('next_followup', todayStartISO)
+    .lte('next_followup', todayEndISO)
+    .limit(20)
+  
+  let todayFollowupsData = (allTodayFollowups || []) as FollowupDataRaw[]
+  
+  // Filter for sales users - only their assigned/created leads
   if (profile?.role === 'sales' && profile?.id) {
-    // For sales, only show follow-ups for their assigned/created leads
-    const { data } = await supabase
-      .from('lead_activities')
-      .select(`
-        id,
-        next_followup,
-        leads!inner(id, name, org_id, assigned_to, created_by)
-      `)
-      .eq('leads.org_id', org.id)
-      .gte('next_followup', `${today}T00:00:00`)
-      .lte('next_followup', `${today}T23:59:59`)
-      .or(`leads.assigned_to.eq.${profile.id},leads.created_by.eq.${profile.id}`)
-      .limit(10)
-    
-    todayFollowupsData = data as typeof todayFollowupsData
-  } else {
-    const { data } = await supabase
-      .from('lead_activities')
-      .select(`
-        id,
-        next_followup,
-        leads!inner(id, name, org_id, assigned_to, created_by)
-      `)
-      .eq('leads.org_id', org.id)
-      .gte('next_followup', `${today}T00:00:00`)
-      .lte('next_followup', `${today}T23:59:59`)
-      .limit(10)
-    
-    todayFollowupsData = data as typeof todayFollowupsData
+    todayFollowupsData = todayFollowupsData.filter(f => 
+      f.leads?.assigned_to === profile.id || f.leads?.created_by === profile.id
+    )
   }
 
   type FollowupData = { id: string; next_followup: string | null; leads: { id: string; name: string } }
-  const todayFollowups = (todayFollowupsData || []) as FollowupData[]
+  const todayFollowups = todayFollowupsData.slice(0, 10) as FollowupData[]
 
   // Get today's demos (filtered for sales users)
   type TodayDemoData = { 
@@ -191,46 +238,33 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     google_meet_link: string | null;
     leads: { id: string; name: string; assigned_to: string | null; created_by: string | null } 
   }
-  let todayDemosData: TodayDemoData[] | null = null
 
+  // Fetch all today's demos and filter client-side for sales users
+  const { data: allTodayDemos } = await supabase
+    .from('demos')
+    .select(`
+      id,
+      scheduled_at,
+      google_meet_link,
+      leads!inner(id, name, org_id, assigned_to, created_by)
+    `)
+    .eq('leads.org_id', org.id)
+    .eq('status', 'scheduled')
+    .gte('scheduled_at', todayStartISO)
+    .lte('scheduled_at', todayEndISO)
+    .order('scheduled_at', { ascending: true })
+    .limit(20)
+
+  let todayDemosData = (allTodayDemos || []) as TodayDemoData[]
+  
+  // Filter for sales users - only their assigned/created leads
   if (profile?.role === 'sales' && profile?.id) {
-    const { data } = await supabase
-      .from('demos')
-      .select(`
-        id,
-        scheduled_at,
-        google_meet_link,
-        leads!inner(id, name, org_id, assigned_to, created_by)
-      `)
-      .eq('leads.org_id', org.id)
-      .eq('status', 'scheduled')
-      .gte('scheduled_at', `${today}T00:00:00`)
-      .lte('scheduled_at', `${today}T23:59:59`)
-      .or(`leads.assigned_to.eq.${profile.id},leads.created_by.eq.${profile.id}`)
-      .order('scheduled_at', { ascending: true })
-      .limit(10)
-    
-    todayDemosData = data as TodayDemoData[]
-  } else {
-    const { data } = await supabase
-      .from('demos')
-      .select(`
-        id,
-        scheduled_at,
-        google_meet_link,
-        leads!inner(id, name, org_id, assigned_to, created_by)
-      `)
-      .eq('leads.org_id', org.id)
-      .eq('status', 'scheduled')
-      .gte('scheduled_at', `${today}T00:00:00`)
-      .lte('scheduled_at', `${today}T23:59:59`)
-      .order('scheduled_at', { ascending: true })
-      .limit(10)
-    
-    todayDemosData = data as TodayDemoData[]
+    todayDemosData = todayDemosData.filter(d => 
+      d.leads?.assigned_to === profile.id || d.leads?.created_by === profile.id
+    )
   }
 
-  const todayDemos = (todayDemosData || []) as TodayDemoData[]
+  const todayDemos = todayDemosData.slice(0, 10)
   const hasReminders = todayDemos.length > 0 || todayFollowups.length > 0
 
   const getStatusColor = (status: string) => {
