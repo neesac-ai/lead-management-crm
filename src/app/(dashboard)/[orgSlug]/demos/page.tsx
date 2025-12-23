@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
@@ -13,10 +13,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Zap, User, Loader2, Clock, Video, Phone, Mail, Building2 } from 'lucide-react'
+import { Zap, User, Loader2, Clock, Video, Phone, Mail, Building2, UserCircle } from 'lucide-react'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { formatInTimeZone } from 'date-fns-tz'
 import { toast } from 'sonner'
+
+type SalesUser = {
+  id: string
+  name: string
+}
 
 type Demo = {
   id: string
@@ -31,6 +36,8 @@ type Demo = {
     phone: string | null
     lead_status: string
     custom_fields: { company?: string } | null
+    assigned_to: string | null
+    assignee?: { name: string } | null
   }
 }
 
@@ -65,6 +72,9 @@ export default function DemosPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [userTimezone] = useState(getUserTimezone())
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [salesTeam, setSalesTeam] = useState<SalesUser[]>([])
+  const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
 
   useEffect(() => {
     fetchDemos()
@@ -72,6 +82,32 @@ export default function DemosPage() {
 
   const fetchDemos = async () => {
     const supabase = createClient()
+    
+    // Get current user role
+    const { data: { user: authUser } } = await supabase.auth.getUser()
+    if (authUser) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role, org_id')
+        .eq('auth_id', authUser.id)
+        .single()
+      
+      if (profile) {
+        const adminRole = profile.role === 'admin' || profile.role === 'super_admin'
+        setIsAdmin(adminRole)
+        
+        // Fetch sales team for admin filter
+        if (adminRole && profile.org_id) {
+          const { data: teamData } = await supabase
+            .from('users')
+            .select('id, name')
+            .eq('org_id', profile.org_id)
+            .eq('role', 'sales')
+            .eq('is_approved', true)
+          setSalesTeam(teamData || [])
+        }
+      }
+    }
     
     // Get org ID from slug
     const { data: org } = await supabase
@@ -90,10 +126,13 @@ export default function DemosPage() {
       if (leads && leads.length > 0) {
         const leadIds = leads.map(l => l.id)
         
-        // Get demos for these leads with lead status
+        // Get demos for these leads with lead status and assignee info
         const { data } = await supabase
           .from('demos')
-          .select('id, scheduled_at, status, google_meet_link, notes, leads(id, name, email, phone, status, custom_fields)')
+          .select(`
+            id, scheduled_at, status, google_meet_link, notes, 
+            leads(id, name, email, phone, status, custom_fields, assigned_to, assignee:users!leads_assigned_to_fkey(name))
+          `)
           .in('lead_id', leadIds)
           .order('scheduled_at', { ascending: true })
 
@@ -102,7 +141,8 @@ export default function DemosPage() {
           ...demo,
           leads: demo.leads ? {
             ...demo.leads,
-            lead_status: (demo.leads as unknown as { status: string }).status
+            lead_status: (demo.leads as unknown as { status: string }).status,
+            assignee: (demo.leads as unknown as { assignee: { name: string } | null }).assignee
           } : null
         }))
 
@@ -111,6 +151,12 @@ export default function DemosPage() {
     }
     setIsLoading(false)
   }
+
+  // Filter demos by selected sales rep
+  const filteredDemos = useMemo(() => {
+    if (!isAdmin || selectedSalesRep === 'all') return demos
+    return demos.filter(d => d.leads?.assigned_to === selectedSalesRep)
+  }, [demos, isAdmin, selectedSalesRep])
 
   const handleLeadStatusChange = async (leadId: string, newStatus: string) => {
     setUpdatingStatus(leadId)
@@ -147,18 +193,34 @@ export default function DemosPage() {
       
       <div className="flex-1 p-4 lg:p-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Scheduled Demos</CardTitle>
-            <CardDescription>Upcoming demos and meetings with leads</CardDescription>
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <CardTitle>Scheduled Demos</CardTitle>
+              <CardDescription>Upcoming demos and meetings with leads</CardDescription>
+            </div>
+            {/* Sales Rep Filter - Admin Only */}
+            {isAdmin && salesTeam.length > 0 && (
+              <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by rep" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sales Reps</SelectItem>
+                  {salesTeam.map((rep) => (
+                    <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : demos.length > 0 ? (
+            ) : filteredDemos.length > 0 ? (
               <div className="space-y-3">
-                {demos.map((demo) => (
+                {filteredDemos.map((demo) => (
                   <div 
                     key={demo.id} 
                     className={`p-4 rounded-lg border bg-card ${
@@ -192,9 +254,17 @@ export default function DemosPage() {
 
                     {/* Email */}
                     {demo.leads?.email && (
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-3">
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
                         <Mail className="h-3 w-3" />
                         <span className="truncate">{demo.leads.email}</span>
+                      </div>
+                    )}
+
+                    {/* Sales Rep Name - Admin Only */}
+                    {isAdmin && demo.leads?.assignee && (
+                      <div className="flex items-center gap-1 text-sm text-primary mb-3">
+                        <UserCircle className="h-3 w-3" />
+                        <span>Assigned to: {demo.leads.assignee.name}</span>
                       </div>
                     )}
 

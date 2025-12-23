@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
@@ -24,11 +24,17 @@ import {
   User,
   Phone,
   Mail,
-  Building2
+  Building2,
+  UserCircle
 } from 'lucide-react'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { toast } from 'sonner'
 import { differenceInDays, format, parseISO } from 'date-fns'
+
+type SalesUser = {
+  id: string
+  name: string
+}
 
 type Subscription = {
   id: string
@@ -48,6 +54,9 @@ type Subscription = {
     email: string | null
     phone: string | null
     custom_fields: { company?: string } | null
+    assigned_to: string | null
+    created_by: string | null
+    assignee?: { name: string } | null
   } | null
 }
 
@@ -66,6 +75,8 @@ export default function SubscriptionsPage() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [filter, setFilter] = useState<string>('all')
+  const [salesTeam, setSalesTeam] = useState<SalesUser[]>([])
+  const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
 
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'super_admin'
 
@@ -97,7 +108,18 @@ export default function SubscriptionsPage() {
 
       if (!orgData) return
 
-      // Fetch subscriptions with lead info
+      // Fetch sales team for admin filter
+      if ((profile.role === 'admin' || profile.role === 'super_admin') && profile.org_id) {
+        const { data: teamData } = await supabase
+          .from('users')
+          .select('id, name')
+          .eq('org_id', profile.org_id)
+          .eq('role', 'sales')
+          .eq('is_approved', true)
+        setSalesTeam(teamData || [])
+      }
+
+      // Fetch subscriptions with lead info and assignee name
       const { data: subsData, error } = await supabase
         .from('customer_subscriptions')
         .select(`
@@ -107,7 +129,10 @@ export default function SubscriptionsPage() {
             name,
             email,
             phone,
-            custom_fields
+            custom_fields,
+            assigned_to,
+            created_by,
+            assignee:users!leads_assigned_to_fkey(name)
           )
         `)
         .eq('org_id', orgData.id)
@@ -115,8 +140,23 @@ export default function SubscriptionsPage() {
 
       if (error) {
         console.error('Error fetching subscriptions:', error)
+        setSubscriptions([])
       } else {
-        setSubscriptions(subsData || [])
+        // Filter client-side for sales reps (only their assigned/created leads)
+        let filteredSubs = (subsData || []).map(sub => ({
+          ...sub,
+          leads: sub.leads ? {
+            ...sub.leads,
+            assignee: (sub.leads as unknown as { assignee: { name: string } | null }).assignee
+          } : null
+        })) as Subscription[]
+        
+        if (profile.role === 'sales') {
+          filteredSubs = filteredSubs.filter(sub => 
+            sub.leads?.assigned_to === profile.id || sub.leads?.created_by === profile.id
+          )
+        }
+        setSubscriptions(filteredSubs)
       }
     } catch (error) {
       console.error('Error:', error)
@@ -136,9 +176,9 @@ export default function SubscriptionsPage() {
     const endDate = parseISO(sub.end_date)
     endDate.setHours(0, 0, 0, 0)
     
-    // Check if lifetime (validity_days >= 36500)
+    // Check if non-recurring (validity_days >= 36500)
     if (sub.validity_days >= 36500) {
-      return { status: 'active', color: 'bg-green-500', label: 'Lifetime' }
+      return { status: 'non_recurring', color: 'bg-gray-500', label: 'Non Recurring' }
     }
     
     if (endDate >= today) {
@@ -150,9 +190,9 @@ export default function SubscriptionsPage() {
 
   // Calculate days remaining
   function getDaysRemaining(sub: Subscription): { days: number; color: string } {
-    // Lifetime subscription
+    // Non-recurring subscription
     if (sub.validity_days >= 36500) {
-      return { days: -1, color: 'text-green-600' } // -1 means lifetime
+      return { days: -1, color: 'text-gray-600' } // -1 means non-recurring
     }
     
     const today = new Date()
@@ -185,12 +225,21 @@ export default function SubscriptionsPage() {
     }
   }
 
-  // Filter subscriptions
-  const filteredSubscriptions = subscriptions.filter(sub => {
-    if (filter === 'all') return true
-    const status = getSubscriptionStatus(sub)
-    return status.status === filter
-  })
+  // Filter subscriptions by status and sales rep
+  const filteredSubscriptions = useMemo(() => {
+    return subscriptions.filter(sub => {
+      // Status filter
+      if (filter !== 'all') {
+        const status = getSubscriptionStatus(sub)
+        if (status.status !== filter) return false
+      }
+      // Sales rep filter (admin only)
+      if (isAdmin && selectedSalesRep !== 'all') {
+        if (sub.leads?.assigned_to !== selectedSalesRep) return false
+      }
+      return true
+    })
+  }, [subscriptions, filter, isAdmin, selectedSalesRep])
 
   if (isLoading) {
     return (
@@ -219,17 +268,34 @@ export default function SubscriptionsPage() {
                 {subscriptions.length} total subscription{subscriptions.length !== 1 ? 's' : ''}
               </CardDescription>
             </div>
-            <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Filter" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="paused">Paused</SelectItem>
-                <SelectItem value="inactive">Expired</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              {/* Sales Rep Filter - Admin Only */}
+              {isAdmin && salesTeam.length > 0 && (
+                <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Sales Rep" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Reps</SelectItem>
+                    {salesTeam.map((rep) => (
+                      <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select value={filter} onValueChange={setFilter}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="non_recurring">Non Recurring</SelectItem>
+                  <SelectItem value="paused">Paused</SelectItem>
+                  <SelectItem value="inactive">Expired</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </CardHeader>
           <CardContent>
             {filteredSubscriptions.length === 0 ? (
@@ -251,7 +317,7 @@ export default function SubscriptionsPage() {
                         <th className="py-3 px-2 font-medium">Period</th>
                         <th className="py-3 px-2 font-medium text-center">Status</th>
                         <th className="py-3 px-2 font-medium text-center">Days Left</th>
-                        <th className="py-3 px-2 font-medium text-center">Actions</th>
+                        {isAdmin && <th className="py-3 px-2 font-medium text-center">Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -283,6 +349,13 @@ export default function SubscriptionsPage() {
                                       {sub.leads.email}
                                     </span>
                                   )}
+                                  {/* Sales Rep Name - Admin Only */}
+                                  {isAdmin && sub.leads?.assignee && (
+                                    <span className="flex items-center gap-1 text-xs text-primary mt-1">
+                                      <UserCircle className="h-3 w-3" />
+                                      {sub.leads.assignee.name}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </td>
@@ -303,7 +376,7 @@ export default function SubscriptionsPage() {
                                   {format(parseISO(sub.start_date), 'dd MMM yyyy')}
                                 </div>
                                 <div className="text-muted-foreground">
-                                  to {sub.validity_days >= 36500 ? 'Lifetime' : format(parseISO(sub.end_date), 'dd MMM yyyy')}
+                                  to {sub.validity_days >= 36500 ? 'Non Recurring' : format(parseISO(sub.end_date), 'dd MMM yyyy')}
                                 </div>
                               </div>
                             </td>
@@ -314,25 +387,27 @@ export default function SubscriptionsPage() {
                             </td>
                             <td className="py-3 px-2 text-center">
                               <span className={`font-semibold ${daysInfo.color}`}>
-                                {daysInfo.days === -1 ? '∞' : daysInfo.days}
+                                {daysInfo.days === -1 ? '-' : daysInfo.days}
                               </span>
                             </td>
-                            <td className="py-3 px-2 text-center">
-                              {(isAdmin || userProfile?.role === 'sales') && statusInfo.status !== 'inactive' && (
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => togglePause(sub.id, sub.status)}
-                                  title={sub.status === 'paused' ? 'Resume' : 'Pause'}
-                                >
-                                  {sub.status === 'paused' ? (
-                                    <Play className="h-4 w-4 text-green-600" />
-                                  ) : (
-                                    <Pause className="h-4 w-4 text-yellow-600" />
-                                  )}
-                                </Button>
-                              )}
-                            </td>
+                            {isAdmin && (
+                              <td className="py-3 px-2 text-center">
+                                {statusInfo.status !== 'inactive' && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => togglePause(sub.id, sub.status)}
+                                    title={sub.status === 'paused' ? 'Resume' : 'Pause'}
+                                  >
+                                    {sub.status === 'paused' ? (
+                                      <Play className="h-4 w-4 text-green-600" />
+                                    ) : (
+                                      <Pause className="h-4 w-4 text-yellow-600" />
+                                    )}
+                                  </Button>
+                                )}
+                              </td>
+                            )}
                           </tr>
                         )
                       })}
@@ -378,6 +453,14 @@ export default function SubscriptionsPage() {
                           </div>
                         )}
 
+                        {/* Sales Rep Name - Admin Only */}
+                        {isAdmin && sub.leads?.assignee && (
+                          <div className="flex items-center gap-1 text-sm text-primary">
+                            <UserCircle className="h-3 w-3" />
+                            <span>Assigned to: {sub.leads.assignee.name}</span>
+                          </div>
+                        )}
+
                         {/* Contact Actions */}
                         <ContactActions 
                           phone={sub.leads?.phone || null}
@@ -394,7 +477,7 @@ export default function SubscriptionsPage() {
                           <div>
                             <p className="text-muted-foreground text-xs">Days Left</p>
                             <p className={`font-semibold ${daysInfo.color}`}>
-                              {daysInfo.days === -1 ? 'Lifetime' : `${daysInfo.days} days`}
+                              {daysInfo.days === -1 ? '-' : `${daysInfo.days} days`}
                             </p>
                           </div>
                           <div>
@@ -411,9 +494,10 @@ export default function SubscriptionsPage() {
                         <div className="flex items-center justify-between pt-2 border-t text-sm">
                           <div className="flex items-center gap-1 text-muted-foreground">
                             <Clock className="h-3 w-3" />
-                            {format(parseISO(sub.start_date), 'dd MMM')} - {sub.validity_days >= 36500 ? 'Lifetime' : format(parseISO(sub.end_date), 'dd MMM yyyy')}
+                            {format(parseISO(sub.start_date), 'dd MMM')} - {sub.validity_days >= 36500 ? 'Non Recurring' : format(parseISO(sub.end_date), 'dd MMM yyyy')}
                           </div>
-                          {(isAdmin || userProfile?.role === 'sales') && statusInfo.status !== 'inactive' && (
+                          {/* Only admin can pause/resume subscriptions */}
+                          {isAdmin && statusInfo.status !== 'inactive' && (
                             <Button
                               size="sm"
                               variant="outline"

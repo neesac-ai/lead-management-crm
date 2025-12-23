@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import { Loader2, Mail, ArrowLeft, CheckCircle } from 'lucide-react'
+import Image from 'next/image'
 
 export default function ForgotPasswordPage() {
   const [isLoading, setIsLoading] = useState(false)
@@ -78,13 +79,9 @@ export default function ForgotPasswordPage() {
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Mobile logo */}
-      <div className="lg:hidden flex items-center gap-3 justify-center mb-8">
-        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-          <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        </div>
-        <span className="text-2xl font-bold tracking-tight">LeadFlow</span>
+      <div className="lg:hidden flex flex-col items-center justify-center mb-8 gap-2">
+        <span className="text-2xl font-bold tracking-tight">BharatCRM</span>
+        <Image src="/neesac-logo.svg" alt="neesac.ai" width={80} height={20} className="opacity-70" />
       </div>
 
       <div className="space-y-2">
@@ -139,6 +136,8 @@ export default function ForgotPasswordPage() {
     </div>
   )
 }
+
+
 
 
 

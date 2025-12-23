@@ -1,6 +1,8 @@
-# LeadFlow CRM
+# BharatCRM
 
-A modern, multi-tenant Lead Management CRM built with Next.js and Supabase.
+**Digitising MSMEs of Bharat** - A product of [neesac.ai](https://neesac.ai)
+
+A modern, multi-tenant Lead Management CRM built with Next.js and Supabase, designed specifically for Indian MSMEs.
 
 ## Features
 
@@ -56,7 +58,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-NEXT_PUBLIC_APP_NAME=LeadFlow CRM
+NEXT_PUBLIC_APP_NAME=BharatCRM
 ```
 
 4. Set up the database:

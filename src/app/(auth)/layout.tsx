@@ -21,44 +21,30 @@ export default function AuthLayout({
         
         <div className="relative z-10 flex flex-col justify-between p-12 xl:p-16 text-white">
           <div>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
-                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-              <span className="text-2xl font-bold tracking-tight">LeadFlow</span>
+            <div className="flex flex-col gap-2 mb-4">
+              <span className="text-3xl font-bold tracking-tight">BharatCRM</span>
+              <span className="text-sm text-white/70">A product of neesac.ai</span>
             </div>
           </div>
           
           <div className="space-y-8">
             <div className="space-y-4 animate-fade-in">
               <h1 className="text-4xl xl:text-5xl font-bold leading-tight">
-                Transform your leads into lasting relationships
+                Digitising MSMEs of Bharat
               </h1>
               <p className="text-lg xl:text-xl text-white/80 max-w-md">
-                Streamline your sales pipeline, automate follow-ups, and close more deals with our intelligent CRM platform.
+                Empowering small businesses with smart CRM solutions. Manage leads, track follow-ups, and grow your business the Bharat way.
               </p>
-            </div>
-            
-            <div className="grid grid-cols-3 gap-6 animate-fade-in animate-delay-200">
-              <div className="space-y-2">
-                <div className="text-3xl xl:text-4xl font-bold">10k+</div>
-                <div className="text-sm text-white/70">Active Users</div>
-              </div>
-              <div className="space-y-2">
-                <div className="text-3xl xl:text-4xl font-bold">50M+</div>
-                <div className="text-sm text-white/70">Leads Managed</div>
-              </div>
-              <div className="space-y-2">
-                <div className="text-3xl xl:text-4xl font-bold">98%</div>
-                <div className="text-sm text-white/70">Satisfaction</div>
-              </div>
             </div>
           </div>
           
-          <div className="flex items-center gap-4 text-sm text-white/60 animate-fade-in animate-delay-300">
-            <span>Trusted by 500+ companies worldwide</span>
+          <div className="animate-fade-in animate-delay-300">
+            <div className="bg-white rounded-lg px-4 py-2 inline-block shadow-lg">
+              <span className="text-xl font-semibold tracking-tight">
+                <span className="text-slate-800">neesac</span>
+                <span className="text-indigo-600">.ai</span>
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -72,6 +58,8 @@ export default function AuthLayout({
     </div>
   );
 }
+
+
 
 
 

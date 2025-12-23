@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -166,11 +167,10 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       )
     }
 
-    if (user?.role === 'admin' || user?.role === 'super_admin') {
-      items.push(
-        { title: 'Settings', href: `${baseUrl}/settings`, icon: <Settings className="w-5 h-5" /> },
-      )
-    }
+    // Settings available for all users (admin, sales)
+    items.push(
+      { title: 'Settings', href: `${baseUrl}/settings`, icon: <Settings className="w-5 h-5" /> },
+    )
 
     return items
   }
@@ -181,11 +181,17 @@ export function Sidebar({ orgSlug }: SidebarProps) {
   const SidebarContent = () => (
     <div className="flex h-full flex-col">
       {/* Logo */}
-      <div className="flex h-16 items-center gap-3 border-b px-6">
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-          <Zap className="w-5 h-5 text-primary-foreground" />
+      <div className="flex h-16 items-center border-b px-6">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xl font-bold">BharatCRM</span>
+          <Image 
+            src="/neesac-logo.svg" 
+            alt="neesac.ai" 
+            width={70} 
+            height={18}
+            className="opacity-70"
+          />
         </div>
-        <span className="text-xl font-bold">LeadFlow</span>
       </div>
 
       {/* Navigation */}
@@ -276,11 +282,9 @@ export function Sidebar({ orgSlug }: SidebarProps) {
         {/* Mobile Header */}
         <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b bg-card lg:hidden">
           <div className="flex h-full items-center justify-between px-4">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                <Zap className="w-5 h-5 text-primary-foreground" />
-              </div>
-              <span className="text-lg font-bold">LeadFlow</span>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-lg font-bold">BharatCRM</span>
+              <Image src="/neesac-logo.svg" alt="neesac.ai" width={60} height={16} className="opacity-70" />
             </div>
             <div className="w-10 h-10 rounded bg-muted animate-pulse" />
           </div>
@@ -289,11 +293,11 @@ export function Sidebar({ orgSlug }: SidebarProps) {
         {/* Desktop Sidebar */}
         <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card hidden lg:block">
           <div className="flex h-full flex-col">
-            <div className="flex h-16 items-center gap-3 border-b px-6">
-              <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-                <Zap className="w-5 h-5 text-primary-foreground" />
+            <div className="flex h-16 items-center border-b px-6">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xl font-bold">BharatCRM</span>
+                <Image src="/neesac-logo.svg" alt="neesac.ai" width={70} height={18} className="opacity-70" />
               </div>
-              <span className="text-xl font-bold">LeadFlow</span>
             </div>
             <div className="flex-1 flex items-center justify-center">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -309,11 +313,9 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       {/* Mobile Header */}
       <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b bg-card lg:hidden">
         <div className="flex h-full items-center justify-between px-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <Zap className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-bold">LeadFlow</span>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-lg font-bold">BharatCRM</span>
+            <Image src="/neesac-logo.svg" alt="neesac.ai" width={60} height={16} className="opacity-70" />
           </div>
           
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
@@ -13,11 +13,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { CalendarDays, User, Loader2, Clock, Phone, Mail, Building2 } from 'lucide-react'
+import { CalendarDays, User, Loader2, Clock, Phone, Mail, Building2, UserCircle } from 'lucide-react'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { formatDistanceToNow } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
 import { toast } from 'sonner'
+
+type SalesUser = {
+  id: string
+  name: string
+}
 
 type FollowUp = {
   id: string
@@ -31,6 +36,8 @@ type FollowUp = {
     phone: string | null
     status: string
     custom_fields: { company?: string } | null
+    assigned_to: string | null
+    assignee?: { name: string } | null
   }
 }
 
@@ -58,6 +65,9 @@ export default function FollowUpsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [userTimezone] = useState(getUserTimezone())
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [salesTeam, setSalesTeam] = useState<SalesUser[]>([])
+  const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
 
   useEffect(() => {
     fetchFollowUps()
@@ -65,6 +75,32 @@ export default function FollowUpsPage() {
 
   const fetchFollowUps = async () => {
     const supabase = createClient()
+    
+    // Get current user role
+    const { data: { user: authUser } } = await supabase.auth.getUser()
+    if (authUser) {
+      const { data: profile } = await supabase
+        .from('users')
+        .select('role, org_id')
+        .eq('auth_id', authUser.id)
+        .single()
+      
+      if (profile) {
+        const adminRole = profile.role === 'admin' || profile.role === 'super_admin'
+        setIsAdmin(adminRole)
+        
+        // Fetch sales team for admin filter
+        if (adminRole && profile.org_id) {
+          const { data: teamData } = await supabase
+            .from('users')
+            .select('id, name')
+            .eq('org_id', profile.org_id)
+            .eq('role', 'sales')
+            .eq('is_approved', true)
+          setSalesTeam(teamData || [])
+        }
+      }
+    }
     
     // Get org ID from slug
     const { data: org } = await supabase
@@ -87,16 +123,34 @@ export default function FollowUpsPage() {
         // Get activities with next_followup for these leads
         const { data } = await supabase
           .from('lead_activities')
-          .select('id, lead_id, next_followup, comments, leads(id, name, email, phone, status, custom_fields)')
+          .select(`
+            id, lead_id, next_followup, comments, 
+            leads(id, name, email, phone, status, custom_fields, assigned_to, assignee:users!leads_assigned_to_fkey(name))
+          `)
           .in('lead_id', leadIds)
           .not('next_followup', 'is', null)
           .order('next_followup', { ascending: true })
 
-        setFollowUps((data || []) as FollowUp[])
+        // Map with assignee info
+        const followUpsWithAssignee = (data || []).map(f => ({
+          ...f,
+          leads: f.leads ? {
+            ...f.leads,
+            assignee: (f.leads as unknown as { assignee: { name: string } | null }).assignee
+          } : null
+        }))
+
+        setFollowUps(followUpsWithAssignee as FollowUp[])
       }
     }
     setIsLoading(false)
   }
+
+  // Filter follow-ups by selected sales rep
+  const filteredFollowUps = useMemo(() => {
+    if (!isAdmin || selectedSalesRep === 'all') return followUps
+    return followUps.filter(f => f.leads?.assigned_to === selectedSalesRep)
+  }, [followUps, isAdmin, selectedSalesRep])
 
   const handleStatusChange = async (leadId: string, newStatus: string) => {
     setUpdatingStatus(leadId)
@@ -134,18 +188,34 @@ export default function FollowUpsPage() {
       
       <div className="flex-1 p-4 lg:p-6">
         <Card>
-          <CardHeader>
-            <CardTitle>Scheduled Follow-ups</CardTitle>
-            <CardDescription>Leads marked for follow-up will appear here</CardDescription>
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <CardTitle>Scheduled Follow-ups</CardTitle>
+              <CardDescription>Leads marked for follow-up will appear here</CardDescription>
+            </div>
+            {/* Sales Rep Filter - Admin Only */}
+            {isAdmin && salesTeam.length > 0 && (
+              <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filter by rep" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sales Reps</SelectItem>
+                  {salesTeam.map((rep) => (
+                    <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
-            ) : followUps.length > 0 ? (
+            ) : filteredFollowUps.length > 0 ? (
               <div className="space-y-3">
-                {followUps.map((followUp) => (
+                {filteredFollowUps.map((followUp) => (
                   <div 
                     key={followUp.id} 
                     className={`p-4 rounded-lg border bg-card ${
@@ -185,9 +255,17 @@ export default function FollowUpsPage() {
 
                     {/* Email */}
                     {followUp.leads?.email && (
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-3">
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
                         <Mail className="h-3 w-3" />
                         <span className="truncate">{followUp.leads.email}</span>
+                      </div>
+                    )}
+
+                    {/* Sales Rep Name - Admin Only */}
+                    {isAdmin && followUp.leads?.assignee && (
+                      <div className="flex items-center gap-1 text-sm text-primary mb-3">
+                        <UserCircle className="h-3 w-3" />
+                        <span>Assigned to: {followUp.leads.assignee.name}</span>
                       </div>
                     )}
 

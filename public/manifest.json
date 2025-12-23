@@ -1,7 +1,7 @@
 {
-  "name": "Lead Management CRM",
-  "short_name": "Lead CRM",
-  "description": "Multi-tenant Lead Management CRM for sales teams",
+  "name": "BharatCRM - Digitising MSMEs of Bharat",
+  "short_name": "BharatCRM",
+  "description": "Empowering MSMEs with smart CRM solutions. A product of neesac.ai",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
@@ -68,6 +68,8 @@
     }
   ]
 }
+
+
 
 
 

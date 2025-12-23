@@ -18,3 +18,5 @@ ALTER TYPE lead_status ADD VALUE IF NOT EXISTS 'call_not_picked';
 -- UPDATE leads SET status = 'demo_completed' WHERE status = 'negotiation';
 
 
+
+

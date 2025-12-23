@@ -27,7 +27,7 @@ export default function SettingsPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <div className="space-y-2">
                 <Label>Platform Name</Label>
-                <Input defaultValue="LeadFlow" />
+                <Input defaultValue="BharatCRM" />
               </div>
               <div className="space-y-2">
                 <Label>Support Email</Label>
@@ -75,6 +75,8 @@ export default function SettingsPage() {
     </div>
   )
 }
+
+
 
 
 

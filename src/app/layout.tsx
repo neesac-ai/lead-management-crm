@@ -11,13 +11,13 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "LeadFlow CRM - Modern Lead Management",
-  description: "A powerful multi-tenant CRM for lead management, sales pipeline, and customer subscriptions.",
+  title: "BharatCRM - Digitising MSMEs of Bharat | by neesac.ai",
+  description: "Empowering MSMEs with smart CRM solutions. Manage leads, track follow-ups, and grow your business the Bharat way. A product of neesac.ai",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Lead CRM",
+    title: "BharatCRM",
   },
   formatDetection: {
     telephone: true,
@@ -52,7 +52,7 @@ export default function RootLayout({
         {/* PWA Meta Tags for iOS */}
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Lead CRM" />
+        <meta name="apple-mobile-web-app-title" content="BharatCRM" />
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
         
         {/* Splash screens for iOS */}

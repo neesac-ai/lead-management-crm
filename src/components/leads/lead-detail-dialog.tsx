@@ -35,6 +35,11 @@ import {
   ExternalLink,
   Package,
   CheckCircle2,
+  Phone,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  FileText,
 } from 'lucide-react'
 import { ContactActions } from './contact-actions'
 import { toast } from 'sonner'
@@ -115,6 +120,20 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   const [amountCredited, setAmountCredited] = useState<string>('')
   const [existingSubscriptionId, setExistingSubscriptionId] = useState<string | null>(null)
   
+  // Call recordings
+  type CallRecording = {
+    id: string
+    phone_number: string
+    duration_seconds: number | null
+    recording_date: string
+    summary: string | null
+    sentiment: 'positive' | 'neutral' | 'negative' | null
+    processing_status: string
+    drive_file_url: string | null
+  }
+  const [callRecordings, setCallRecordings] = useState<CallRecording[]>([])
+  const [isLoadingCalls, setIsLoadingCalls] = useState(false)
+  
   // Calculate end date and pending amount
   const calculateEndDate = (startDate: string, validityDays: string): string => {
     if (!startDate || validityDays === 'lifetime') return ''
@@ -123,8 +142,8 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     return start.toISOString().split('T')[0]
   }
   
-  const subscriptionEndDate = validity === 'lifetime' 
-    ? 'Lifetime' 
+  const subscriptionEndDate = validity === 'non_recurring' 
+    ? 'Non Recurring' 
     : calculateEndDate(subscriptionStartDate, validity)
   
   const amountPending = dealValue && amountCredited 
@@ -159,16 +178,16 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
     setIsGoogleConnected(!!profile?.google_refresh_token)
 
-    // Fetch products for the org
+    // Fetch products for the org - only needed columns
     if (profile?.org_id) {
       const { data: productsData } = await supabase
         .from('products')
-        .select('*')
+        .select('id, name, description')
         .eq('org_id', profile.org_id)
         .eq('is_active', true)
         .order('name')
       
-      setProducts(productsData || [])
+      setProducts((productsData || []) as Product[])
     }
   }
 
@@ -193,12 +212,12 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     }
   }
 
-  // Fetch existing subscription for a deal won lead
+  // Fetch existing subscription for a deal won lead - only needed columns
   const fetchExistingSubscription = async (leadId: string) => {
     const supabase = createClient()
     const { data } = await supabase
       .from('customer_subscriptions')
-      .select('*')
+      .select('id, deal_value, validity_days, start_date, amount_credited')
       .eq('lead_id', leadId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -207,12 +226,31 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     if (data) {
       setExistingSubscriptionId(data.id)
       setDealValue(data.deal_value?.toString() || '')
-      setValidity(data.validity_days >= 36500 ? 'lifetime' : data.validity_days.toString())
+      setValidity(data.validity_days >= 36500 ? 'non_recurring' : data.validity_days.toString())
       setSubscriptionStartDate(data.start_date || '')
       setAmountCredited(data.amount_credited?.toString() || '0')
     } else {
       setExistingSubscriptionId(null)
     }
+  }
+
+  // Fetch call recordings for this lead
+  const fetchCallRecordings = async (leadId: string) => {
+    setIsLoadingCalls(true)
+    const supabase = createClient()
+    const { data, error } = await supabase
+      .from('call_recordings')
+      .select('id, phone_number, duration_seconds, recording_date, summary, sentiment, processing_status, drive_file_url')
+      .eq('lead_id', leadId)
+      .order('recording_date', { ascending: false })
+      .limit(10)
+    
+    if (error) {
+      console.error('Error fetching call recordings:', error)
+    } else {
+      setCallRecordings(data || [])
+    }
+    setIsLoadingCalls(false)
   }
 
   const connectGoogle = async () => {
@@ -330,6 +368,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       setExistingSubscriptionId(null)
       
       fetchActivities(lead.id)
+      fetchCallRecordings(lead.id)
       checkGoogleConnection()
       // Fetch last product used for this lead
       fetchLastProduct(lead.id)
@@ -473,8 +512,8 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
         return
       }
 
-      const validityDays = validity === 'lifetime' ? 36500 : parseInt(validity) // 100 years for lifetime
-      const endDateValue = validity === 'lifetime' 
+      const validityDays = validity === 'non_recurring' ? 36500 : parseInt(validity) // 100 years for non-recurring
+      const endDateValue = validity === 'non_recurring' 
         ? new Date(new Date(subscriptionStartDate).getTime() + 36500 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         : calculateEndDate(subscriptionStartDate, validity)
 
@@ -488,7 +527,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
             validity_days: validityDays,
             deal_value: parseFloat(dealValue),
             amount_credited: parseFloat(amountCredited || '0'),
-            notes: validity === 'lifetime' ? 'Lifetime subscription' : null,
+            notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existingSubscriptionId)
@@ -520,7 +559,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
               deal_value: parseFloat(dealValue),
               amount_credited: parseFloat(amountCredited || '0'),
               // amount_pending is auto-calculated by the database (deal_value - amount_credited)
-              notes: validity === 'lifetime' ? 'Lifetime subscription' : null,
+              notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
             })
 
           if (subError) {
@@ -583,9 +622,10 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
         </DialogHeader>
 
         <Tabs defaultValue="details" className="mt-4">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="details">Details & Actions</TabsTrigger>
-            <TabsTrigger value="history">Activity History</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="details">Details</TabsTrigger>
+            <TabsTrigger value="calls">Calls</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
           <TabsContent value="details" className="space-y-4 mt-4">
@@ -890,7 +930,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                         <SelectItem value="90">90 Days</SelectItem>
                         <SelectItem value="180">180 Days</SelectItem>
                         <SelectItem value="365">365 Days (1 Year)</SelectItem>
-                        <SelectItem value="lifetime">Lifetime</SelectItem>
+                        <SelectItem value="non_recurring">Non Recurring</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -953,6 +993,80 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   onChange={(e) => setComment(e.target.value)}
                   rows={3}
                 />
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="calls" className="mt-4">
+            {isLoadingCalls ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : callRecordings.length > 0 ? (
+              <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                {callRecordings.map((call) => {
+                  const formatDuration = (seconds: number | null) => {
+                    if (!seconds) return '--:--'
+                    const mins = Math.floor(seconds / 60)
+                    const secs = seconds % 60
+                    return `${mins}:${secs.toString().padStart(2, '0')}`
+                  }
+                  
+                  const getSentimentIcon = () => {
+                    switch (call.sentiment) {
+                      case 'positive': return <TrendingUp className="w-4 h-4 text-green-500" />
+                      case 'negative': return <TrendingDown className="w-4 h-4 text-red-500" />
+                      default: return <Minus className="w-4 h-4 text-yellow-500" />
+                    }
+                  }
+                  
+                  return (
+                    <div 
+                      key={call.id} 
+                      className="p-3 border rounded-lg bg-card"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-4 h-4 text-muted-foreground" />
+                          <span className="font-medium text-sm">
+                            {new Date(call.recording_date).toLocaleDateString()}
+                          </span>
+                          {call.processing_status === 'completed' && getSentimentIcon()}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            {formatDuration(call.duration_seconds)}
+                          </span>
+                          {call.drive_file_url && (
+                            <a 
+                              href={call.drive_file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                      {call.summary ? (
+                        <p className="text-sm text-muted-foreground line-clamp-2">{call.summary}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic">
+                          {call.processing_status === 'pending' ? 'Pending analysis' : 
+                           call.processing_status === 'processing' ? 'Analyzing...' : 
+                           call.processing_status === 'failed' ? 'Analysis failed' : 'No summary'}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                <Phone className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p>No call recordings found</p>
+                <p className="text-xs mt-1">Sync call recordings from Google Drive</p>
               </div>
             )}
           </TabsContent>

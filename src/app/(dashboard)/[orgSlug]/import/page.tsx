@@ -5,8 +5,10 @@ import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, AlertTriangle, X, UserCheck, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from 'sonner'
 
 type ParsedLead = {
@@ -17,6 +19,25 @@ type ParsedLead = {
   source?: string
 }
 
+type DuplicateInfo = {
+  lead: ParsedLead
+  existingId: string
+  existingName: string
+  assignedTo: string | null
+  assigneeName: string | null
+}
+
+type ImportPreview = {
+  newLeads: ParsedLead[]
+  duplicates: DuplicateInfo[]
+}
+
+type UserProfile = {
+  id: string
+  role: string
+  org_id: string
+}
+
 export default function ImportPage() {
   const params = useParams()
   const orgSlug = params.orgSlug as string
@@ -24,12 +45,19 @@ export default function ImportPage() {
   
   const [isDragging, setIsDragging] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [importResult, setImportResult] = useState<{ success: number; failed: number } | null>(null)
+  const [importResult, setImportResult] = useState<{ success: number; failed: number; skipped: number } | null>(null)
   const [orgId, setOrgId] = useState<string | null>(null)
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  
+  // Import preview state (for admin)
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
+  const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    const fetchOrg = async () => {
+    const fetchData = async () => {
       const supabase = createClient()
+      
+      // Get org
       const { data: org } = await supabase
         .from('organizations')
         .select('id')
@@ -37,8 +65,22 @@ export default function ImportPage() {
         .single()
       
       if (org) setOrgId(org.id)
+      
+      // Get user profile
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('users')
+          .select('id, role, org_id')
+          .eq('auth_id', user.id)
+          .single()
+        
+        if (profile) {
+          setUserProfile(profile as UserProfile)
+        }
+      }
     }
-    fetchOrg()
+    fetchData()
   }, [orgSlug])
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -62,8 +104,23 @@ export default function ImportPage() {
     setIsDragging(false)
   }
 
+  // Normalize phone number for comparison
+  const normalizePhone = (phone: string): string => {
+    const cleaned = phone.replace(/[^\d+]/g, '')
+    if (cleaned.length === 10 && /^[6-9]/.test(cleaned)) {
+      return '+91' + cleaned
+    }
+    if (cleaned.length === 12 && cleaned.startsWith('91')) {
+      return '+' + cleaned
+    }
+    if (!cleaned.startsWith('+') && cleaned.length > 10) {
+      return '+' + cleaned
+    }
+    return cleaned
+  }
+
   const processFile = async (file: File) => {
-    if (!orgId) {
+    if (!orgId || !userProfile) {
       toast.error('Organization not found')
       return
     }
@@ -76,6 +133,7 @@ export default function ImportPage() {
 
     setIsProcessing(true)
     setImportResult(null)
+    setImportPreview(null)
 
     try {
       const text = await file.text()
@@ -88,38 +146,67 @@ export default function ImportPage() {
       }
 
       const supabase = createClient()
-      let success = 0
-      let failed = 0
+      
+      // Fetch existing leads to check for duplicates
+      const { data: existingLeads } = await supabase
+        .from('leads')
+        .select('id, name, phone, assigned_to')
+        .eq('org_id', orgId)
+      
+      // Get user names for assigned leads
+      const assignedUserIds = new Set(existingLeads?.filter(l => l.assigned_to).map(l => l.assigned_to) || [])
+      let userNames: Record<string, string> = {}
+      if (assignedUserIds.size > 0) {
+        const { data: users } = await supabase
+          .from('users')
+          .select('id, name')
+          .in('id', Array.from(assignedUserIds))
+        users?.forEach(u => { userNames[u.id] = u.name })
+      }
+
+      // Build phone lookup map
+      const phoneToExisting = new Map<string, { id: string; name: string; assigned_to: string | null }>()
+      existingLeads?.forEach(lead => {
+        if (lead.phone) {
+          phoneToExisting.set(normalizePhone(lead.phone), {
+            id: lead.id,
+            name: lead.name,
+            assigned_to: lead.assigned_to,
+          })
+        }
+      })
+
+      // Categorize leads
+      const newLeads: ParsedLead[] = []
+      const duplicates: DuplicateInfo[] = []
 
       for (const lead of leads) {
-        const { error } = await supabase
-          .from('leads')
-          .insert({
-            org_id: orgId,
-            name: lead.name,
-            email: lead.email || null,
-            phone: lead.phone || null,
-            source: lead.source || 'import',
-            status: 'new',
-            custom_fields: { company: lead.company || null },
-          })
-
-        if (error) {
-          failed++
-          console.error('Failed to import lead:', lead.name, error)
-        } else {
-          success++
+        if (lead.phone) {
+          const normalized = normalizePhone(lead.phone)
+          const existing = phoneToExisting.get(normalized)
+          if (existing) {
+            duplicates.push({
+              lead,
+              existingId: existing.id,
+              existingName: existing.name,
+              assignedTo: existing.assigned_to,
+              assigneeName: existing.assigned_to ? userNames[existing.assigned_to] || null : null,
+            })
+            continue
+          }
         }
+        newLeads.push(lead)
       }
 
-      setImportResult({ success, failed })
-      
-      if (success > 0) {
-        toast.success(`Imported ${success} leads successfully`)
+      // For admin - show preview if there are duplicates
+      if (userProfile.role === 'admin' && duplicates.length > 0) {
+        setImportPreview({ newLeads, duplicates })
+        setIsProcessing(false)
+        return
       }
-      if (failed > 0) {
-        toast.error(`Failed to import ${failed} leads`)
-      }
+
+      // For sales or no duplicates - import directly
+      await importLeads(newLeads, duplicates.length)
     } catch (error) {
       console.error('Import error:', error)
       toast.error('Failed to process file')
@@ -129,6 +216,83 @@ export default function ImportPage() {
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
+  }
+
+  const importLeads = async (leads: ParsedLead[], skippedCount: number = 0) => {
+    if (!orgId || !userProfile) return
+
+    setIsProcessing(true)
+    const supabase = createClient()
+    let success = 0
+    let failed = 0
+
+    for (const lead of leads) {
+      const { error } = await supabase
+        .from('leads')
+        .insert({
+          org_id: orgId,
+          name: lead.name,
+          email: lead.email || null,
+          phone: lead.phone || null,
+          source: lead.source || 'import',
+          status: 'new',
+          custom_fields: { company: lead.company || null },
+          created_by: userProfile.id,
+        })
+
+      if (error) {
+        failed++
+        console.error('Failed to import lead:', lead.name, error)
+      } else {
+        success++
+      }
+    }
+
+    setImportResult({ success, failed, skipped: skippedCount })
+    setImportPreview(null)
+    setSelectedDuplicates(new Set())
+    
+    if (success > 0) {
+      toast.success(`Imported ${success} leads successfully`)
+    }
+    if (skippedCount > 0) {
+      toast.info(`${skippedCount} duplicate leads skipped`)
+    }
+    if (failed > 0) {
+      toast.error(`Failed to import ${failed} leads`)
+    }
+
+    setIsProcessing(false)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleImportWithDuplicates = async () => {
+    if (!importPreview) return
+    
+    // Get selected duplicates to add anyway
+    const leadsToImport = [
+      ...importPreview.newLeads,
+      ...importPreview.duplicates
+        .filter(d => selectedDuplicates.has(d.existingId))
+        .map(d => d.lead)
+    ]
+    
+    const skipped = importPreview.duplicates.length - selectedDuplicates.size
+    await importLeads(leadsToImport, skipped)
+  }
+
+  const toggleDuplicateSelection = (id: string) => {
+    setSelectedDuplicates(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
   }
 
   const parseCSV = (text: string): ParsedLead[] => {
@@ -197,14 +361,110 @@ export default function ImportPage() {
                     Please wait while we import your leads
                   </p>
                 </>
+              ) : importPreview ? (
+                <div className="text-left">
+                  <div className="flex items-center gap-2 mb-4">
+                    <AlertTriangle className="h-6 w-6 text-amber-500" />
+                    <h3 className="text-lg font-medium">Import Preview</h3>
+                  </div>
+                  
+                  {/* Summary */}
+                  <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                      <div className="flex items-center gap-2 text-green-700">
+                        <CheckCircle className="h-5 w-5" />
+                        <span className="font-medium">{importPreview.newLeads.length} New Leads</span>
+                      </div>
+                      <p className="text-sm text-green-600 mt-1">Ready to import</p>
+                    </div>
+                    <div className="p-4 bg-amber-50 rounded-lg border border-amber-200">
+                      <div className="flex items-center gap-2 text-amber-700">
+                        <AlertTriangle className="h-5 w-5" />
+                        <span className="font-medium">{importPreview.duplicates.length} Duplicates</span>
+                      </div>
+                      <p className="text-sm text-amber-600 mt-1">Phone already exists</p>
+                    </div>
+                  </div>
+
+                  {/* Duplicates List */}
+                  {importPreview.duplicates.length > 0 && (
+                    <div className="mb-6">
+                      <h4 className="font-medium mb-2 flex items-center gap-2">
+                        <Users className="h-4 w-4" />
+                        Duplicate Leads (select to add anyway)
+                      </h4>
+                      <div className="max-h-[200px] overflow-y-auto space-y-2 border rounded-lg p-2">
+                        {importPreview.duplicates.map((dup, idx) => (
+                          <div 
+                            key={idx}
+                            className={`p-3 rounded-lg border ${
+                              selectedDuplicates.has(dup.existingId) 
+                                ? 'bg-primary/5 border-primary' 
+                                : 'bg-muted/50'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <Checkbox
+                                checked={selectedDuplicates.has(dup.existingId)}
+                                onCheckedChange={() => toggleDuplicateSelection(dup.existingId)}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-medium truncate">{dup.lead.name}</span>
+                                  <Badge variant="outline" className="shrink-0">
+                                    {dup.lead.phone}
+                                  </Badge>
+                                </div>
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  Existing: <span className="text-foreground">{dup.existingName}</span>
+                                  {dup.assignedTo && (
+                                    <span className="ml-2">
+                                      → <UserCheck className="inline h-3 w-3" /> {dup.assigneeName}
+                                    </span>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {selectedDuplicates.size} selected to add, {importPreview.duplicates.length - selectedDuplicates.size} will be skipped
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-3 justify-end">
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        setImportPreview(null)
+                        setSelectedDuplicates(new Set())
+                      }}
+                    >
+                      <X className="h-4 w-4 mr-2" />
+                      Cancel
+                    </Button>
+                    <Button onClick={handleImportWithDuplicates}>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Import {importPreview.newLeads.length + selectedDuplicates.size} Leads
+                    </Button>
+                  </div>
+                </div>
               ) : importResult ? (
                 <>
                   <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-500" />
                   <p className="text-lg font-medium mb-2">Import Complete</p>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    {importResult.success} leads imported successfully
-                    {importResult.failed > 0 && `, ${importResult.failed} failed`}
-                  </p>
+                  <div className="text-sm text-muted-foreground mb-4 space-y-1">
+                    <p className="text-green-600">{importResult.success} leads imported successfully</p>
+                    {importResult.skipped > 0 && (
+                      <p className="text-amber-600">{importResult.skipped} duplicates skipped</p>
+                    )}
+                    {importResult.failed > 0 && (
+                      <p className="text-red-600">{importResult.failed} failed to import</p>
+                    )}
+                  </div>
                   <Button onClick={() => setImportResult(null)}>
                     Import More
                   </Button>

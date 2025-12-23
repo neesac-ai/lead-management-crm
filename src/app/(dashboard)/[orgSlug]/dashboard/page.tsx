@@ -93,14 +93,14 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     followupsQuery,
     supabase
       .from('customer_subscriptions')
-      .select('id, status, deal_value')
+      .select('id, status, deal_value, leads(assigned_to, created_by)')
       .eq('org_id', org.id),
   ])
 
   type LeadData = { id: string; status: string }
   type DemoData = { id: string; status: string; scheduled_at: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
   type FollowupCountData = { id: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
-  type SubscriptionData = { id: string; status: string; deal_value: number }
+  type SubscriptionData = { id: string; status: string; deal_value: number; leads: { assigned_to: string | null; created_by: string | null } | null }
 
   const leadsData = (leadsResult.data || []) as LeadData[]
   const demosData = (demosResult.data || []) as DemoData[]
@@ -128,8 +128,16 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   }
   const upcomingFollowups = filteredFollowups.length
   
-  const activeSubscriptions = subscriptionsData.filter(s => s.status === 'active').length
-  const totalRevenue = subscriptionsData.reduce((sum, s) => sum + (s.deal_value || 0), 0)
+  // Filter subscriptions for sales users (only their assigned/created leads)
+  let filteredSubscriptions = subscriptionsData
+  if (!isAdmin && profile?.id) {
+    filteredSubscriptions = subscriptionsData.filter(s => 
+      s.leads?.assigned_to === profile.id || s.leads?.created_by === profile.id
+    )
+  }
+  
+  const activeSubscriptions = filteredSubscriptions.filter(s => s.status === 'active').length
+  const totalRevenue = filteredSubscriptions.reduce((sum, s) => sum + (s.deal_value || 0), 0)
 
   const stats = [
     {
@@ -494,38 +502,6 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
           </Card>
         </div>
 
-        {/* Quick Actions */}
-        <Card className="animate-fade-in animate-delay-300">
-          <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
-            <CardDescription>Common tasks you can perform</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap gap-3">
-              <Link href={`/${orgSlug}/leads/new`}>
-                <Button>
-                  <Target className="mr-2 h-4 w-4" />
-                  Add New Lead
-                </Button>
-              </Link>
-              <Link href={`/${orgSlug}/import`}>
-                <Button variant="outline">
-                  Import Leads
-                </Button>
-              </Link>
-              <Link href={`/${orgSlug}/demos/new`}>
-                <Button variant="outline">
-                  Schedule Demo
-                </Button>
-              </Link>
-              <Link href={`/${orgSlug}/subscriptions/new`}>
-                <Button variant="outline">
-                  Create Subscription
-                </Button>
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   )

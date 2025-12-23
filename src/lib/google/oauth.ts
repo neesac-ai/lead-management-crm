@@ -4,6 +4,7 @@ import { google } from 'googleapis'
 const SCOPES = [
   'https://www.googleapis.com/auth/calendar',
   'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/drive.readonly', // Read access to Google Drive for call recordings
 ]
 
 export function getOAuth2Client() {
@@ -51,6 +52,7 @@ export function getAuthenticatedClient(accessToken: string, refreshToken?: strin
   })
   return oauth2Client
 }
+
 
 
 

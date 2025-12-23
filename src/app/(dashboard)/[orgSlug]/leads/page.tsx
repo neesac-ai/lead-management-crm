@@ -19,6 +19,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -26,7 +36,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { LeadDetailDialog } from '@/components/leads/lead-detail-dialog'
-import { Target, Plus, Loader2, Phone, Mail, User, UserCircle } from 'lucide-react'
+import { Target, Plus, Loader2, Phone, Mail, User, UserCircle, AlertTriangle, Upload } from 'lucide-react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 
 type Lead = {
@@ -48,6 +59,14 @@ type UserProfile = {
   id: string
   role: string
   org_id: string
+}
+
+type DuplicateLead = {
+  id: string
+  name: string
+  phone: string | null
+  assigned_to: string | null
+  assignee_name: string | null
 }
 
 const statusColors: Record<string, string> = {
@@ -82,6 +101,11 @@ export default function LeadsPage() {
     source: 'manual',
     status: 'new',
   })
+  
+  // Duplicate detection state
+  const [duplicateLead, setDuplicateLead] = useState<DuplicateLead | null>(null)
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
+  const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
 
   useEffect(() => {
     fetchUserAndLeads()
@@ -111,64 +135,21 @@ export default function LeadsPage() {
   const fetchLeads = async (profile: UserProfile) => {
     const supabase = createClient()
     
-    // First get leads
+    // Use a single query with JOIN for users - much faster than N+1 queries
+    // Using foreign key relationships defined in Supabase
     let query = supabase
       .from('leads')
-      .select('id, name, email, phone, source, status, custom_fields, created_at, created_by, assigned_to')
+      .select(`
+        id, name, email, phone, source, status, custom_fields, created_at, created_by, assigned_to,
+        creator:users!leads_created_by_fkey(name),
+        assignee:users!leads_assigned_to_fkey(name)
+      `)
       .eq('org_id', profile.org_id)
       .order('created_at', { ascending: false })
 
-    // Sales can only see leads assigned to them or created by them
+    // Sales can only see leads assigned to them or created by them - single query with OR
     if (profile.role === 'sales') {
-      // Fetch leads assigned to this sales person
-      const { data: assignedLeads } = await supabase
-        .from('leads')
-        .select('id, name, email, phone, source, status, custom_fields, created_at, created_by, assigned_to')
-        .eq('org_id', profile.org_id)
-        .eq('assigned_to', profile.id)
-        .order('created_at', { ascending: false })
-
-      // Fetch leads created by this sales person
-      const { data: createdLeads } = await supabase
-        .from('leads')
-        .select('id, name, email, phone, source, status, custom_fields, created_at, created_by, assigned_to')
-        .eq('org_id', profile.org_id)
-        .eq('created_by', profile.id)
-        .order('created_at', { ascending: false })
-
-      // Combine and deduplicate
-      const allLeads = [...(assignedLeads || []), ...(createdLeads || [])]
-      const uniqueLeads = allLeads.filter((lead, index, self) => 
-        index === self.findIndex(l => l.id === lead.id)
-      )
-
-      // Get user names
-      const userIds = new Set<string>()
-      uniqueLeads.forEach(lead => {
-        if (lead.created_by) userIds.add(lead.created_by)
-        if (lead.assigned_to) userIds.add(lead.assigned_to)
-      })
-
-      let usersMap: Record<string, string> = {}
-      if (userIds.size > 0) {
-        const { data: usersData } = await supabase
-          .from('users')
-          .select('id, name')
-          .in('id', Array.from(userIds))
-        
-        usersData?.forEach(u => {
-          usersMap[u.id] = u.name
-        })
-      }
-
-      const leadsWithUsers = uniqueLeads.map(lead => ({
-        ...lead,
-        creator: lead.created_by ? { name: usersMap[lead.created_by] || 'Unknown' } : null,
-        assignee: lead.assigned_to ? { name: usersMap[lead.assigned_to] || 'Unknown' } : null,
-      }))
-
-      setLeads(leadsWithUsers as Lead[])
-      return
+      query = query.or(`assigned_to.eq.${profile.id},created_by.eq.${profile.id}`)
     }
 
     const { data: leadsData, error } = await query
@@ -179,37 +160,99 @@ export default function LeadsPage() {
       return
     }
 
-    // Get user names for created_by and assigned_to
-    const userIds = new Set<string>()
-    leadsData?.forEach(lead => {
-      if (lead.created_by) userIds.add(lead.created_by)
-      if (lead.assigned_to) userIds.add(lead.assigned_to)
-    })
-
-    let usersMap: Record<string, string> = {}
-    if (userIds.size > 0) {
-      const { data: usersData } = await supabase
-        .from('users')
-        .select('id, name')
-        .in('id', Array.from(userIds))
-      
-      usersData?.forEach(u => {
-        usersMap[u.id] = u.name
-      })
-    }
-
-    // Map leads with creator/assignee names
+    // Map leads - relationships already included
     const leadsWithUsers = (leadsData || []).map(lead => ({
       ...lead,
-      creator: lead.created_by ? { name: usersMap[lead.created_by] || 'Unknown' } : null,
-      assignee: lead.assigned_to ? { name: usersMap[lead.assigned_to] || 'Unknown' } : null,
+      creator: lead.creator as { name: string } | null,
+      assignee: lead.assignee as { name: string } | null,
     }))
 
     setLeads(leadsWithUsers as Lead[])
   }
 
+  // Normalize phone number for comparison
+  const normalizePhone = (phone: string): string => {
+    const cleaned = phone.replace(/[^\d+]/g, '')
+    if (cleaned.length === 10 && /^[6-9]/.test(cleaned)) {
+      return '+91' + cleaned
+    }
+    if (cleaned.length === 12 && cleaned.startsWith('91')) {
+      return '+' + cleaned
+    }
+    if (!cleaned.startsWith('+') && cleaned.length > 10) {
+      return '+' + cleaned
+    }
+    return cleaned
+  }
+
+  // Check for duplicate phone number - optimized with single query
+  const checkDuplicate = async (phone: string): Promise<DuplicateLead | null> => {
+    if (!phone || !orgId) return null
+    
+    const supabase = createClient()
+    const normalizedPhone = normalizePhone(phone)
+    
+    // Search for leads with matching phone using ILIKE for flexibility
+    // Also join with users to get assignee name in single query
+    const { data: matches } = await supabase
+      .from('leads')
+      .select(`
+        id, name, phone, assigned_to,
+        assignee:users!leads_assigned_to_fkey(name)
+      `)
+      .eq('org_id', orgId)
+      .or(`phone.ilike.%${phone.replace(/[^\d]/g, '').slice(-10)}%`)
+      .limit(5)
+    
+    // Find exact match with normalized phone
+    const match = matches?.find(lead => {
+      if (!lead.phone) return false
+      return normalizePhone(lead.phone) === normalizedPhone
+    })
+    
+    if (!match) return null
+    
+    return {
+      id: match.id,
+      name: match.name,
+      phone: match.phone,
+      assigned_to: match.assigned_to,
+      assignee_name: (match.assignee as { name: string } | null)?.name || null,
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!orgId || !userProfile) return
+
+    // First check for duplicates
+    setIsCheckingDuplicate(true)
+    const duplicate = await checkDuplicate(formData.phone)
+    setIsCheckingDuplicate(false)
+    
+    if (duplicate) {
+      setDuplicateLead(duplicate)
+      
+      // For sales rep - just show message and skip
+      if (userProfile.role === 'sales') {
+        if (duplicate.assigned_to) {
+          toast.error(`Lead already assigned to ${duplicate.assignee_name || 'another rep'}. Skipped.`)
+        } else {
+          toast.error('Lead already exists in the system. Skipped.')
+        }
+        return
+      }
+      
+      // For admin - show dialog with options
+      setShowDuplicateDialog(true)
+      return
+    }
+    
+    // No duplicate - proceed with adding
+    await addLead()
+  }
+  
+  const addLead = async (forceAdd = false) => {
     if (!orgId || !userProfile) return
 
     setIsSaving(true)
@@ -239,9 +282,30 @@ export default function LeadsPage() {
       toast.success('Lead added successfully')
       setFormData({ name: '', company: '', email: '', phone: '', source: 'manual', status: 'new' })
       setIsDialogOpen(false)
+      setShowDuplicateDialog(false)
+      setDuplicateLead(null)
       fetchLeads(userProfile)
     }
     setIsSaving(false)
+  }
+  
+  const handleDuplicateAction = async (action: 'ignore' | 'add_anyway' | 'view_existing') => {
+    if (action === 'ignore') {
+      setShowDuplicateDialog(false)
+      setDuplicateLead(null)
+      toast.info('Lead skipped')
+    } else if (action === 'add_anyway') {
+      await addLead(true)
+    } else if (action === 'view_existing' && duplicateLead) {
+      // Find and open the existing lead
+      const existing = leads.find(l => l.id === duplicateLead.id)
+      if (existing) {
+        setSelectedLead(existing)
+        setIsDetailOpen(true)
+      }
+      setShowDuplicateDialog(false)
+      setDuplicateLead(null)
+    }
   }
 
   const isAdmin = userProfile?.role === 'admin'
@@ -271,13 +335,22 @@ export default function LeadsPage() {
                 {isAdmin ? 'All leads from various sources' : 'Your assigned leads'}
               </CardDescription>
             </div>
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Lead
-                </Button>
-              </DialogTrigger>
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <Link href={`/${orgSlug}/import`}>
+                  <Button variant="outline">
+                    <Upload className="mr-2 h-4 w-4" />
+                    Import
+                  </Button>
+                </Link>
+              )}
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Lead
+                  </Button>
+                </DialogTrigger>
               <DialogContent>
                 <form onSubmit={handleSubmit}>
                   <DialogHeader>
@@ -370,7 +443,8 @@ export default function LeadsPage() {
                   </DialogFooter>
                 </form>
               </DialogContent>
-            </Dialog>
+              </Dialog>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -471,9 +545,52 @@ export default function LeadsPage() {
             })
           }
         }}
-        canEditStatus={isSales} // Only sales can edit status
+        canEditStatus={isSales || isAdmin} // Sales and Admin can edit status
         isAdmin={isAdmin} // Admin can unassign leads
       />
+
+      {/* Duplicate Lead Dialog (Admin Only) */}
+      <AlertDialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Duplicate Lead Found
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>A lead with this phone number already exists:</p>
+                <div className="p-3 bg-muted rounded-lg">
+                  <p className="font-medium">{duplicateLead?.name}</p>
+                  <p className="text-sm text-muted-foreground">{duplicateLead?.phone}</p>
+                  {duplicateLead?.assigned_to ? (
+                    <p className="text-sm text-primary mt-1">
+                      Assigned to: {duplicateLead.assignee_name}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-amber-600 mt-1">Unassigned</p>
+                  )}
+                </div>
+                <p className="text-sm">What would you like to do?</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel onClick={() => handleDuplicateAction('ignore')}>
+              Skip / Ignore
+            </AlertDialogCancel>
+            <Button
+              variant="outline"
+              onClick={() => handleDuplicateAction('view_existing')}
+            >
+              View Existing Lead
+            </Button>
+            <AlertDialogAction onClick={() => handleDuplicateAction('add_anyway')}>
+              Add Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
