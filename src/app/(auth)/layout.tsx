@@ -30,7 +30,7 @@ export default function AuthLayout({
           <div className="space-y-8">
             <div className="space-y-4 animate-fade-in">
               <h1 className="text-4xl xl:text-5xl font-bold leading-tight">
-                Digitising MSMEs of Bharat
+                Digitizing MSMEs of Bharat
               </h1>
               <p className="text-lg xl:text-xl text-white/80 max-w-md">
                 Empowering small businesses with smart CRM solutions. Manage leads, track follow-ups, and grow your business the Bharat way.

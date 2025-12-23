@@ -1,6 +1,6 @@
 # BharatCRM
 
-**Digitising MSMEs of Bharat** - A product of [neesac.ai](https://neesac.ai)
+**Digitizing MSMEs of Bharat** - A product of [neesac.ai](https://neesac.ai)
 
 A modern, multi-tenant Lead Management CRM built with Next.js and Supabase, designed specifically for Indian MSMEs.
 

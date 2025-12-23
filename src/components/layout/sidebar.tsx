@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -184,13 +183,9 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       <div className="flex h-16 items-center border-b px-6">
         <div className="flex flex-col gap-0.5">
           <span className="text-xl font-bold">BharatCRM</span>
-          <Image 
-            src="/neesac-logo.svg" 
-            alt="neesac.ai" 
-            width={70} 
-            height={18}
-            className="opacity-70"
-          />
+          <span className="text-[10px] text-muted-foreground">
+            by <span className="font-medium">neesac</span><span className="text-primary">.ai</span>
+          </span>
         </div>
       </div>
 
@@ -284,7 +279,9 @@ export function Sidebar({ orgSlug }: SidebarProps) {
           <div className="flex h-full items-center justify-between px-4">
             <div className="flex flex-col gap-0.5">
               <span className="text-lg font-bold">BharatCRM</span>
-              <Image src="/neesac-logo.svg" alt="neesac.ai" width={60} height={16} className="opacity-70" />
+              <span className="text-[10px] text-muted-foreground">
+                by <span className="font-medium">neesac</span><span className="text-primary">.ai</span>
+              </span>
             </div>
             <div className="w-10 h-10 rounded bg-muted animate-pulse" />
           </div>
@@ -296,7 +293,9 @@ export function Sidebar({ orgSlug }: SidebarProps) {
             <div className="flex h-16 items-center border-b px-6">
               <div className="flex flex-col gap-0.5">
                 <span className="text-xl font-bold">BharatCRM</span>
-                <Image src="/neesac-logo.svg" alt="neesac.ai" width={70} height={18} className="opacity-70" />
+                <span className="text-[10px] text-muted-foreground">
+                  by <span className="font-medium">neesac</span><span className="text-primary">.ai</span>
+                </span>
               </div>
             </div>
             <div className="flex-1 flex items-center justify-center">
@@ -315,7 +314,9 @@ export function Sidebar({ orgSlug }: SidebarProps) {
         <div className="flex h-full items-center justify-between px-4">
           <div className="flex flex-col gap-0.5">
             <span className="text-lg font-bold">BharatCRM</span>
-            <Image src="/neesac-logo.svg" alt="neesac.ai" width={60} height={16} className="opacity-70" />
+            <span className="text-[10px] text-muted-foreground">
+              by <span className="font-medium">neesac</span><span className="text-primary">.ai</span>
+            </span>
           </div>
           
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
