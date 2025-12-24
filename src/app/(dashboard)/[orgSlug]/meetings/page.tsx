@@ -1,0 +1,613 @@
+'use client'
+
+import { useState, useEffect, useMemo } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { Header } from '@/components/layout/header'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Zap, User, Loader2, Clock, Video, Phone, Mail, Building2, UserCircle, Filter, Calendar, Package, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
+import { ContactActions } from '@/components/leads/contact-actions'
+import { formatInTimeZone } from 'date-fns-tz'
+import { toast } from 'sonner'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+
+type SalesUser = {
+  id: string
+  name: string
+}
+
+type Product = {
+  id: string
+  name: string
+}
+
+type Demo = {
+  id: string
+  scheduled_at: string
+  status: string
+  google_meet_link: string | null
+  notes: string | null
+  leads: {
+    id: string
+    name: string
+    email: string | null
+    phone: string | null
+    lead_status: string
+    custom_fields: { company?: string } | null
+    assigned_to: string | null
+    assignee?: { name: string } | null
+  }
+}
+
+const demoStatusColors: Record<string, string> = {
+  scheduled: 'bg-purple-500',
+  completed: 'bg-green-500',
+  cancelled: 'bg-red-500',
+  rescheduled: 'bg-yellow-500',
+}
+
+const LEAD_STATUS_OPTIONS = [
+  { value: 'new', label: 'New' },
+  { value: 'call_not_picked', label: 'Call Not Picked' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'follow_up_again', label: 'Follow Up Again' },
+  { value: 'demo_booked', label: 'Meeting Booked' },
+  { value: 'demo_completed', label: 'Meeting Completed' },
+  { value: 'deal_won', label: 'Deal Won' },
+  { value: 'deal_lost', label: 'Deal Lost' },
+]
+
+const getLeadStatusColor = (status: string) => {
+  const colors: Record<string, string> = {
+    new: 'bg-blue-500',
+    call_not_picked: 'bg-yellow-500',
+    not_interested: 'bg-gray-500',
+    follow_up_again: 'bg-orange-500',
+    demo_booked: 'bg-purple-500',
+    demo_completed: 'bg-indigo-500',
+    deal_won: 'bg-emerald-500',
+    deal_lost: 'bg-red-500',
+  }
+  return colors[status] || 'bg-gray-500'
+}
+
+// Get user's timezone
+const getUserTimezone = () => {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+export default function MeetingsPage() {
+  const params = useParams()
+  const router = useRouter()
+  const orgSlug = params.orgSlug as string
+  
+  const [meetings, setMeetings] = useState<Demo[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [userTimezone] = useState(getUserTimezone())
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [salesTeam, setSalesTeam] = useState<SalesUser[]>([])
+  const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
+  const [products, setProducts] = useState<Product[]>([])
+  const [selectedProduct, setSelectedProduct] = useState<string>('all')
+  const [dateFrom, setDateFrom] = useState<string>('')
+  const [dateTo, setDateTo] = useState<string>('')
+  const [showUpcomingOnly, setShowUpcomingOnly] = useState<boolean>(true)
+  const [showFilters, setShowFilters] = useState(false)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    fetchMeetings()
+  }, [orgSlug])
+
+  const handleDeleteMeeting = async () => {
+    if (!deleteId) return
+    
+    setIsDeleting(true)
+    const supabase = createClient()
+    
+    const { error } = await supabase
+      .from('demos')
+      .delete()
+      .eq('id', deleteId)
+    
+    if (error) {
+      console.error('Error deleting meeting:', error)
+      toast.error('Failed to delete meeting')
+    } else {
+      toast.success('Meeting deleted successfully')
+      setMeetings(prev => prev.filter(m => m.id !== deleteId))
+      // Refresh to invalidate cached pages like dashboard
+      router.refresh()
+    }
+    
+    setIsDeleting(false)
+    setDeleteId(null)
+  }
+
+  const handleLeadStatusChange = async (leadId: string, newStatus: string, meetingId: string) => {
+    const supabase = createClient()
+    
+    // Update lead status
+    const { error } = await supabase
+      .from('leads')
+      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .eq('id', leadId)
+    
+    if (error) {
+      console.error('Error updating lead status:', error)
+      toast.error('Failed to update lead status')
+      return
+    }
+    
+    // If status is no longer "demo_booked" (Meeting Booked), update the meeting status
+    if (newStatus !== 'demo_booked') {
+      // Mark meeting as completed or cancelled based on new status
+      const meetingStatus = newStatus === 'demo_completed' ? 'completed' : 
+                           newStatus === 'deal_won' ? 'completed' :
+                           newStatus === 'deal_lost' ? 'cancelled' : 'completed'
+      
+      await supabase
+        .from('demos')
+        .update({ status: meetingStatus })
+        .eq('id', meetingId)
+      
+      // Remove from local list since it's no longer a scheduled meeting
+      setMeetings(prev => prev.filter(m => m.id !== meetingId))
+      toast.success('Lead status updated and meeting removed from scheduled list')
+    } else {
+      // Just update local state
+      setMeetings(prev => prev.map(m => 
+        m.leads.id === leadId 
+          ? { ...m, leads: { ...m.leads, lead_status: newStatus } }
+          : m
+      ))
+      toast.success('Lead status updated')
+    }
+    
+    router.refresh()
+  }
+
+  const fetchMeetings = async () => {
+    const supabase = createClient()
+    
+    // Get current user profile
+    const { data: { user: authUser } } = await supabase.auth.getUser()
+    if (!authUser) return
+    
+    const { data: profile } = await supabase
+      .from('users')
+      .select('id, role, org_id')
+      .eq('auth_id', authUser.id)
+      .single()
+    
+    if (!profile) return
+    
+    const adminRole = profile.role === 'admin' || profile.role === 'super_admin'
+    setIsAdmin(adminRole)
+    
+    // Fetch sales team for admin filter
+    if (adminRole && profile.org_id) {
+      const { data: teamData } = await supabase
+        .from('users')
+        .select('id, name')
+        .eq('org_id', profile.org_id)
+        .eq('role', 'sales')
+        .eq('is_approved', true)
+        .eq('is_active', true)
+      setSalesTeam(teamData || [])
+    }
+
+    // Fetch products
+    if (profile.org_id) {
+      const { data: productsData } = await supabase
+        .from('products')
+        .select('id, name')
+        .eq('org_id', profile.org_id)
+        .eq('is_active', true)
+        .order('name')
+      setProducts(productsData || [])
+    }
+    
+    // Get org ID from slug
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('id')
+      .eq('slug', orgSlug)
+      .single()
+
+    if (org) {
+      // Build leads query - sales reps only see their assigned leads
+      let leadsQuery = supabase
+        .from('leads')
+        .select('id')
+        .eq('org_id', org.id)
+      
+      // Sales reps only see meetings for leads assigned to them
+      if (!adminRole) {
+        leadsQuery = leadsQuery.eq('assigned_to', profile.id)
+      }
+
+      const { data: leads } = await leadsQuery
+
+      if (leads && leads.length > 0) {
+        const leadIds = leads.map(l => l.id)
+        
+        // Get only scheduled demos for these leads with lead status and assignee info
+        const { data } = await supabase
+          .from('demos')
+          .select(`
+            id, scheduled_at, status, google_meet_link, notes, 
+            leads(id, name, email, phone, status, custom_fields, assigned_to, assignee:users!leads_assigned_to_fkey(name))
+          `)
+          .in('lead_id', leadIds)
+          .eq('status', 'scheduled')
+          .order('scheduled_at', { ascending: true })
+
+        // Map the lead status field
+        const meetingsWithStatus = (data || []).map(meeting => ({
+          ...meeting,
+          leads: meeting.leads ? {
+            ...meeting.leads,
+            lead_status: (meeting.leads as unknown as { status: string }).status,
+            assignee: (meeting.leads as unknown as { assignee: { name: string } | null }).assignee
+          } : null
+        }))
+
+        setMeetings(meetingsWithStatus as Demo[])
+      } else {
+        setMeetings([])
+      }
+    }
+    setIsLoading(false)
+  }
+
+  // Helper functions - defined before useMemo
+  const isUpcoming = (date: string) => new Date(date) > new Date()
+  const isToday = (date: string) => {
+    const d = new Date(date)
+    const today = new Date()
+    return d.toDateString() === today.toDateString()
+  }
+
+  // Filter meetings by all criteria
+  const filteredMeetings = useMemo(() => {
+    return meetings.filter(m => {
+      // Show only upcoming filter
+      if (showUpcomingOnly && !isUpcoming(m.scheduled_at)) return false
+      
+      // Sales rep filter (admin only)
+      if (isAdmin && selectedSalesRep !== 'all') {
+        if (m.leads?.assigned_to !== selectedSalesRep) return false
+      }
+      
+      // Date range filter
+      if (dateFrom) {
+        const meetingDate = new Date(m.scheduled_at)
+        const fromDate = new Date(dateFrom)
+        fromDate.setHours(0, 0, 0, 0)
+        if (meetingDate < fromDate) return false
+      }
+      if (dateTo) {
+        const meetingDate = new Date(m.scheduled_at)
+        const toDate = new Date(dateTo)
+        toDate.setHours(23, 59, 59, 999)
+        if (meetingDate > toDate) return false
+      }
+      
+      return true
+    })
+  }, [meetings, isAdmin, selectedSalesRep, dateFrom, dateTo, showUpcomingOnly])
+
+  // Check if any filter is active
+  const hasActiveFilters = selectedSalesRep !== 'all' || selectedProduct !== 'all' || 
+    dateFrom || dateTo || !showUpcomingOnly
+
+  // Clear all filters
+  const clearAllFilters = () => {
+    setSelectedSalesRep('all')
+    setSelectedProduct('all')
+    setDateFrom('')
+    setDateTo('')
+    setShowUpcomingOnly(true)
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      <Header 
+        title="Meetings" 
+        description="Manage scheduled meetings"
+      />
+      
+      <div className="flex-1 p-4 lg:p-6">
+        <Card>
+          <CardHeader className="flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <CardTitle>Scheduled Meetings</CardTitle>
+                <CardDescription>{filteredMeetings.length} meeting{filteredMeetings.length !== 1 ? 's' : ''}</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Sales Rep Filter - Admin Only */}
+                {isAdmin && salesTeam.length > 0 && (
+                  <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue placeholder="Sales Rep" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Reps</SelectItem>
+                      {salesTeam.map((rep) => (
+                        <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Product Filter */}
+                {products.length > 0 && (
+                  <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                    <SelectTrigger className="w-[140px]">
+                      <Package className="h-4 w-4 mr-2" />
+                      <SelectValue placeholder="Product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Products</SelectItem>
+                      {products.map((product) => (
+                        <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={showFilters ? 'bg-primary/10' : ''}
+                >
+                  <Filter className="h-4 w-4 mr-1" />
+                  More
+                </Button>
+
+                {hasActiveFilters && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={clearAllFilters}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Extended Filters */}
+            {showFilters && (
+              <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
+                {/* Show Upcoming Only */}
+                <div className="flex items-center gap-2">
+                  <Checkbox 
+                    id="upcoming-only"
+                    checked={showUpcomingOnly} 
+                    onCheckedChange={(checked) => setShowUpcomingOnly(checked === true)}
+                  />
+                  <Label htmlFor="upcoming-only" className="text-sm cursor-pointer">
+                    Upcoming only
+                  </Label>
+                </div>
+
+                {/* Date Range Filter */}
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="w-[140px] h-9"
+                    placeholder="From"
+                  />
+                  <span className="text-muted-foreground">to</span>
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="w-[140px] h-9"
+                    placeholder="To"
+                  />
+                </div>
+              </div>
+            )}
+          </CardHeader>
+          <CardContent>
+            {isLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : filteredMeetings.length > 0 ? (
+              <div className="space-y-3">
+                {filteredMeetings.map((meeting) => (
+                  <div 
+                    key={meeting.id} 
+                    className={`p-4 rounded-lg border bg-card ${
+                      isToday(meeting.scheduled_at) && meeting.status === 'scheduled' 
+                        ? 'border-purple-500/50 bg-purple-500/5' : ''
+                    }`}
+                  >
+                    {/* Top row: Phone (primary) + Meeting Status */}
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-4 w-4 text-primary shrink-0" />
+                          <p className="font-semibold truncate text-lg">{meeting.leads?.phone}</p>
+                        </div>
+                        {meeting.leads?.name && meeting.leads.name !== meeting.leads.phone && (
+                          <p className="text-sm text-muted-foreground truncate mt-0.5">
+                            {meeting.leads.name}
+                          </p>
+                        )}
+                        {meeting.leads?.custom_fields?.company && (
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Building2 className="h-3 w-3" />
+                            <span className="truncate">{meeting.leads.custom_fields.company}</span>
+                          </div>
+                        )}
+                      </div>
+                      <Badge className={`${demoStatusColors[meeting.status] || 'bg-gray-500'} shrink-0`}>
+                        {meeting.status}
+                      </Badge>
+                    </div>
+
+                    {/* Email */}
+                    {meeting.leads?.email && (
+                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
+                        <Mail className="h-3 w-3" />
+                        <span className="truncate">{meeting.leads.email}</span>
+                      </div>
+                    )}
+
+                    {/* Sales Rep Name - Admin Only */}
+                    {isAdmin && meeting.leads?.assignee && (
+                      <div className="flex items-center gap-1 text-sm text-primary mb-3">
+                        <UserCircle className="h-3 w-3" />
+                        <span>Assigned to: {meeting.leads.assignee.name}</span>
+                      </div>
+                    )}
+
+                    {/* Contact Actions */}
+                    <div className="mb-3">
+                      <ContactActions 
+                        phone={meeting.leads?.phone || null}
+                        email={meeting.leads?.email || null}
+                        name={meeting.leads?.name || ''}
+                      />
+                    </div>
+                    
+                    {/* Lead Status */}
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-sm text-muted-foreground">Lead Status:</span>
+                      {mounted ? (
+                        <Select
+                          value={meeting.leads?.lead_status || 'new'}
+                          onValueChange={(value) => handleLeadStatusChange(meeting.leads.id, value, meeting.id)}
+                        >
+                          <SelectTrigger className="w-[160px] h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {LEAD_STATUS_OPTIONS.map(option => (
+                              <SelectItem key={option.value} value={option.value}>
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-2 h-2 rounded-full ${getLeadStatusColor(option.value)}`} />
+                                  {option.label}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Badge className={getLeadStatusColor(meeting.leads?.lead_status || 'new')}>
+                          {LEAD_STATUS_OPTIONS.find(o => o.value === meeting.leads?.lead_status)?.label || 'New'}
+                        </Badge>
+                      )}
+                    </div>
+
+                    {/* Date/Time */}
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
+                      <Clock className="h-4 w-4 shrink-0" />
+                      <span>{formatInTimeZone(new Date(meeting.scheduled_at), userTimezone, 'MMM d, yyyy')}</span>
+                      <span className="font-medium text-foreground">
+                        {formatInTimeZone(new Date(meeting.scheduled_at), userTimezone, 'h:mm a')}
+                      </span>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-2">
+                      {meeting.google_meet_link && (
+                        <a 
+                          href={meeting.google_meet_link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+                        >
+                          <Video className="h-4 w-4" />
+                          Join Google Meet
+                        </a>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeleteId(meeting.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <Zap className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-lg font-medium">No meetings scheduled</p>
+                <p className="text-sm">Book a meeting from a lead to see it here</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Meeting</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this meeting? This action cannot be undone.
+              The Google Calendar event will remain (you&apos;ll need to delete it manually from your calendar).
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteMeeting}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}

@@ -1,5 +1,16 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+
+type SubscriptionData = {
+  subscription_type: 'trial' | 'paid'
+  validity_days: number
+  sales_quota: number | null
+  accountant_quota: number | null
+  subscription_value: number
+  amount_credited: number
+  start_date: string
+  end_date: string
+}
 
 // Approve or reject organization
 export async function PATCH(
@@ -8,7 +19,8 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params
-    const { action } = await request.json()
+    const body = await request.json()
+    const { action, subscription } = body as { action: string; subscription?: SubscriptionData }
 
     if (!['approve', 'reject', 'suspend'].includes(action)) {
       return NextResponse.json(
@@ -18,6 +30,7 @@ export async function PATCH(
     }
 
     const supabase = await createClient()
+    const adminSupabase = await createAdminClient()
 
     // Check if requester is super admin
     const { data: { user } } = await supabase.auth.getUser()
@@ -25,9 +38,9 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: profile } = await supabase
+    const { data: profile } = await adminSupabase
       .from('users')
-      .select('role')
+      .select('id, role')
       .eq('auth_id', user.id)
       .single()
 
@@ -36,9 +49,9 @@ export async function PATCH(
     }
 
     // Get the organization
-    const { data: org } = await supabase
+    const { data: org } = await adminSupabase
       .from('organizations')
-      .select('id, name')
+      .select('id, name, status')
       .eq('id', id)
       .single()
 
@@ -62,7 +75,7 @@ export async function PATCH(
     }
 
     // Update organization status
-    const { error: updateError } = await supabase
+    const { error: updateError } = await adminSupabase
       .from('organizations')
       .update({ status: newStatus, updated_at: new Date().toISOString() })
       .eq('id', id)
@@ -75,24 +88,43 @@ export async function PATCH(
       )
     }
 
-    // If approved, also approve the admin user
-    if (action === 'approve') {
-      const { data: superAdmin } = await supabase
-        .from('users')
-        .select('id')
-        .eq('auth_id', user.id)
-        .single()
-
-      await supabase
+    // If approved, also approve the admin user and create subscription
+    if (action === 'approve' && org.status === 'pending') {
+      // Approve admin user
+      await adminSupabase
         .from('users')
         .update({ 
           is_approved: true, 
-          approved_by: superAdmin?.id,
+          approved_by: profile?.id,
           approved_at: new Date().toISOString(),
           updated_at: new Date().toISOString() 
         })
         .eq('org_id', id)
         .eq('role', 'admin')
+
+      // Create subscription if provided
+      if (subscription) {
+        const { error: subError } = await adminSupabase
+          .from('org_subscriptions')
+          .insert({
+            org_id: id,
+            subscription_type: subscription.subscription_type,
+            validity_days: subscription.validity_days,
+            sales_quota: subscription.sales_quota,
+            accountant_quota: subscription.accountant_quota,
+            subscription_value: subscription.subscription_value,
+            amount_credited: subscription.amount_credited,
+            start_date: subscription.start_date,
+            end_date: subscription.end_date,
+            status: 'active',
+            created_by: profile?.id,
+          })
+
+        if (subError) {
+          console.error('Error creating subscription:', subError)
+          // Don't fail the approval, but log the error
+        }
+      }
     }
 
     return NextResponse.json({
@@ -116,6 +148,7 @@ export async function DELETE(
   try {
     const { id } = await params
     const supabase = await createClient()
+    const adminSupabase = await createAdminClient()
 
     // Check if requester is super admin
     const { data: { user } } = await supabase.auth.getUser()
@@ -123,7 +156,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: profile } = await supabase
+    const { data: profile } = await adminSupabase
       .from('users')
       .select('role')
       .eq('auth_id', user.id)
@@ -133,8 +166,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Delete the organization (cascade will delete users)
-    const { error } = await supabase
+    // Delete the organization (cascade will delete users and subscriptions)
+    const { error } = await adminSupabase
       .from('organizations')
       .delete()
       .eq('id', id)
@@ -159,11 +192,3 @@ export async function DELETE(
     )
   }
 }
-
-
-
-
-
-
-
-

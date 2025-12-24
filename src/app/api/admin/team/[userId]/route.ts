@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 
 // Approve or reject team member
@@ -58,6 +58,39 @@ export async function PATCH(
     }
 
     if (action === 'approve') {
+      // Check quota before approving
+      const adminClient = await createAdminClient()
+      
+      // Get current approved count for this role
+      const { count: currentCount } = await adminClient
+        .from('users')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', adminProfile.org_id)
+        .eq('role', teamMember.role)
+        .eq('is_approved', true)
+        .eq('is_active', true)
+
+      // Get quota from org_subscriptions
+      const { data: subscription } = await adminClient
+        .from('org_subscriptions')
+        .select('sales_quota, accountant_quota, status')
+        .eq('org_id', adminProfile.org_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (subscription && subscription.status === 'active') {
+        const quota = teamMember.role === 'sales' ? subscription.sales_quota : subscription.accountant_quota
+        
+        // If quota is not null (not unlimited) and current count >= quota, deny approval
+        if (quota !== null && (currentCount || 0) >= quota) {
+          const roleLabel = teamMember.role === 'sales' ? 'Sales Rep' : 'Accountant'
+          return NextResponse.json({ 
+            error: `${roleLabel} quota is full (${currentCount}/${quota}). Cannot approve more team members of this role. Please contact super admin to increase quota.` 
+          }, { status: 400 })
+        }
+      }
+
       const { error: updateError } = await supabase
         .from('users')
         .update({ 
@@ -103,7 +136,7 @@ export async function PATCH(
   }
 }
 
-// Remove team member
+// Deactivate/Reactivate team member
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ userId: string }> }
@@ -126,13 +159,13 @@ export async function DELETE(
       .single()
 
     if (!adminProfile || adminProfile.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admins can remove team members' }, { status: 403 })
+      return NextResponse.json({ error: 'Only admins can manage team members' }, { status: 403 })
     }
 
     // Get the team member
     const { data: teamMember } = await supabase
       .from('users')
-      .select('id, org_id, role')
+      .select('id, org_id, role, is_active')
       .eq('id', userId)
       .single()
 
@@ -145,34 +178,55 @@ export async function DELETE(
       return NextResponse.json({ error: 'User not in your organization' }, { status: 403 })
     }
 
-    // Can't remove another admin
+    // Can't deactivate another admin
     if (teamMember.role === 'admin') {
-      return NextResponse.json({ error: 'Cannot remove admin users' }, { status: 403 })
+      return NextResponse.json({ error: 'Cannot deactivate admin users' }, { status: 403 })
     }
 
-    // Delete user
-    const { error } = await supabase
+    // Use admin client to bypass RLS
+    const adminClient = await createAdminClient()
+
+    // Toggle is_active status
+    const newStatus = !teamMember.is_active
+
+    // If deactivating, unassign all leads from this user
+    if (!newStatus) {
+      await adminClient
+        .from('leads')
+        .update({ assigned_to: null })
+        .eq('assigned_to', userId)
+    }
+
+    // Update user status
+    const { error } = await adminClient
       .from('users')
-      .delete()
+      .update({ 
+        is_active: newStatus,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', userId)
 
     if (error) {
-      console.error('Error removing user:', error)
-      return NextResponse.json({ error: 'Failed to remove user' }, { status: 500 })
+      console.error('Error updating user status:', error)
+      return NextResponse.json({ error: 'Failed to update user status' }, { status: 500 })
     }
 
     return NextResponse.json({
       success: true,
-      message: 'Team member removed',
+      message: newStatus 
+        ? 'Team member reactivated successfully.' 
+        : 'Team member deactivated. Their leads have been unassigned.',
+      isActive: newStatus
     })
   } catch (error) {
-    console.error('Remove team member error:', error)
+    console.error('Team member status error:', error)
     return NextResponse.json(
       { error: 'An unexpected error occurred' },
       { status: 500 }
     )
   }
 }
+
 
 
 

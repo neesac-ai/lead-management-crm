@@ -23,6 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
 import { 
   Target, 
@@ -51,7 +53,7 @@ import { format, subDays, startOfDay, endOfDay, isWithinInterval, formatDistance
 import type { CallRecording } from '@/types/ai.types'
 import Link from 'next/link'
 
-type DateFilter = 'today' | 'last_7_days' | 'last_30_days' | 'all_time'
+type DateFilter = 'today' | 'last_7_days' | 'last_30_days' | 'all_time' | 'custom'
 
 interface SalesPerformance {
   user: User
@@ -67,8 +69,8 @@ const STATUS_LABELS: Record<LeadStatus, string> = {
   call_not_picked: 'Call Not Picked',
   not_interested: 'Not Interested',
   follow_up_again: 'Follow Up Again',
-  demo_booked: 'Demo Booked',
-  demo_completed: 'Demo Completed',
+  demo_booked: 'Meeting Booked',
+  demo_completed: 'Meeting Completed',
   deal_won: 'Deal Won',
   deal_lost: 'Deal Lost'
 }
@@ -82,6 +84,20 @@ const STATUS_COLORS: Record<LeadStatus, string> = {
   demo_completed: 'bg-indigo-500',
   deal_won: 'bg-green-500',
   deal_lost: 'bg-red-500'
+}
+
+const ACTION_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  call: { label: 'Call Made', color: 'bg-blue-100 text-blue-700' },
+  email: { label: 'Email Sent', color: 'bg-cyan-100 text-cyan-700' },
+  meeting: { label: 'Meeting', color: 'bg-purple-100 text-purple-700' },
+  note: { label: 'Note Added', color: 'bg-gray-100 text-gray-700' },
+  follow_up: { label: 'Follow-up', color: 'bg-orange-100 text-orange-700' },
+  status_change: { label: 'Status Changed', color: 'bg-indigo-100 text-indigo-700' },
+  demo_booked: { label: 'Meeting Booked', color: 'bg-purple-100 text-purple-700' },
+  demo_completed: { label: 'Meeting Done', color: 'bg-indigo-100 text-indigo-700' },
+  deal_won: { label: 'Deal Won', color: 'bg-green-100 text-green-700' },
+  deal_lost: { label: 'Deal Lost', color: 'bg-red-100 text-red-700' },
+  whatsapp: { label: 'WhatsApp', color: 'bg-emerald-100 text-emerald-700' },
 }
 
 export default function AnalyticsPage() {
@@ -99,6 +115,8 @@ export default function AnalyticsPage() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [salesTeam, setSalesTeam] = useState<User[]>([])
   const [dateFilter, setDateFilter] = useState<DateFilter>('all_time')
+  const [customDateFrom, setCustomDateFrom] = useState<string>('')
+  const [customDateTo, setCustomDateTo] = useState<string>('')
 
   // Call analytics state
   const [recordings, setRecordings] = useState<CallRecording[]>([])
@@ -124,6 +142,19 @@ export default function AnalyticsPage() {
     completed: 0,
     failed: 0,
   })
+
+  // Sales rep detail view
+  const [selectedRepForDetail, setSelectedRepForDetail] = useState<SalesPerformance | null>(null)
+  const [repActivities, setRepActivities] = useState<Array<{
+    id: string
+    lead_id: string
+    action_type: string
+    comments: string | null
+    action_date: string
+    lead_name?: string
+    lead_status?: string
+  }>>([])
+  const [loadingActivities, setLoadingActivities] = useState(false)
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin'
 
@@ -393,12 +424,62 @@ export default function AnalyticsPage() {
     setDeleting(null)
   }
 
+  // Fetch activities for selected sales rep
+  async function fetchRepActivities(userId: string) {
+    if (!orgId) return
+    setLoadingActivities(true)
+    
+    try {
+      const { data: activities, error } = await supabase
+        .from('lead_activities')
+        .select(`
+          id,
+          lead_id,
+          action_type,
+          comments,
+          action_date,
+          leads:lead_id(name, status)
+        `)
+        .eq('user_id', userId)
+        .order('action_date', { ascending: false })
+        .limit(100)
+
+      if (error) {
+        console.error('Error fetching activities:', error)
+        return
+      }
+
+      const formattedActivities = (activities || []).map((a) => ({
+        id: a.id,
+        lead_id: a.lead_id,
+        action_type: a.action_type,
+        comments: a.comments,
+        action_date: a.action_date,
+        lead_name: (a.leads as { name: string } | null)?.name,
+        lead_status: (a.leads as { status: string } | null)?.status,
+      }))
+
+      setRepActivities(formattedActivities)
+    } catch (error) {
+      console.error('Error fetching activities:', error)
+    } finally {
+      setLoadingActivities(false)
+    }
+  }
+
+  // Handle sales rep click
+  const handleRepClick = (perf: SalesPerformance) => {
+    setSelectedRepForDetail(perf)
+    fetchRepActivities(perf.user.id)
+  }
+
   // Lead analytics helpers
   function getFilteredLeads(): Lead[] {
     if (dateFilter === 'all_time') return leads
 
     const now = new Date()
     let startDate: Date
+    let endDate: Date = endOfDay(now)
 
     switch (dateFilter) {
       case 'today':
@@ -410,13 +491,18 @@ export default function AnalyticsPage() {
       case 'last_30_days':
         startDate = subDays(now, 30)
         break
+      case 'custom':
+        if (!customDateFrom && !customDateTo) return leads
+        startDate = customDateFrom ? startOfDay(new Date(customDateFrom)) : new Date(0)
+        endDate = customDateTo ? endOfDay(new Date(customDateTo)) : endOfDay(now)
+        break
       default:
         return leads
     }
 
     return leads.filter(lead => {
       const leadDate = new Date(lead.created_at)
-      return isWithinInterval(leadDate, { start: startDate, end: endOfDay(now) })
+      return isWithinInterval(leadDate, { start: startDate, end: endDate })
     })
   }
 
@@ -541,7 +627,7 @@ export default function AnalyticsPage() {
   }, [recordings, selectedSalesRep])
 
   // Memoize expensive lead analytics calculations
-  const filteredLeads = useMemo(() => getFilteredLeads(), [leads, dateFilter])
+  const filteredLeads = useMemo(() => getFilteredLeads(), [leads, dateFilter, customDateFrom, customDateTo])
   const statusBreakdown = useMemo(() => getStatusBreakdown(filteredLeads), [filteredLeads])
   const salesPerformance = useMemo(() => isAdmin ? getSalesPerformance() : [], [isAdmin, leads, salesTeam])
 
@@ -591,12 +677,13 @@ export default function AnalyticsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   {[
                     { value: 'today', label: 'Today' },
                     { value: 'last_7_days', label: 'Last 7 Days' },
                     { value: 'last_30_days', label: 'Last 30 Days' },
                     { value: 'all_time', label: 'All Time' },
+                    { value: 'custom', label: 'Custom' },
                   ].map((filter) => (
                     <Button
                       key={filter.value}
@@ -607,6 +694,23 @@ export default function AnalyticsPage() {
                       {filter.label}
                     </Button>
                   ))}
+                  {dateFilter === 'custom' && (
+                    <div className="flex items-center gap-2 ml-2">
+                      <Input
+                        type="date"
+                        value={customDateFrom}
+                        onChange={(e) => setCustomDateFrom(e.target.value)}
+                        className="w-[140px] h-9"
+                      />
+                      <span className="text-muted-foreground">to</span>
+                      <Input
+                        type="date"
+                        value={customDateTo}
+                        onChange={(e) => setCustomDateTo(e.target.value)}
+                        className="w-[140px] h-9"
+                      />
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -731,10 +835,13 @@ export default function AnalyticsPage() {
             {isAdmin && salesTeam.length > 0 && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Users className="h-5 w-5" />
-                    Sales Team Performance
-                  </CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <Users className="h-5 w-5" />
+                      Sales Team Performance
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground">Click on a row to see details</p>
+                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="hidden md:block overflow-x-auto">
@@ -745,14 +852,18 @@ export default function AnalyticsPage() {
                           <th className="text-center py-3 px-2 font-medium">Total</th>
                           <th className="text-center py-3 px-2 font-medium">Actioned</th>
                           <th className="text-center py-3 px-2 font-medium">Action %</th>
-                          <th className="text-center py-3 px-2 font-medium">Demo</th>
+                          <th className="text-center py-3 px-2 font-medium">Meeting</th>
                           <th className="text-center py-3 px-2 font-medium">Won</th>
                           <th className="text-center py-3 px-2 font-medium">Win Rate</th>
                         </tr>
                       </thead>
                       <tbody>
                         {salesPerformance.map((perf) => (
-                          <tr key={perf.user.id} className="border-b last:border-0">
+                          <tr 
+                            key={perf.user.id} 
+                            className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
+                            onClick={() => handleRepClick(perf)}
+                          >
                             <td className="py-3 px-2">
                               <div className="flex items-center gap-2">
                                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
@@ -792,7 +903,11 @@ export default function AnalyticsPage() {
                   {/* Mobile Cards */}
                   <div className="md:hidden space-y-4">
                     {salesPerformance.map((perf) => (
-                      <div key={perf.user.id} className="border rounded-lg p-4 space-y-3">
+                      <div 
+                        key={perf.user.id} 
+                        className="border rounded-lg p-4 space-y-3 hover:bg-muted/50 cursor-pointer transition-colors"
+                        onClick={() => handleRepClick(perf)}
+                      >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
@@ -844,7 +959,7 @@ export default function AnalyticsPage() {
                     </div>
                     <div className="text-center p-4 bg-purple-50 rounded-lg">
                       <p className="text-3xl font-bold text-purple-700">{statusBreakdown.demo_booked}</p>
-                      <p className="text-sm text-muted-foreground">Demos Scheduled</p>
+                      <p className="text-sm text-muted-foreground">Meetings Scheduled</p>
                     </div>
                     <div className="text-center p-4 bg-green-50 rounded-lg">
                       <p className="text-3xl font-bold text-green-700">{statusBreakdown.deal_won}</p>
@@ -852,7 +967,7 @@ export default function AnalyticsPage() {
                     </div>
                     <div className="text-center p-4 bg-indigo-50 rounded-lg">
                       <p className="text-3xl font-bold text-indigo-700">{statusBreakdown.demo_completed}</p>
-                      <p className="text-sm text-muted-foreground">Demos Completed</p>
+                      <p className="text-sm text-muted-foreground">Meetings Completed</p>
                     </div>
                   </div>
                 </CardContent>
@@ -1119,6 +1234,128 @@ export default function AnalyticsPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Sales Rep Detail Dialog */}
+      <Dialog open={!!selectedRepForDetail} onOpenChange={() => setSelectedRepForDetail(null)}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+          {selectedRepForDetail && (
+            <>
+              <DialogHeader>
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-12 w-12">
+                    <AvatarFallback className="bg-primary/10 text-primary text-lg">
+                      {selectedRepForDetail.user.name.charAt(0).toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <DialogTitle className="text-xl">{selectedRepForDetail.user.name}</DialogTitle>
+                    <DialogDescription>Sales Representative Activity</DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+
+              {/* Stats Summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-4">
+                <div className="text-center p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
+                  <p className="text-2xl font-bold">{selectedRepForDetail.totalLeads}</p>
+                  <p className="text-xs text-muted-foreground">Total Leads</p>
+                </div>
+                <div className="text-center p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                  <p className="text-2xl font-bold text-blue-600">{selectedRepForDetail.actionedLeads}</p>
+                  <p className="text-xs text-muted-foreground">Actioned</p>
+                </div>
+                <div className="text-center p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                  <p className="text-2xl font-bold text-green-600">{selectedRepForDetail.statusBreakdown.deal_won}</p>
+                  <p className="text-xs text-muted-foreground">Deals Won</p>
+                </div>
+                <div className="text-center p-3 bg-purple-50 dark:bg-purple-950 rounded-lg">
+                  <p className="text-2xl font-bold text-purple-600">{selectedRepForDetail.conversionRate}%</p>
+                  <p className="text-xs text-muted-foreground">Win Rate</p>
+                </div>
+              </div>
+
+              {/* Lead Status Breakdown */}
+              <div className="border rounded-lg p-4 space-y-2">
+                <h4 className="text-sm font-medium text-muted-foreground mb-3">Lead Status Breakdown</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                  {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((status) => {
+                    const count = selectedRepForDetail.statusBreakdown[status]
+                    if (count === 0) return null
+                    return (
+                      <div key={status} className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
+                        <span className="text-muted-foreground">{STATUS_LABELS[status]}:</span>
+                        <span className="font-medium">{count}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Activity Timeline */}
+              <div className="flex-1 overflow-hidden">
+                <h4 className="text-sm font-medium text-muted-foreground mb-3">Recent Activities</h4>
+                {loadingActivities ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : repActivities.length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Clock className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                    <p>No activities recorded yet</p>
+                  </div>
+                ) : (
+                  <ScrollArea className="h-[280px] pr-4">
+                    <div className="space-y-3">
+                      {repActivities.map((activity) => {
+                        const actionInfo = ACTION_TYPE_LABELS[activity.action_type] || { 
+                          label: activity.action_type.replace(/_/g, ' '), 
+                          color: 'bg-gray-100 text-gray-700' 
+                        }
+                        return (
+                          <div 
+                            key={activity.id} 
+                            className="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                              <Phone className="w-4 h-4 text-primary" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge className={actionInfo.color}>
+                                  {actionInfo.label}
+                                </Badge>
+                                {activity.lead_name && (
+                                  <span className="font-medium text-sm truncate">
+                                    {activity.lead_name}
+                                  </span>
+                                )}
+                                {activity.lead_status && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {STATUS_LABELS[activity.lead_status as LeadStatus] || activity.lead_status}
+                                  </Badge>
+                                )}
+                              </div>
+                              {activity.comments && (
+                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                                  {activity.comments}
+                                </p>
+                              )}
+                              <p className="text-xs text-muted-foreground mt-1.5">
+                                {format(new Date(activity.action_date), 'MMM d, yyyy h:mm a')}
+                              </p>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </ScrollArea>
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Recording Detail Dialog */}
       <Dialog open={!!selectedRecording} onOpenChange={() => setSelectedRecording(null)}>

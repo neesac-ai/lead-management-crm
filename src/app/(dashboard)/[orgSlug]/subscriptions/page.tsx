@@ -25,13 +25,23 @@ import {
   Phone,
   Mail,
   Building2,
-  UserCircle
+  UserCircle,
+  Filter,
+  Package,
+  DollarSign
 } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { toast } from 'sonner'
 import { differenceInDays, format, parseISO } from 'date-fns'
 
 type SalesUser = {
+  id: string
+  name: string
+}
+
+type Product = {
   id: string
   name: string
 }
@@ -77,6 +87,16 @@ export default function SubscriptionsPage() {
   const [filter, setFilter] = useState<string>('all')
   const [salesTeam, setSalesTeam] = useState<SalesUser[]>([])
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
+  const [products, setProducts] = useState<Product[]>([])
+  const [selectedProduct, setSelectedProduct] = useState<string>('all')
+  const [dealValueOperator, setDealValueOperator] = useState<string>('all')
+  const [dealValueAmount, setDealValueAmount] = useState<string>('')
+  const [paymentFilter, setPaymentFilter] = useState<string>('all')
+  const [daysLeftOperator, setDaysLeftOperator] = useState<string>('all')
+  const [daysLeftValue, setDaysLeftValue] = useState<string>('')
+  const [dateFrom, setDateFrom] = useState<string>('')
+  const [dateTo, setDateTo] = useState<string>('')
+  const [showFilters, setShowFilters] = useState(false)
 
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'super_admin'
 
@@ -116,8 +136,18 @@ export default function SubscriptionsPage() {
           .eq('org_id', profile.org_id)
           .eq('role', 'sales')
           .eq('is_approved', true)
+          .eq('is_active', true)
         setSalesTeam(teamData || [])
       }
+
+      // Fetch products
+      const { data: productsData } = await supabase
+        .from('products')
+        .select('id, name')
+        .eq('org_id', orgData.id)
+        .eq('is_active', true)
+        .order('name')
+      setProducts(productsData || [])
 
       // Fetch subscriptions with lead info and assignee name
       const { data: subsData, error } = await supabase
@@ -225,7 +255,7 @@ export default function SubscriptionsPage() {
     }
   }
 
-  // Filter subscriptions by status and sales rep
+  // Filter subscriptions by all criteria
   const filteredSubscriptions = useMemo(() => {
     return subscriptions.filter(sub => {
       // Status filter
@@ -237,9 +267,121 @@ export default function SubscriptionsPage() {
       if (isAdmin && selectedSalesRep !== 'all') {
         if (sub.leads?.assigned_to !== selectedSalesRep) return false
       }
+      
+      // Deal value filter
+      if (dealValueOperator !== 'all' && dealValueAmount) {
+        const targetAmount = parseFloat(dealValueAmount)
+        if (!isNaN(targetAmount)) {
+          switch (dealValueOperator) {
+            case 'lt': if (!(sub.deal_value < targetAmount)) return false; break
+            case 'eq': if (!(sub.deal_value === targetAmount)) return false; break
+            case 'gt': if (!(sub.deal_value > targetAmount)) return false; break
+          }
+        }
+      }
+      
+      // Payment filter (paid/pending)
+      if (paymentFilter !== 'all') {
+        if (paymentFilter === 'fully_paid' && sub.amount_pending > 0) return false
+        if (paymentFilter === 'pending' && sub.amount_pending <= 0) return false
+      }
+      
+      // Days left filter
+      if (daysLeftOperator !== 'all' && daysLeftValue) {
+        const daysInfo = getDaysRemaining(sub)
+        if (daysInfo.days === -1) return false // Skip non-recurring
+        
+        const targetDays = parseInt(daysLeftValue)
+        if (!isNaN(targetDays)) {
+          switch (daysLeftOperator) {
+            case 'lt': if (!(daysInfo.days < targetDays)) return false; break
+            case 'eq': if (!(daysInfo.days === targetDays)) return false; break
+            case 'gt': if (!(daysInfo.days > targetDays)) return false; break
+          }
+        }
+      }
+      
+      // Date range filter (by start_date)
+      if (dateFrom) {
+        const subDate = new Date(sub.start_date)
+        const fromDate = new Date(dateFrom)
+        fromDate.setHours(0, 0, 0, 0)
+        if (subDate < fromDate) return false
+      }
+      if (dateTo) {
+        const subDate = new Date(sub.start_date)
+        const toDate = new Date(dateTo)
+        toDate.setHours(23, 59, 59, 999)
+        if (subDate > toDate) return false
+      }
+      
       return true
     })
-  }, [subscriptions, filter, isAdmin, selectedSalesRep])
+  }, [subscriptions, filter, isAdmin, selectedSalesRep, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo])
+
+  // Check if any filter is active
+  const hasActiveFilters = filter !== 'all' || selectedSalesRep !== 'all' || 
+    selectedProduct !== 'all' || dealValueOperator !== 'all' || 
+    paymentFilter !== 'all' || daysLeftOperator !== 'all' || dateFrom || dateTo
+
+  // Clear all filters
+  const clearAllFilters = () => {
+    setFilter('all')
+    setSelectedSalesRep('all')
+    setSelectedProduct('all')
+    setDealValueOperator('all')
+    setDealValueAmount('')
+    setPaymentFilter('all')
+    setDaysLeftOperator('all')
+    setDaysLeftValue('')
+    setDateFrom('')
+    setDateTo('')
+  }
+
+  // Calculate stats from filtered subscriptions
+  const stats = useMemo(() => {
+    const data = filteredSubscriptions
+    
+    const totalCount = data.length
+    const totalCredited = data.reduce((sum, sub) => sum + (sub.amount_credited || 0), 0)
+    const totalPending = data.reduce((sum, sub) => sum + (sub.amount_pending || 0), 0)
+    const totalDealValue = data.reduce((sum, sub) => sum + (sub.deal_value || 0), 0)
+    
+    let activeCount = 0
+    let inactiveCount = 0
+    let pausedCount = 0
+    let nonRecurringCount = 0
+    
+    data.forEach(sub => {
+      const status = getSubscriptionStatus(sub)
+      switch (status.status) {
+        case 'active': activeCount++; break
+        case 'inactive': inactiveCount++; break
+        case 'paused': pausedCount++; break
+        case 'non_recurring': nonRecurringCount++; break
+      }
+    })
+    
+    return {
+      totalCount,
+      totalCredited,
+      totalPending,
+      totalDealValue,
+      activeCount,
+      inactiveCount,
+      pausedCount,
+      nonRecurringCount
+    }
+  }, [filteredSubscriptions])
+
+  // Format currency
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(amount)
+  }
 
   if (isLoading) {
     return (
@@ -256,46 +398,222 @@ export default function SubscriptionsPage() {
         description="Manage customer subscriptions"
       />
       
-      <div className="flex-1 p-4 lg:p-6">
+      <div className="flex-1 p-4 lg:p-6 space-y-4">
+        {/* Stats Summary */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Total</div>
+            <div className="text-xl font-bold">{stats.totalCount}</div>
+          </Card>
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Deal Value</div>
+            <div className="text-lg font-bold text-primary">{formatCurrency(stats.totalDealValue)}</div>
+          </Card>
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Credited</div>
+            <div className="text-lg font-bold text-green-600">{formatCurrency(stats.totalCredited)}</div>
+          </Card>
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Pending</div>
+            <div className="text-lg font-bold text-red-600">{formatCurrency(stats.totalPending)}</div>
+          </Card>
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Active</div>
+            <div className="text-xl font-bold text-green-600">{stats.activeCount}</div>
+          </Card>
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Expired</div>
+            <div className="text-xl font-bold text-red-600">{stats.inactiveCount}</div>
+          </Card>
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Paused</div>
+            <div className="text-xl font-bold text-yellow-600">{stats.pausedCount}</div>
+          </Card>
+          <Card className="p-3">
+            <div className="text-xs text-muted-foreground">Non Recurring</div>
+            <div className="text-xl font-bold text-gray-600">{stats.nonRecurringCount}</div>
+          </Card>
+        </div>
+
         <Card>
-          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <CreditCard className="h-5 w-5" />
-                Customer Subscriptions
-              </CardTitle>
-              <CardDescription>
-                {subscriptions.length} total subscription{subscriptions.length !== 1 ? 's' : ''}
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* Sales Rep Filter - Admin Only */}
-              {isAdmin && salesTeam.length > 0 && (
-                <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Sales Rep" />
+          <CardHeader className="flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <CreditCard className="h-5 w-5" />
+                  Customer Subscriptions
+                </CardTitle>
+                <CardDescription>
+                  {filteredSubscriptions.length} of {subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Sales Rep Filter - Admin Only */}
+                {isAdmin && salesTeam.length > 0 && (
+                  <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue placeholder="Sales Rep" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Reps</SelectItem>
+                      {salesTeam.map((rep) => (
+                        <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Product Filter */}
+                {products.length > 0 && (
+                  <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                    <SelectTrigger className="w-[130px]">
+                      <Package className="h-4 w-4 mr-2" />
+                      <SelectValue placeholder="Product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Products</SelectItem>
+                      {products.map((product) => (
+                        <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                <Select value={filter} onValueChange={setFilter}>
+                  <SelectTrigger className="w-[130px]">
+                    <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All Reps</SelectItem>
-                    {salesTeam.map((rep) => (
-                      <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
-                    ))}
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="non_recurring">Non Recurring</SelectItem>
+                    <SelectItem value="paused">Paused</SelectItem>
+                    <SelectItem value="inactive">Expired</SelectItem>
                   </SelectContent>
                 </Select>
-              )}
-              <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger className="w-[150px]">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="non_recurring">Non Recurring</SelectItem>
-                  <SelectItem value="paused">Paused</SelectItem>
-                  <SelectItem value="inactive">Expired</SelectItem>
-                </SelectContent>
-              </Select>
+
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={showFilters ? 'bg-primary/10' : ''}
+                >
+                  <Filter className="h-4 w-4 mr-1" />
+                  More
+                </Button>
+
+                {hasActiveFilters && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={clearAllFilters}
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
             </div>
+
+            {/* Extended Filters */}
+            {showFilters && (
+              <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
+                {/* Deal Value Filter */}
+                <div className="flex items-center gap-1">
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Deal Value</span>
+                  <Select value={dealValueOperator} onValueChange={setDealValueOperator}>
+                    <SelectTrigger className="w-[90px]">
+                      <SelectValue placeholder="Any" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Any</SelectItem>
+                      <SelectItem value="lt">&lt; Less</SelectItem>
+                      <SelectItem value="eq">= Equal</SelectItem>
+                      <SelectItem value="gt">&gt; Greater</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {dealValueOperator !== 'all' && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">₹</span>
+                      <Input
+                        type="number"
+                        placeholder="0"
+                        value={dealValueAmount}
+                        onChange={(e) => setDealValueAmount(e.target.value)}
+                        className="w-[90px] h-9"
+                        min="0"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Payment Filter */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Payment:</span>
+                  <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+                    <SelectTrigger className="w-[130px]">
+                      <SelectValue placeholder="All" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="fully_paid">Fully Paid</SelectItem>
+                      <SelectItem value="pending">Has Pending</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Days Left Filter */}
+                <div className="flex items-center gap-1">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Days Left</span>
+                  <Select value={daysLeftOperator} onValueChange={setDaysLeftOperator}>
+                    <SelectTrigger className="w-[90px]">
+                      <SelectValue placeholder="Any" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Any</SelectItem>
+                      <SelectItem value="lt">&lt; Less</SelectItem>
+                      <SelectItem value="eq">= Equal</SelectItem>
+                      <SelectItem value="gt">&gt; Greater</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {daysLeftOperator !== 'all' && (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        type="number"
+                        placeholder="0"
+                        value={daysLeftValue}
+                        onChange={(e) => setDaysLeftValue(e.target.value)}
+                        className="w-[70px] h-9"
+                        min="0"
+                      />
+                      <span className="text-sm text-muted-foreground">days</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Date Range Filter */}
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">Start Date</span>
+                  <Input
+                    type="date"
+                    placeholder="From"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="w-[140px] h-9"
+                  />
+                  <span className="text-muted-foreground">to</span>
+                  <Input
+                    type="date"
+                    placeholder="To"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="w-[140px] h-9"
+                  />
+                </div>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             {filteredSubscriptions.length === 0 ? (

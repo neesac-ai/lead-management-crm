@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
         accessToken = newCredentials.access_token as string
         
         // Update tokens in database
-        const adminSupabase = createAdminClient()
+        const adminSupabase = await createAdminClient()
         await adminSupabase
           .from('users')
           .update({
@@ -196,21 +196,29 @@ export async function POST(request: NextRequest) {
     )?.uri
 
     // Update the demos table with the calendar event info
-    const { error: demoUpdateError } = await supabase
+    // First, find the most recent demo for this lead
+    const { data: latestDemo } = await supabase
       .from('demos')
-      .update({
-        calendar_event_id: calendarEvent.data.id,
-        google_meet_link: meetLink,
-        status: 'scheduled',
-      })
+      .select('id')
       .eq('lead_id', leadId)
       .eq('status', 'scheduled')
       .order('created_at', { ascending: false })
       .limit(1)
+      .single()
 
-    if (demoUpdateError) {
-      console.error('Error updating demo record:', demoUpdateError)
-      // Don't fail the request - the calendar event was created successfully
+    if (latestDemo) {
+      const { error: demoUpdateError } = await supabase
+        .from('demos')
+        .update({
+          calendar_event_id: calendarEvent.data.id,
+          google_meet_link: meetLink,
+        })
+        .eq('id', latestDemo.id)
+
+      if (demoUpdateError) {
+        console.error('Error updating demo record:', demoUpdateError)
+        // Don't fail the request - the calendar event was created successfully
+      }
     }
 
     return NextResponse.json({

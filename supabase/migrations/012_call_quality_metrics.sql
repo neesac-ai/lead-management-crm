@@ -9,3 +9,5 @@ COMMENT ON COLUMN call_recordings.sentiment_reasoning IS 'AI explanation for why
 COMMENT ON COLUMN call_recordings.call_quality IS 'JSON object containing call quality scores and feedback';
 
 
+
+

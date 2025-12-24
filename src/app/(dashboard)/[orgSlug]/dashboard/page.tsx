@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
+import { formatInTimeZone } from 'date-fns-tz'
 import { 
   Target, 
   Users, 
@@ -18,6 +19,12 @@ import {
   Video,
   Phone,
 } from 'lucide-react'
+
+// Force dynamic rendering to always fetch fresh data
+export const dynamic = 'force-dynamic'
+
+// Default timezone for server-side rendering (IST)
+const DEFAULT_TIMEZONE = 'Asia/Kolkata'
 
 interface DashboardPageProps {
   params: Promise<{ orgSlug: string }>
@@ -93,14 +100,14 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     followupsQuery,
     supabase
       .from('customer_subscriptions')
-      .select('id, status, deal_value, leads(assigned_to, created_by)')
+      .select('id, status, deal_value, amount_credited, amount_pending, validity_days, leads(assigned_to, created_by)')
       .eq('org_id', org.id),
   ])
 
   type LeadData = { id: string; status: string }
   type DemoData = { id: string; status: string; scheduled_at: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
   type FollowupCountData = { id: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
-  type SubscriptionData = { id: string; status: string; deal_value: number; leads: { assigned_to: string | null; created_by: string | null } | null }
+  type SubscriptionData = { id: string; status: string; deal_value: number; amount_credited: number; amount_pending: number; validity_days: number; leads: { assigned_to: string | null; created_by: string | null } | null }
 
   const leadsData = (leadsResult.data || []) as LeadData[]
   const demosData = (demosResult.data || []) as DemoData[]
@@ -139,6 +146,19 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const activeSubscriptions = filteredSubscriptions.filter(s => s.status === 'active').length
   const totalRevenue = filteredSubscriptions.reduce((sum, s) => sum + (s.deal_value || 0), 0)
 
+  // Calculate additional subscription stats for admin
+  const totalSubscriptions = filteredSubscriptions.length
+  const pausedSubscriptions = filteredSubscriptions.filter(s => s.status === 'paused').length
+  const nonRecurringSubscriptions = filteredSubscriptions.filter(s => s.validity_days >= 36500).length
+  const inactiveSubscriptions = filteredSubscriptions.filter(s => {
+    if (s.status === 'paused') return false
+    if (s.validity_days >= 36500) return false // non-recurring
+    if (s.status === 'active') return false
+    return true
+  }).length
+  const totalCredited = filteredSubscriptions.reduce((sum, s) => sum + (s.amount_credited || 0), 0)
+  const totalPending = filteredSubscriptions.reduce((sum, s) => sum + (s.amount_pending || 0), 0)
+
   const stats = [
     {
       title: 'Total Leads',
@@ -148,11 +168,11 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       href: `/${orgSlug}/leads`,
     },
     {
-      title: 'Upcoming Demos',
+      title: 'Upcoming Meetings',
       value: upcomingDemos.toString(),
       icon: CalendarDays,
       description: 'Future scheduled',
-      href: `/${orgSlug}/demos`,
+      href: `/${orgSlug}/meetings`,
     },
     {
       title: 'Pending Follow-ups',
@@ -169,6 +189,53 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       href: `/${orgSlug}/subscriptions`,
     },
   ]
+
+  // Fetch organization subscription/quota info (for admin)
+  type OrgSubscription = {
+    subscription_type: string
+    validity_days: number
+    sales_quota: number | null
+    accountant_quota: number | null
+    start_date: string
+    end_date: string
+    status: string
+  }
+  
+  let orgSubscription: OrgSubscription | null = null
+  let salesCount = 0
+  let accountantCount = 0
+  
+  if (isAdmin) {
+    const { data: subData } = await supabase
+      .from('org_subscriptions')
+      .select('subscription_type, validity_days, sales_quota, accountant_quota, start_date, end_date, status')
+      .eq('org_id', org.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (subData) {
+      orgSubscription = subData as OrgSubscription
+    }
+    
+    // Count current team members
+    const { count: salesCountResult } = await supabase
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', org.id)
+      .eq('role', 'sales')
+      .eq('is_active', true)
+    
+    const { count: accountantCountResult } = await supabase
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', org.id)
+      .eq('role', 'accountant')
+      .eq('is_active', true)
+    
+    salesCount = salesCountResult || 0
+    accountantCount = accountantCountResult || 0
+  }
 
   // Get recent leads (filtered for sales users)
   let recentLeadsQuery = supabase
@@ -194,27 +261,21 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   type RecentLead = { id: string; name: string; status: string; created_at: string }
   const recentLeads = (recentLeadsData || []) as RecentLead[]
 
-  // Get today's follow-ups (filtered for sales users)
-  // Calculate today's range in IST (UTC+5:30) for proper timezone handling
+  // Get upcoming follow-ups (filtered for sales users)
+  // Only show follow-ups that haven't passed yet
   const now = new Date()
+  const currentTimeISO = now.toISOString()
   
-  // Get today's date in IST (add 5.5 hours to UTC to get IST time, then get the date)
+  // Get today's end date in IST for limiting the scope
   const istOffset = 5.5 * 60 * 60 * 1000 // 5.5 hours in milliseconds
   const istNow = new Date(now.getTime() + istOffset)
   const istDateStr = istNow.toISOString().split('T')[0]
-  
-  // Today in IST starts at 00:00 IST = previous day 18:30 UTC
-  // Today in IST ends at 23:59:59 IST = current day 18:29:59 UTC
-  const todayStartIST = new Date(`${istDateStr}T00:00:00+05:30`)
   const todayEndIST = new Date(`${istDateStr}T23:59:59+05:30`)
-  
-  const todayStartISO = todayStartIST.toISOString()
   const todayEndISO = todayEndIST.toISOString()
-  const today = istDateStr
   
   type FollowupDataRaw = { id: string; next_followup: string | null; leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } }
   
-  // Fetch all today's follow-ups and filter client-side for sales users
+  // Fetch upcoming follow-ups (from current time to end of today)
   const { data: allTodayFollowups } = await supabase
     .from('lead_activities')
     .select(`
@@ -223,8 +284,9 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       leads!inner(id, name, phone, org_id, assigned_to, created_by)
     `)
     .eq('leads.org_id', org.id)
-    .gte('next_followup', todayStartISO)
+    .gte('next_followup', currentTimeISO)
     .lte('next_followup', todayEndISO)
+    .order('next_followup', { ascending: true })
     .limit(20)
   
   let todayFollowupsData = (allTodayFollowups || []) as FollowupDataRaw[]
@@ -239,7 +301,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   type FollowupData = { id: string; next_followup: string | null; leads: { id: string; name: string; phone: string | null } }
   const todayFollowups = todayFollowupsData.slice(0, 10) as FollowupData[]
 
-  // Get today's demos (filtered for sales users)
+  // Get upcoming demos/meetings (filtered for sales users)
   type TodayDemoData = { 
     id: string; 
     scheduled_at: string; 
@@ -247,7 +309,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } 
   }
 
-  // Fetch all today's demos and filter client-side for sales users
+  // Fetch upcoming demos (from current time to end of today) - only ones that haven't passed
   const { data: allTodayDemos } = await supabase
     .from('demos')
     .select(`
@@ -258,7 +320,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     `)
     .eq('leads.org_id', org.id)
     .eq('status', 'scheduled')
-    .gte('scheduled_at', todayStartISO)
+    .gte('scheduled_at', currentTimeISO)
     .lte('scheduled_at', todayEndISO)
     .order('scheduled_at', { ascending: true })
     .limit(20)
@@ -289,6 +351,20 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     }
   }
 
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      new: 'New',
+      call_not_picked: 'Call Not Picked',
+      not_interested: 'Not Interested',
+      follow_up_again: 'Follow Up Again',
+      demo_booked: 'Meeting Booked',
+      demo_completed: 'Meeting Completed',
+      deal_won: 'Deal Won',
+      deal_lost: 'Deal Lost',
+    }
+    return labels[status] || status.replace(/_/g, ' ')
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       <Header 
@@ -297,50 +373,56 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       />
       
       <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
-        {/* Today's Reminders */}
+        {/* Upcoming Reminders */}
         {hasReminders && (
           <Card className="border-orange-300 bg-orange-50/50">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2 text-orange-700">
                 <Bell className="h-5 w-5" />
-                Today&apos;s Reminders
+                Upcoming Reminders
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {/* Today's Demos */}
+              {/* Today's Meetings */}
               {todayDemos.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-orange-700 flex items-center gap-1">
                     <Video className="h-4 w-4" />
-                    Demos Scheduled ({todayDemos.length})
+                    Meetings Scheduled ({todayDemos.length})
                   </p>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {todayDemos.map((demo) => (
-                      <div 
-                        key={demo.id}
-                        className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{demo.leads?.phone || demo.leads?.name}</p>
-                          {demo.leads?.name && demo.leads.name !== demo.leads.phone && (
-                            <p className="text-xs text-muted-foreground truncate">{demo.leads.name}</p>
+                    {todayDemos.map((demo) => {
+                      // Format with timezone (same as meetings page)
+                      const dateStr = formatInTimeZone(new Date(demo.scheduled_at), DEFAULT_TIMEZONE, 'MMM d, yyyy')
+                      const timeStr = formatInTimeZone(new Date(demo.scheduled_at), DEFAULT_TIMEZONE, 'h:mm a')
+                      
+                      return (
+                        <div 
+                          key={demo.id}
+                          className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{demo.leads?.phone || demo.leads?.name}</p>
+                            {demo.leads?.name && demo.leads.name !== demo.leads.phone && (
+                              <p className="text-xs text-muted-foreground truncate">{demo.leads.name}</p>
+                            )}
+                            <p className="text-xs text-orange-600">
+                              {dateStr} at {timeStr}
+                            </p>
+                          </div>
+                          {demo.google_meet_link && (
+                            <a 
+                              href={demo.google_meet_link} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-xs bg-orange-500 text-white px-2 py-1 rounded hover:bg-orange-600 transition-colors"
+                            >
+                              Join
+                            </a>
                           )}
-                          <p className="text-xs text-orange-600">
-                            {new Date(demo.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </p>
                         </div>
-                        {demo.google_meet_link && (
-                          <a 
-                            href={demo.google_meet_link} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-xs bg-orange-500 text-white px-2 py-1 rounded hover:bg-orange-600 transition-colors"
-                          >
-                            Join
-                          </a>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
@@ -353,24 +435,25 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                     Follow-ups Due ({todayFollowups.length})
                   </p>
                   <div className="grid gap-2 sm:grid-cols-2">
-                    {todayFollowups.slice(0, 4).map((followup) => (
-                      <div 
-                        key={followup.id}
-                        className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate">{followup.leads?.phone || followup.leads?.name}</p>
-                          {followup.leads?.name && followup.leads.name !== followup.leads.phone && (
-                            <p className="text-xs text-muted-foreground truncate">{followup.leads.name}</p>
-                          )}
-                          <p className="text-xs text-orange-600">
-                            {followup.next_followup 
-                              ? new Date(followup.next_followup).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                              : 'Today'}
-                          </p>
+                    {todayFollowups.slice(0, 4).map((followup) => {
+                      const timeStr = followup.next_followup 
+                        ? formatInTimeZone(new Date(followup.next_followup), DEFAULT_TIMEZONE, 'h:mm a')
+                        : 'Today'
+                      return (
+                        <div 
+                          key={followup.id}
+                          className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{followup.leads?.phone || followup.leads?.name}</p>
+                            {followup.leads?.name && followup.leads.name !== followup.leads.phone && (
+                              <p className="text-xs text-muted-foreground truncate">{followup.leads.name}</p>
+                            )}
+                            <p className="text-xs text-orange-600">{timeStr}</p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                   {todayFollowups.length > 4 && (
                     <Link href={`/${orgSlug}/follow-ups`} className="text-xs text-orange-600 hover:underline">
@@ -403,6 +486,96 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
           ))}
         </div>
 
+        {/* Subscription Stats (Admin Only) */}
+        {isAdmin && totalSubscriptions > 0 && (
+          <Card className="animate-fade-in animate-delay-200">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <CreditCard className="h-5 w-5 text-primary" />
+                Subscription Overview
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <p className="text-2xl font-bold">{totalSubscriptions}</p>
+                  <p className="text-xs text-muted-foreground">Total</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-green-500/10">
+                  <p className="text-2xl font-bold text-green-600">{activeSubscriptions}</p>
+                  <p className="text-xs text-muted-foreground">Active</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-yellow-500/10">
+                  <p className="text-2xl font-bold text-yellow-600">{pausedSubscriptions}</p>
+                  <p className="text-xs text-muted-foreground">Paused</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-gray-500/10">
+                  <p className="text-2xl font-bold text-gray-600">{nonRecurringSubscriptions}</p>
+                  <p className="text-xs text-muted-foreground">Non Recurring</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-primary/10">
+                  <p className="text-2xl font-bold text-primary">₹{totalCredited.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">Credited</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-red-500/10">
+                  <p className="text-2xl font-bold text-red-600">₹{totalPending.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">Pending</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Organization Quota Info (Admin Only) */}
+        {isAdmin && orgSubscription && (
+          <Card className="animate-fade-in animate-delay-300 border-primary/20 bg-primary/5">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Users className="h-5 w-5 text-primary" />
+                  Team Quota
+                </CardTitle>
+                <Badge variant={orgSubscription.subscription_type === 'paid' ? 'default' : 'secondary'}>
+                  {orgSubscription.subscription_type === 'paid' ? 'Paid Plan' : 'Trial'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center p-3 rounded-lg bg-background">
+                  <p className="text-2xl font-bold text-blue-600">
+                    {salesCount}/{orgSubscription.sales_quota === null ? '∞' : orgSubscription.sales_quota}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Sales Reps</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-background">
+                  <p className="text-2xl font-bold text-green-600">
+                    {accountantCount}/{orgSubscription.accountant_quota === null ? '∞' : orgSubscription.accountant_quota}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Accountants</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-background">
+                  <p className="text-2xl font-bold">
+                    {orgSubscription.validity_days >= 36500 ? 'Lifetime' : `${orgSubscription.validity_days} days`}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Plan Validity</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-background">
+                  <p className={`text-2xl font-bold ${orgSubscription.status === 'active' ? 'text-green-600' : 'text-yellow-600'}`}>
+                    {orgSubscription.status === 'active' ? 'Active' : orgSubscription.status}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Subscription Status</p>
+                </div>
+              </div>
+              {orgSubscription.end_date && orgSubscription.validity_days < 36500 && (
+                <p className="text-xs text-muted-foreground mt-3 text-center">
+                  Plan expires on {new Date(orgSubscription.end_date).toLocaleDateString('en-IN', { dateStyle: 'long' })}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Main Content Grid */}
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Recent Leads */}
@@ -431,8 +604,8 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                       <div className={`w-2 h-2 rounded-full ${getStatusColor(lead.status)}`} />
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{lead.name}</p>
-                        <p className="text-sm text-muted-foreground capitalize">
-                          {lead.status.replace('_', ' ')}
+                        <p className="text-sm text-muted-foreground">
+                          {getStatusLabel(lead.status)}
                         </p>
                       </div>
                       <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
@@ -478,7 +651,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                         return (
                           <div key={status} className="space-y-1">
                             <div className="flex items-center justify-between text-sm">
-                              <span className="capitalize">{status.replace(/_/g, ' ')}</span>
+                              <span>{getStatusLabel(status)}</span>
                               <span className="text-muted-foreground">{count} ({percentage}%)</span>
                             </div>
                             <div className="h-2 bg-muted rounded-full overflow-hidden">

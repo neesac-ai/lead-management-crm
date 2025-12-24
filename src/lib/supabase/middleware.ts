@@ -66,14 +66,12 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // If user is logged in and trying to access auth pages
-  if (user && isPublicRoute) {
-    const url = request.nextUrl.clone()
-    
+  // If user is logged in
+  if (user) {
     // Get user profile to determine redirect
     const { data: profile } = await supabase
       .from('users')
-      .select('role, org_id, is_approved, organizations(slug)')
+      .select('role, org_id, is_approved, is_active, organizations(slug)')
       .eq('auth_id', user.id)
       .single()
 
@@ -83,17 +81,33 @@ export async function updateSession(request: NextRequest) {
       const role = p.role as string
       const org_id = p.org_id as string | null
       const is_approved = p.is_approved as boolean
+      const is_active = p.is_active as boolean
       const organizations = p.organizations as { slug: string } | { slug: string }[] | null
       const orgSlug = Array.isArray(organizations) ? organizations[0]?.slug : organizations?.slug
-      
-      if (role === 'super_admin') {
-        url.pathname = '/super-admin'
-      } else if (org_id && is_approved) {
-        url.pathname = `/${orgSlug}/dashboard`
-      } else {
-        url.pathname = '/pending-approval'
+
+      // Check if user is inactive (not super_admin)
+      if (role !== 'super_admin' && !is_active && !isPublicRoute) {
+        // Sign out the user and redirect to login with message
+        await supabase.auth.signOut()
+        const url = request.nextUrl.clone()
+        url.pathname = '/login'
+        url.searchParams.set('error', 'account_deactivated')
+        return NextResponse.redirect(url)
       }
-      return NextResponse.redirect(url)
+
+      // If trying to access auth pages while logged in
+      if (isPublicRoute) {
+        const url = request.nextUrl.clone()
+        
+        if (role === 'super_admin') {
+          url.pathname = '/super-admin'
+        } else if (org_id && is_approved) {
+          url.pathname = `/${orgSlug}/dashboard`
+        } else {
+          url.pathname = '/pending-approval'
+        }
+        return NextResponse.redirect(url)
+      }
     }
   }
 

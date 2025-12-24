@@ -1,6 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { Header } from '@/components/layout/header'
+
+// Force dynamic rendering to prevent caching
+export const dynamic = 'force-dynamic'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -10,6 +13,7 @@ import {
   Users,
   CheckCircle,
   Clock,
+  UserX,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 
@@ -20,6 +24,7 @@ type TeamMember = {
   avatar_url: string | null
   role: string
   is_approved: boolean
+  is_active: boolean
   created_at: string
 }
 
@@ -64,14 +69,15 @@ export default async function TeamPage({
   // Get team members (excluding the current admin)
   const { data: teamMembers } = await supabase
     .from('users')
-    .select('id, name, email, avatar_url, role, is_approved, created_at')
+    .select('id, name, email, avatar_url, role, is_approved, is_active, created_at')
     .eq('org_id', org.id)
     .neq('role', 'admin')
     .order('created_at', { ascending: false })
 
   const team = (teamMembers || []) as TeamMember[]
   const pendingMembers = team.filter(m => !m.is_approved)
-  const approvedMembers = team.filter(m => m.is_approved)
+  const activeMembers = team.filter(m => m.is_approved && m.is_active)
+  const inactiveMembers = team.filter(m => m.is_approved && !m.is_active)
 
   const getRoleBadge = (role: string) => {
     switch (role) {
@@ -93,7 +99,7 @@ export default async function TeamPage({
         <OrgCodeCard orgCode={org.org_code} />
 
         {/* Stats */}
-        <div className="grid gap-3 grid-cols-3">
+        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">Total Team</CardTitle>
@@ -107,12 +113,20 @@ export default async function TeamPage({
               <CardTitle className="text-sm font-medium text-muted-foreground">Active</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-500">{approvedMembers.length}</div>
+              <div className="text-2xl font-bold text-green-500">{activeMembers.length}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">Inactive</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-gray-400">{inactiveMembers.length}</div>
             </CardContent>
           </Card>
           <Card className="border-yellow-500/30 bg-yellow-500/5">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-yellow-600">Pending Approval</CardTitle>
+              <CardTitle className="text-sm font-medium text-yellow-600">Pending</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-yellow-600">{pendingMembers.length}</div>
@@ -161,8 +175,10 @@ export default async function TeamPage({
                       </div>
                       <TeamMemberActions 
                         userId={member.id} 
-                        userName={member.name} 
-                        isApproved={member.is_approved} 
+                        userName={member.name}
+                        userEmail={member.email}
+                        isApproved={member.is_approved}
+                        isActive={member.is_active}
                       />
                     </div>
                   </div>
@@ -172,16 +188,19 @@ export default async function TeamPage({
           </Card>
         )}
 
-        {/* Approved Team Members */}
+        {/* Active Team Members */}
         <Card>
           <CardHeader>
-            <CardTitle>Team Members</CardTitle>
-            <CardDescription>Your active team members</CardDescription>
+            <CardTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              Active Team Members
+            </CardTitle>
+            <CardDescription>Team members who can access the system</CardDescription>
           </CardHeader>
           <CardContent className="px-4 lg:px-6">
-            {approvedMembers.length > 0 ? (
+            {activeMembers.length > 0 ? (
               <div className="space-y-3">
-                {approvedMembers.map((member) => (
+                {activeMembers.map((member) => (
                   <div 
                     key={member.id} 
                     className="p-4 rounded-lg border bg-card"
@@ -208,8 +227,10 @@ export default async function TeamPage({
                       {getRoleBadge(member.role)}
                       <TeamMemberActions 
                         userId={member.id} 
-                        userName={member.name} 
-                        isApproved={member.is_approved} 
+                        userName={member.name}
+                        userEmail={member.email}
+                        isApproved={member.is_approved}
+                        isActive={member.is_active}
                       />
                     </div>
                   </div>
@@ -218,12 +239,63 @@ export default async function TeamPage({
             ) : (
               <div className="text-center py-12 text-muted-foreground">
                 <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-medium">No team members yet</p>
+                <p className="text-lg font-medium">No active team members</p>
                 <p className="text-sm">Share your organization code to invite team members</p>
               </div>
             )}
           </CardContent>
         </Card>
+
+        {/* Inactive Team Members */}
+        {inactiveMembers.length > 0 && (
+          <Card className="border-gray-300 bg-gray-50 dark:bg-gray-900/20">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-gray-500">
+                <UserX className="h-5 w-5" />
+                Inactive Team Members
+              </CardTitle>
+              <CardDescription>Deactivated members - cannot access the system</CardDescription>
+            </CardHeader>
+            <CardContent className="px-4 lg:px-6">
+              <div className="space-y-3">
+                {inactiveMembers.map((member) => (
+                  <div 
+                    key={member.id} 
+                    className="p-4 rounded-lg border border-gray-200 bg-white/50 dark:bg-gray-800/30 opacity-75"
+                  >
+                    <div className="flex items-start gap-3 mb-3">
+                      <Avatar className="h-10 w-10 shrink-0 grayscale">
+                        <AvatarImage src={member.avatar_url || undefined} />
+                        <AvatarFallback className="bg-gray-200 text-gray-500">
+                          {member.name?.charAt(0).toUpperCase() || 'U'}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold truncate text-gray-500">{member.name}</p>
+                          <Badge variant="secondary" className="bg-gray-200 text-gray-600">
+                            Inactive
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground truncate">{member.email}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      {getRoleBadge(member.role)}
+                      <TeamMemberActions 
+                        userId={member.id} 
+                        userName={member.name}
+                        userEmail={member.email}
+                        isApproved={member.is_approved}
+                        isActive={member.is_active}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )

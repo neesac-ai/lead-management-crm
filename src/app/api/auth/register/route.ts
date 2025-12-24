@@ -58,19 +58,28 @@ export async function POST(request: Request) {
       slugCounter++
     }
 
-    // Sign up the user in Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    // Create user with admin API (more reliable, auto-confirms email)
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
-      options: {
-        data: {
-          name,
-          organization_name: organizationName,
-        },
+      email_confirm: true, // Auto-confirm email
+      user_metadata: {
+        name,
+        organization_name: organizationName,
       },
     })
 
     if (authError) {
+      console.error('Auth error:', authError)
+      
+      if (authError.message.includes('already') ||
+          authError.message.includes('exists') ||
+          authError.message.includes('duplicate')) {
+        return NextResponse.json(
+          { error: 'This email is already registered. Please try logging in.' },
+          { status: 400 }
+        )
+      }
       return NextResponse.json(
         { error: authError.message },
         { status: 400 }

@@ -24,7 +24,11 @@ type Lead = {
   email: string | null
   status: string
   assigned_to: string | null
+  created_by: string | null
   custom_fields: { company?: string } | null
+  created_at: string
+  // For leads from deactivated members
+  previous_owner?: string
 }
 
 type SalesPerson = {
@@ -32,6 +36,7 @@ type SalesPerson = {
   name: string
   email: string
   lead_allocation_percent: number
+  is_active: boolean
 }
 
 export default function AssignmentPage() {
@@ -70,20 +75,21 @@ export default function AssignmentPage() {
     // Fetch unassigned leads
     const { data: leads } = await supabase
       .from('leads')
-      .select('id, name, email, status, assigned_to, custom_fields')
+      .select('id, name, email, status, assigned_to, created_by, custom_fields, created_at')
       .eq('org_id', org.id)
       .is('assigned_to', null)
       .order('created_at', { ascending: false })
 
     setUnassignedLeads((leads || []) as Lead[])
 
-    // Fetch sales team members
+    // Fetch active sales team members only
     const { data: sales } = await supabase
       .from('users')
-      .select('id, name, email, lead_allocation_percent')
+      .select('id, name, email, lead_allocation_percent, is_active')
       .eq('org_id', org.id)
       .eq('role', 'sales')
       .eq('is_approved', true)
+      .eq('is_active', true)
 
     setSalesTeam((sales || []) as SalesPerson[])
     setIsLoading(false)

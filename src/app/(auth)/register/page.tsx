@@ -6,20 +6,27 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
-import { Loader2, Mail, Lock, User, Building2, ArrowRight, CheckCircle, Copy } from 'lucide-react'
+import { Loader2, Mail, Lock, User, Hash, ArrowRight, CheckCircle, Users } from 'lucide-react'
 import Image from 'next/image'
-import { Card, CardContent } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [registrationComplete, setRegistrationComplete] = useState(false)
-  const [orgCode, setOrgCode] = useState('')
+  const [orgName, setOrgName] = useState('')
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     confirmPassword: '',
-    organizationName: '',
+    orgCode: '',
+    role: '',
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -29,9 +36,11 @@ export default function RegisterPage() {
     }))
   }
 
-  const copyOrgCode = () => {
-    navigator.clipboard.writeText(orgCode)
-    toast.success('Organization code copied!')
+  const handleRoleChange = (value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      role: value
+    }))
   }
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -47,17 +56,23 @@ export default function RegisterPage() {
       return
     }
 
+    if (!formData.role) {
+      toast.error('Please select your role')
+      return
+    }
+
     setIsLoading(true)
 
     try {
-      const response = await fetch('/api/auth/register', {
+      const response = await fetch('/api/auth/register-team', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: formData.name,
           email: formData.email,
           password: formData.password,
-          organizationName: formData.organizationName,
+          orgCode: formData.orgCode,
+          role: formData.role,
         }),
       })
 
@@ -68,7 +83,7 @@ export default function RegisterPage() {
         return
       }
 
-      setOrgCode(data.orgCode)
+      setOrgName(data.organizationName)
       setRegistrationComplete(true)
       toast.success('Account created successfully!')
     } catch (error) {
@@ -88,35 +103,16 @@ export default function RegisterPage() {
           </div>
           <h2 className="text-2xl font-bold">Registration Complete!</h2>
           <p className="text-muted-foreground">
-            Your account has been created and is pending approval.
+            You&apos;ve joined <span className="font-semibold text-foreground">{orgName}</span>
           </p>
         </div>
 
-        <Card className="border-2 border-primary/20 bg-primary/5">
-          <CardContent className="pt-6">
-            <div className="text-center space-y-3">
-              <p className="text-sm font-medium text-muted-foreground">Your Organization Code</p>
-              <div className="flex items-center justify-center gap-2">
-                <code className="text-2xl font-mono font-bold tracking-wider bg-background px-4 py-2 rounded-lg border">
-                  {orgCode}
-                </code>
-                <Button variant="outline" size="icon" onClick={copyOrgCode}>
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Share this code with your team members so they can join your organization
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="space-y-3 text-sm text-muted-foreground">
+        <div className="space-y-3 text-sm text-muted-foreground bg-muted/50 rounded-lg p-4">
           <p className="font-medium text-foreground">What happens next?</p>
           <ol className="list-decimal list-inside space-y-2">
-            <li>Our team will review your registration</li>
+            <li>Your organization admin will review your request</li>
             <li>You&apos;ll receive an email once approved</li>
-            <li>Then you can log in and start using the platform</li>
+            <li>Then you can log in and start working</li>
           </ol>
         </div>
 
@@ -140,36 +136,56 @@ export default function RegisterPage() {
       </div>
 
       <div className="space-y-2">
-        <h2 className="text-3xl font-bold tracking-tight">Register as Admin</h2>
+        <h2 className="text-3xl font-bold tracking-tight">Join Your Team</h2>
         <p className="text-muted-foreground">
-          Create your organization and become its administrator.
+          Enter your organization code to join as a team member.
         </p>
       </div>
 
       <form onSubmit={handleRegister} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="organizationName" className="text-sm font-medium">
-            Organization name
+          <Label htmlFor="orgCode" className="text-sm font-medium">
+            Organization code
           </Label>
           <div className="relative">
-            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              id="organizationName"
-              name="organizationName"
+              id="orgCode"
+              name="orgCode"
               type="text"
-              placeholder="Acme Inc."
-              value={formData.organizationName}
+              placeholder="e.g., ACME7X9K"
+              value={formData.orgCode}
               onChange={handleChange}
-              className="pl-10 h-11"
+              className="pl-10 h-11 uppercase font-mono tracking-wider"
               required
               disabled={isLoading}
+              maxLength={8}
             />
           </div>
+          <p className="text-xs text-muted-foreground">
+            Ask your organization admin for this code
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="role" className="text-sm font-medium">
+            Your role
+          </Label>
+          <Select onValueChange={handleRoleChange} disabled={isLoading}>
+            <SelectTrigger className="h-11">
+              <Users className="mr-2 h-4 w-4 text-muted-foreground" />
+              <SelectValue placeholder="Select your role" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sales">Sales</SelectItem>
+              <SelectItem value="accountant">Accountant</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="name" className="text-sm font-medium">
-            Your full name
+            Full name
           </Label>
           <div className="relative">
             <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -258,11 +274,11 @@ export default function RegisterPage() {
           {isLoading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Creating account...
+              Joining team...
             </>
           ) : (
             <>
-              Create Organization
+              Join Team
               <ArrowRight className="ml-2 h-4 w-4" />
             </>
           )}
@@ -286,17 +302,17 @@ export default function RegisterPage() {
         </div>
         <div className="relative flex justify-center text-xs uppercase">
           <span className="bg-background px-2 text-muted-foreground">
-            Joining a team?
+            Creating a new organization?
           </span>
         </div>
       </div>
 
       <p className="text-center text-sm text-muted-foreground">
         <Link 
-          href="/register/team" 
+          href="/register/admin" 
           className="text-primary font-medium hover:text-primary/80 transition-colors"
         >
-          Register as Sales or Accountant
+          Register as Admin
         </Link>
       </p>
 

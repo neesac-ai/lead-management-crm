@@ -65,9 +65,10 @@ export function Sidebar({ orgSlug }: SidebarProps) {
 
   useEffect(() => {
     setMounted(true)
+    const supabase = createClient()
+    let userId: string | null = null
     
     const fetchUser = async () => {
-      const supabase = createClient()
       const { data: { user: authUser } } = await supabase.auth.getUser()
       
       if (authUser) {
@@ -88,6 +89,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
             is_approved: boolean
             organizations: { slug: string } | null
           }
+          userId = p.id
           setUser({
             id: p.id,
             email: p.email,
@@ -104,6 +106,57 @@ export function Sidebar({ orgSlug }: SidebarProps) {
     }
 
     fetchUser()
+
+    // Subscribe to real-time updates for the user profile
+    const channel = supabase
+      .channel('sidebar-user-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+        },
+        (payload) => {
+          // Only update if it's the current user
+          if (userId && payload.new && (payload.new as { id: string }).id === userId) {
+            const p = payload.new as {
+              id: string
+              email: string
+              name: string
+              avatar_url: string | null
+              role: string
+              org_id: string | null
+              is_approved: boolean
+            }
+            setUser(prev => prev ? {
+              ...prev,
+              name: p.name,
+              avatar_url: p.avatar_url,
+              email: p.email,
+            } : null)
+          }
+        }
+      )
+      .subscribe()
+
+    // Refetch on window focus (fallback if realtime not enabled)
+    const handleFocus = () => {
+      fetchUser()
+    }
+    window.addEventListener('focus', handleFocus)
+
+    // Listen for profile update event from settings page
+    const handleProfileUpdate = () => {
+      fetchUser()
+    }
+    window.addEventListener('profile-updated', handleProfileUpdate)
+
+    return () => {
+      supabase.removeChannel(channel)
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('profile-updated', handleProfileUpdate)
+    }
   }, [])
 
   // Close mobile menu on route change
@@ -141,7 +194,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       items.push(
         { title: 'Leads', href: `${baseUrl}/leads`, icon: <Target className="w-5 h-5" /> },
         { title: 'Follow-ups', href: `${baseUrl}/follow-ups`, icon: <CalendarDays className="w-5 h-5" /> },
-        { title: 'Demos', href: `${baseUrl}/demos`, icon: <Zap className="w-5 h-5" /> },
+        { title: 'Meetings', href: `${baseUrl}/meetings`, icon: <Zap className="w-5 h-5" /> },
         { title: 'Products', href: `${baseUrl}/products`, icon: <Package className="w-5 h-5" /> },
         { title: 'Analytics', href: `${baseUrl}/analytics`, icon: <BarChart3 className="w-5 h-5" /> },
       )
@@ -149,7 +202,6 @@ export function Sidebar({ orgSlug }: SidebarProps) {
 
     if (user?.role === 'admin' || user?.role === 'super_admin') {
       items.push(
-        { title: 'Import Leads', href: `${baseUrl}/import`, icon: <Upload className="w-5 h-5" /> },
         { title: 'Team', href: `${baseUrl}/team`, icon: <Users className="w-5 h-5" /> },
         { title: 'Lead Assignment', href: `${baseUrl}/assignment`, icon: <UserPlus className="w-5 h-5" /> },
       )
@@ -192,7 +244,11 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
         {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+          // Special handling for dashboard routes to prevent false positives
+          const isDashboard = item.title === 'Dashboard'
+          const isActive = isDashboard 
+            ? pathname === item.href || pathname === item.href + '/'
+            : pathname === item.href || pathname.startsWith(item.href + '/')
           return (
               <Link
                 key={item.href}
@@ -222,7 +278,15 @@ export function Sidebar({ orgSlug }: SidebarProps) {
 
       {/* User menu */}
       <div className="border-t p-4">
-        {mounted && user ? (
+        {!mounted || !user ? (
+          <div className="flex items-center gap-3 py-2 px-2">
+            <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
+            <div className="flex-1 space-y-1">
+              <div className="h-4 w-24 bg-muted rounded animate-pulse" />
+              <div className="h-3 w-16 bg-muted rounded animate-pulse" />
+            </div>
+          </div>
+        ) : (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="w-full justify-start gap-3 h-auto py-2">
@@ -240,31 +304,12 @@ export function Sidebar({ orgSlug }: SidebarProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>My Account</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem>
-                <Bell className="mr-2 h-4 w-4" />
-                Notifications
-              </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Settings className="mr-2 h-4 w-4" />
-                Settings
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleLogout} className="text-destructive cursor-pointer">
                 <LogOut className="mr-2 h-4 w-4" />
                 Sign out
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        ) : (
-          <div className="flex items-center gap-3 py-2 px-2">
-            <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
-            <div className="flex-1 space-y-1">
-              <div className="h-4 w-24 bg-muted rounded animate-pulse" />
-              <div className="h-3 w-16 bg-muted rounded animate-pulse" />
-            </div>
-          </div>
         )}
       </div>
     </div>

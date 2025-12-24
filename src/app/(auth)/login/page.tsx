@@ -15,10 +15,14 @@ function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const redirect = searchParams.get('redirect')
+  const errorParam = searchParams.get('error')
   
   const [isLoading, setIsLoading] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+
+  // Show deactivated message if redirected from middleware
+  const showDeactivatedError = errorParam === 'account_deactivated'
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,7 +45,7 @@ function LoginForm() {
         // Get user profile to determine redirect
         const { data: profile, error: profileError } = await supabase
           .from('users')
-          .select('role, org_id, is_approved, organizations(slug)')
+          .select('role, org_id, is_approved, is_active, organizations(slug)')
           .eq('auth_id', data.user.id)
           .single()
 
@@ -54,7 +58,15 @@ function LoginForm() {
           role: string
           org_id: string | null
           is_approved: boolean
+          is_active: boolean
           organizations: { slug: string } | null
+        }
+
+        // Check if account is deactivated
+        if (userProfile.role !== 'super_admin' && !userProfile.is_active) {
+          await supabase.auth.signOut()
+          toast.error('Your account has been deactivated. Please contact your administrator.')
+          return
         }
 
         toast.success('Welcome back!')
@@ -94,6 +106,13 @@ function LoginForm() {
           Enter your credentials to access your account
         </p>
       </div>
+
+      {showDeactivatedError && (
+        <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-800">
+          <p className="font-medium">Account Deactivated</p>
+          <p className="text-sm mt-1">Your account has been deactivated by an administrator. Please contact your organization admin to reactivate your account.</p>
+        </div>
+      )}
 
       <form onSubmit={handleLogin} className="space-y-5">
         <div className="space-y-2">

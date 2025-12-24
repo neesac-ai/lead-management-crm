@@ -66,20 +66,57 @@ export async function POST(request: Request) {
       )
     }
 
-    // Sign up the user in Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
+    // Check quota for this role
+    const { data: quotaResult, error: quotaError } = await supabase
+      .rpc('check_org_quota', { p_org_id: org.id, p_role: role })
+
+    if (quotaError) {
+      console.error('Quota check error:', quotaError)
+      // If the function doesn't exist yet, continue with registration
+      if (!quotaError.message.includes('does not exist')) {
+        return NextResponse.json(
+          { error: 'Failed to check organization quota' },
+          { status: 500 }
+        )
+      }
+    } else if (quotaResult && quotaResult.length > 0) {
+      const quota = quotaResult[0]
+      if (!quota.allowed) {
+        const roleLabel = role === 'sales' ? 'Sales Rep' : 'Accountant'
+        return NextResponse.json(
+          { 
+            error: `${roleLabel} quota is full for this organization. Current: ${quota.current_count}/${quota.quota}. Please contact your admin to increase the quota.` 
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Create user with admin API (more reliable, auto-confirms email)
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
-      options: {
-        data: {
-          name,
-          role,
-          org_code: orgCode,
-        },
+      email_confirm: true, // Auto-confirm email
+      user_metadata: {
+        name,
+        role,
+        org_code: orgCode,
       },
     })
 
     if (authError) {
+      console.error('Auth error:', authError)
+      
+      // Check for duplicate user
+      if (authError.message.includes('already') || 
+          authError.message.includes('exists') ||
+          authError.message.includes('duplicate')) {
+        return NextResponse.json(
+          { error: 'This email is already registered. Please try logging in.' },
+          { status: 400 }
+        )
+      }
+      
       return NextResponse.json(
         { error: authError.message },
         { status: 400 }
@@ -126,4 +163,3 @@ export async function POST(request: Request) {
     )
   }
 }
-

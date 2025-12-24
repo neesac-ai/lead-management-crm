@@ -1,7 +1,8 @@
 import { redirect, notFound } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/layout/sidebar'
 import { GoogleAuthToast } from '@/components/google-auth-toast'
+import { OrgProviderWrapper } from '@/components/providers/org-provider-wrapper'
 import { Suspense } from 'react'
 
 interface OrgLayoutProps {
@@ -16,23 +17,33 @@ export default async function OrgDashboardLayout({
   const { orgSlug } = await params
   const supabase = await createClient()
   
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+
+  if (authError) {
+    console.error('Auth error:', authError.message)
+  }
 
   if (!user) {
     redirect('/login')
   }
 
-  // Verify organization exists and user belongs to it
-  const { data: orgData } = await supabase
+  // Verify organization exists using admin client to bypass RLS
+  const adminSupabase = await createAdminClient()
+  const { data: orgData, error: orgError } = await adminSupabase
     .from('organizations')
-    .select('id, name, status')
+    .select('id, name, status, org_code')
     .eq('slug', orgSlug)
     .single()
 
-  type OrgData = { id: string; name: string; status: string }
+  type OrgData = { id: string; name: string; status: string; org_code: string }
   const org = orgData as OrgData | null
 
+  if (orgError) {
+    console.error('Org fetch error:', orgError.message, 'for slug:', orgSlug)
+  }
+
   if (!org) {
+    console.error('Organization not found for slug:', orgSlug)
     notFound()
   }
 
@@ -42,7 +53,7 @@ export default async function OrgDashboardLayout({
   }
 
   // Verify user belongs to this org (or is super admin)
-  const { data: profileData } = await supabase
+  const { data: profileData } = await adminSupabase
     .from('users')
     .select('role, org_id, is_approved')
     .eq('auth_id', user.id)
@@ -65,15 +76,17 @@ export default async function OrgDashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Suspense fallback={null}>
-        <GoogleAuthToast />
-      </Suspense>
-      <Sidebar orgSlug={orgSlug} />
-      <main className="pt-16 lg:pt-0 lg:pl-64">
-        {children}
-      </main>
-    </div>
+    <OrgProviderWrapper orgName={org.name || ''} orgCode={org.org_code || ''} orgSlug={orgSlug}>
+      <div className="min-h-screen bg-background">
+        <Suspense fallback={null}>
+          <GoogleAuthToast />
+        </Suspense>
+        <Sidebar orgSlug={orgSlug} />
+        <main className="pt-16 lg:pt-0 lg:pl-64">
+          {children}
+        </main>
+      </div>
+    </OrgProviderWrapper>
   )
 }
 

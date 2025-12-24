@@ -17,7 +17,6 @@ import {
 } from '@/components/ui/dialog'
 import { 
   Building2, 
-  Bell, 
   Calendar, 
   CheckCircle2, 
   XCircle, 
@@ -28,6 +27,10 @@ import {
   Folder,
   ChevronRight,
   RefreshCw,
+  User,
+  Key,
+  Pencil,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
@@ -38,9 +41,17 @@ interface PageProps {
 
 type UserProfile = {
   id: string
+  name: string
+  email: string
   role: string
   org_id: string
   google_refresh_token: string | null
+}
+
+type OrgInfo = {
+  name: string
+  org_code: string
+  contact_email?: string | null
 }
 
 type DriveFolder = {
@@ -51,12 +62,25 @@ type DriveFolder = {
 export default function SettingsPage({ params }: PageProps) {
   const { orgSlug } = use(params)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [orgInfo, setOrgInfo] = useState<OrgInfo | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isConnectingGoogle, setIsConnectingGoogle] = useState(false)
   const [orgName, setOrgName] = useState('')
   const [orgEmail, setOrgEmail] = useState('')
   const [isSavingOrg, setIsSavingOrg] = useState(false)
   const [hasAIConfig, setHasAIConfig] = useState(false)
+  
+  // Profile editing states
+  const [profileName, setProfileName] = useState('')
+  const [companyName, setCompanyName] = useState('')
+  const [isSavingProfile, setIsSavingProfile] = useState(false)
+  const [isEditingProfile, setIsEditingProfile] = useState(false)
+  
+  // Password reset states
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isChangingPassword, setIsChangingPassword] = useState(false)
+  const [showPasswordSection, setShowPasswordSection] = useState(false)
   
   // Drive folder states
   const [syncSettings, setSyncSettings] = useState<{
@@ -82,50 +106,108 @@ export default function SettingsPage({ params }: PageProps) {
 
     const { data: profile } = await supabase
       .from('users')
-      .select('id, role, org_id, google_refresh_token')
+      .select('id, name, email, role, org_id, google_refresh_token')
       .eq('auth_id', user.id)
       .single()
 
     if (profile) {
       setUserProfile(profile as UserProfile)
+      setProfileName(profile.name || '')
 
-      if (profile.org_id) {
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('name, contact_email')
-          .eq('id', profile.org_id)
-          .single()
-
-        if (org) {
+      // Fetch org info via API (bypasses RLS)
+      try {
+        const orgResponse = await fetch('/api/org/info')
+        if (orgResponse.ok) {
+          const org = await orgResponse.json()
+          setOrgInfo(org as OrgInfo)
           setOrgName(org.name || '')
           setOrgEmail(org.contact_email || '')
+          setCompanyName(org.name || '')
         }
+      } catch (error) {
+        console.error('Error fetching org info:', error)
+      }
 
-        if (profile.role === 'admin') {
-          const { data: aiConfigs } = await supabase
-            .from('ai_config')
-            .select('id')
-            .eq('org_id', profile.org_id)
-            .eq('is_active', true)
-            .limit(1)
+      if (profile.role === 'admin' && profile.org_id) {
+        const { data: aiConfigs } = await supabase
+          .from('ai_config')
+          .select('id')
+          .eq('org_id', profile.org_id)
+          .eq('is_active', true)
+          .limit(1)
 
-          setHasAIConfig(!!(aiConfigs && aiConfigs.length > 0))
-        }
+        setHasAIConfig(!!(aiConfigs && aiConfigs.length > 0))
+      }
 
-        // Get drive sync settings
-        const { data: sync } = await supabase
-          .from('drive_sync_settings')
-          .select('id, folder_id, folder_name, last_sync_at')
-          .eq('user_id', profile.id)
-          .single()
+      // Get drive sync settings
+      const { data: sync } = await supabase
+        .from('drive_sync_settings')
+        .select('id, folder_id, folder_name, last_sync_at')
+        .eq('user_id', profile.id)
+        .single()
 
-        if (sync) {
-          setSyncSettings(sync)
-        }
+      if (sync) {
+        setSyncSettings(sync)
       }
     }
 
     setIsLoading(false)
+  }
+
+  const handleSaveProfile = async () => {
+    if (!userProfile?.id) return
+    
+    setIsSavingProfile(true)
+    const supabase = createClient()
+
+    const { error } = await supabase
+      .from('users')
+      .update({ name: profileName })
+      .eq('id', userProfile.id)
+
+    if (error) {
+      toast.error('Failed to save profile')
+    } else {
+      toast.success('Profile saved')
+      setUserProfile(prev => prev ? { ...prev, name: profileName } : null)
+      // Notify sidebar to refresh user data
+      window.dispatchEvent(new CustomEvent('profile-updated'))
+    }
+    setIsSavingProfile(false)
+  }
+
+  const handleChangePassword = async () => {
+    if (!newPassword || !confirmPassword) {
+      toast.error('Please fill in all password fields')
+      return
+    }
+    
+    if (newPassword !== confirmPassword) {
+      toast.error('Passwords do not match')
+      return
+    }
+    
+    if (newPassword.length < 6) {
+      toast.error('Password must be at least 6 characters')
+      return
+    }
+
+    setIsChangingPassword(true)
+    const supabase = createClient()
+
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword
+    })
+
+    if (error) {
+      toast.error(error.message || 'Failed to change password')
+    } else {
+      toast.success('Password changed successfully')
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    }
+    setIsChangingPassword(false)
   }
 
   const handleConnectGoogle = async () => {
@@ -204,7 +286,6 @@ export default function SettingsPage({ params }: PageProps) {
       .from('organizations')
       .update({
         name: orgName,
-        contact_email: orgEmail,
       })
       .eq('id', userProfile.org_id)
 
@@ -333,6 +414,197 @@ export default function SettingsPage({ params }: PageProps) {
       />
       
       <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
+        {/* Account Information - Registration Info */}
+        <Card>
+          <CardHeader className="px-4 lg:px-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <User className="h-5 w-5 text-primary" />
+                <CardTitle>Account Information</CardTitle>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="capitalize">
+                  {userProfile?.role?.replace('_', ' ')}
+                </Badge>
+                {!isEditingProfile && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => setIsEditingProfile(true)}
+                  >
+                    <Pencil className="h-4 w-4 mr-1" />
+                    Edit
+                  </Button>
+                )}
+              </div>
+            </div>
+            <CardDescription>
+              Your account details from registration
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 lg:px-6 space-y-6">
+            {/* Account Details - Display Mode */}
+            {!isEditingProfile ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Name</Label>
+                  <p className="font-medium">{userProfile?.name || '-'}</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Organization Name</Label>
+                  <p className="font-medium">{orgInfo?.name || companyName || '-'}</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Email</Label>
+                  <p className="font-medium">{userProfile?.email || '-'}</p>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-muted-foreground text-xs">Organization Code</Label>
+                  <p className="font-medium font-mono text-primary">{orgInfo?.org_code || '-'}</p>
+                  <p className="text-xs text-muted-foreground">Share this code with team members</p>
+                </div>
+              </div>
+            ) : (
+              /* Account Details - Edit Mode */
+              <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Name</Label>
+                    <Input 
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      placeholder="Your name" 
+                    />
+                  </div>
+                  {isAdmin && (
+                    <div className="space-y-2">
+                      <Label>Organization Name</Label>
+                      <Input 
+                        value={companyName}
+                        onChange={(e) => {
+                          setCompanyName(e.target.value)
+                          setOrgName(e.target.value)
+                        }}
+                        placeholder="Organization name" 
+                      />
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <Label>Email</Label>
+                    <Input 
+                      value={userProfile?.email || ''}
+                      disabled
+                      className="bg-muted"
+                    />
+                    <p className="text-xs text-muted-foreground">Email cannot be changed</p>
+                  </div>
+                  {orgInfo && (
+                    <div className="space-y-2">
+                      <Label>Organization Code</Label>
+                      <Input 
+                        value={orgInfo.org_code}
+                        disabled
+                        className="bg-muted font-mono"
+                      />
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex gap-2">
+                  <Button onClick={async () => {
+                    await handleSaveProfile()
+                    if (isAdmin) {
+                      await handleSaveOrg()
+                    }
+                    setIsEditingProfile(false)
+                  }} disabled={isSavingProfile || isSavingOrg}>
+                    {(isSavingProfile || isSavingOrg) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Save Changes
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      // Reset to original values
+                      setProfileName(userProfile?.name || '')
+                      setCompanyName(orgInfo?.name || '')
+                      setOrgName(orgInfo?.name || '')
+                      setIsEditingProfile(false)
+                    }}
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {/* Password Reset Section */}
+            <div className="pt-4 border-t">
+              {!showPasswordSection ? (
+                <Button 
+                  variant="ghost" 
+                  onClick={() => setShowPasswordSection(true)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <Key className="h-4 w-4 mr-2 text-orange-500" />
+                  Change Password
+                </Button>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Key className="h-4 w-4 text-orange-500" />
+                      <h4 className="font-medium">Change Password</h4>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        setShowPasswordSection(false)
+                        setNewPassword('')
+                        setConfirmPassword('')
+                      }}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>New Password</Label>
+                      <Input 
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Enter new password" 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Confirm Password</Label>
+                      <Input 
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Confirm new password" 
+                      />
+                    </div>
+                  </div>
+                  <Button 
+                    onClick={async () => {
+                      await handleChangePassword()
+                      setShowPasswordSection(false)
+                    }} 
+                    disabled={isChangingPassword}
+                    className="mt-4"
+                  >
+                    {isChangingPassword && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Update Password
+                  </Button>
+                </>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* 1. Google Calendar Connection */}
         <Card>
           <CardHeader className="px-4 lg:px-6">
@@ -508,62 +780,6 @@ export default function SettingsPage({ params }: PageProps) {
             </CardContent>
           </Card>
         )}
-
-        {/* Organization Settings (Admin Only) */}
-        {isAdmin && (
-          <Card>
-            <CardHeader className="px-4 lg:px-6">
-              <div className="flex items-center gap-2">
-                <Building2 className="h-5 w-5" />
-                <CardTitle>Organization</CardTitle>
-              </div>
-              <CardDescription>Basic organization information</CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 lg:px-6 space-y-4">
-              <div className="grid gap-4">
-                <div className="space-y-2">
-                  <Label>Organization Name</Label>
-                  <Input 
-                    value={orgName}
-                    onChange={(e) => setOrgName(e.target.value)}
-                    placeholder="Your Organization" 
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Contact Email</Label>
-                  <Input 
-                    type="email" 
-                    value={orgEmail}
-                    onChange={(e) => setOrgEmail(e.target.value)}
-                    placeholder="contact@example.com" 
-                  />
-                </div>
-              </div>
-              <Button onClick={handleSaveOrg} disabled={isSavingOrg}>
-                {isSavingOrg && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Save Changes
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Notifications (Coming Soon) */}
-        <Card>
-          <CardHeader className="px-4 lg:px-6">
-            <div className="flex items-center gap-2">
-              <Bell className="h-5 w-5" />
-              <CardTitle>Notifications</CardTitle>
-              <Badge variant="outline">Coming Soon</Badge>
-            </div>
-            <CardDescription>Configure notification preferences</CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 lg:px-6">
-            <div className="text-center py-8 text-muted-foreground">
-              <Bell className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p>Notification settings coming soon</p>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Folder Browser Dialog */}

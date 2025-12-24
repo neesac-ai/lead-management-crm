@@ -23,6 +23,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { 
   Loader2, 
   Mail, 
@@ -40,6 +50,8 @@ import {
   TrendingDown,
   Minus,
   FileText,
+  Trash2,
+  AlertTriangle,
 } from 'lucide-react'
 import { ContactActions } from './contact-actions'
 import { toast } from 'sonner'
@@ -84,8 +96,8 @@ const statusOptions = [
   { value: 'call_not_picked', label: 'Call Not Picked', color: 'bg-yellow-500' },
   { value: 'not_interested', label: 'Not Interested', color: 'bg-gray-500' },
   { value: 'follow_up_again', label: 'Follow Up Again', color: 'bg-orange-500' },
-  { value: 'demo_booked', label: 'Demo Booked', color: 'bg-purple-500' },
-  { value: 'demo_completed', label: 'Demo Completed', color: 'bg-indigo-500' },
+  { value: 'demo_booked', label: 'Meeting Booked', color: 'bg-purple-500' },
+  { value: 'demo_completed', label: 'Meeting Completed', color: 'bg-indigo-500' },
   { value: 'deal_won', label: 'Deal Won', color: 'bg-emerald-500' },
   { value: 'deal_lost', label: 'Deal Lost', color: 'bg-red-500' },
 ]
@@ -133,6 +145,17 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   }
   const [callRecordings, setCallRecordings] = useState<CallRecording[]>([])
   const [isLoadingCalls, setIsLoadingCalls] = useState(false)
+  
+  // Delete state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  
+  // Hydration fix for Radix UI
+  const [mounted, setMounted] = useState(false)
+  
+  useEffect(() => {
+    setMounted(true)
+  }, [])
   
   // Calculate end date and pending amount
   const calculateEndDate = (startDate: string, validityDays: string): string => {
@@ -319,7 +342,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       }
 
       setMeetLink(data.event.meetLink)
-      toast.success('Demo scheduled with Google Meet link!')
+      toast.success('Meeting scheduled with Google Meet link!')
       return data.event
     } catch (error) {
       console.error('Error creating calendar event:', error)
@@ -447,14 +470,27 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       : null
     
     // Build activity data - only include product_id if products table exists
-    // Note: action_type is VARCHAR(50), so keep it short. Put product info in comments.
+    // Note: action_type is VARCHAR(50), so keep it short. Put extra info in comments.
+    const commentParts: string[] = []
+    if (comment) commentParts.push(comment)
+    if (productName) commentParts.push(`Product: ${productName}`)
+    
+    // Add meeting/follow-up date info to comments
+    if (status === 'demo_booked' && demoDate) {
+      const meetingDateTime = new Date(demoDate)
+      commentParts.push(`Meeting: ${meetingDateTime.toLocaleDateString()} ${meetingDateTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
+      commentParts.push(`Duration: ${demoDuration} min`)
+    }
+    if (status === 'follow_up_again' && followupDate) {
+      const followUpDateTime = new Date(followupDate)
+      commentParts.push(`Follow-up: ${followUpDateTime.toLocaleDateString()} ${followUpDateTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
+    }
+    
     const activityData: Record<string, unknown> = {
       lead_id: lead.id,
       user_id: profile.id,
       action_type: `Status: ${statusLabel}`.substring(0, 50), // Ensure max 50 chars
-      comments: productName 
-        ? `${comment || ''}\n[Product: ${productName}]`.trim()
-        : (comment || null),
+      comments: commentParts.length > 0 ? commentParts.join(' | ') : null,
     }
 
     // Only add product_id if a product was selected (and products table/column exists)
@@ -478,22 +514,26 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       console.log('Activity created successfully:', activityResult)
     }
 
-    // If demo_booked, create a demo entry and Google Calendar event
+    // If demo_booked (Meeting Booked), create a meeting entry and Google Calendar event
     if (status === 'demo_booked' && demoDate) {
-      // Convert datetime-local value to proper ISO string with timezone
-      // datetime-local gives "2025-12-21T01:30", we need to treat it as local time
+      // datetime-local gives "2025-12-25T10:00" - convert to ISO with proper timezone
+      // Create a Date object which interprets the datetime-local as local browser time
       const localDate = new Date(demoDate)
-      const isoWithTimezone = localDate.toISOString() // Converts to UTC properly
+      // Store as ISO string (UTC) - this is the correct way to store timestamps
+      const scheduledAtISO = localDate.toISOString()
+      
+      console.log('Storing meeting - input:', demoDate, 'as ISO:', scheduledAtISO)
       
       // First create the demo entry in database
       const { error: demoError } = await supabase.from('demos').insert({
         lead_id: lead.id,
-        scheduled_at: isoWithTimezone,
+        scheduled_at: scheduledAtISO,
         status: 'scheduled',
       })
 
       if (demoError) {
         console.error('Error creating demo entry:', demoError)
+        toast.error(`Failed to create meeting entry: ${demoError.message}`)
       }
 
       // Then create Google Calendar event with Meet link
@@ -587,6 +627,33 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     
     // Close the dialog after successful save
     onOpenChange(false)
+  }
+
+  const handleDeleteLead = async () => {
+    if (!lead) return
+    
+    setIsDeleting(true)
+    try {
+      const response = await fetch(`/api/leads/${lead.id}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        toast.error(data.error || 'Failed to delete lead')
+        return
+      }
+
+      toast.success('Lead deleted successfully')
+      onUpdate()
+      onOpenChange(false)
+    } catch (error) {
+      console.error('Delete error:', error)
+      toast.error('Failed to delete lead')
+    } finally {
+      setIsDeleting(false)
+      setShowDeleteDialog(false)
+    }
   }
 
   if (!lead || !currentLead) return null
@@ -704,21 +771,25 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label>Update Status</Label>
-                  <Select value={status} onValueChange={setStatus}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {selectableStatusOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${option.color}`} />
-                            {option.label}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {mounted ? (
+                    <Select value={status} onValueChange={setStatus}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectableStatusOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            <div className="flex items-center gap-2">
+                              <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                              {option.label}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="h-10 rounded-md border bg-muted animate-pulse" />
+                  )}
                 </div>
 
                 {/* Product Selection */}
@@ -727,21 +798,25 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     <Package className="h-4 w-4" />
                     Product Discussed
                   </Label>
-                  <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="na">
-                        <span className="text-muted-foreground">N/A - No product</span>
-                      </SelectItem>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>
-                          {product.name}
+                  {mounted ? (
+                    <Select value={selectedProductId} onValueChange={setSelectedProductId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select product" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="na">
+                          <span className="text-muted-foreground">N/A - No product</span>
                         </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                          {products.map((product) => (
+                            <SelectItem key={product.id} value={product.id}>
+                              {product.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                  ) : (
+                    <div className="h-10 rounded-md border bg-muted animate-pulse" />
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Select N/A if no specific product was discussed
                   </p>
@@ -768,7 +843,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
               </div>
             )}
 
-            {/* Demo Date (shown when status is demo_booked) */}
+            {/* Meeting Date (shown when status is demo_booked/Meeting Booked) */}
             {canEditStatus && status === 'demo_booked' && (
               <div className="space-y-4 p-4 border rounded-lg bg-purple-500/5 border-purple-500/20">
                 <div className="flex items-center gap-2 text-purple-600">
@@ -780,7 +855,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
                       <Calendar className="h-4 w-4" />
-                      Demo Date & Time
+                      Meeting Date & Time
                     </Label>
                     <Input
                       type="datetime-local"
@@ -791,18 +866,22 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   
                   <div className="space-y-2">
                     <Label>Duration</Label>
-                    <Select value={demoDuration} onValueChange={setDemoDuration}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="15">15 minutes</SelectItem>
-                        <SelectItem value="30">30 minutes</SelectItem>
-                        <SelectItem value="45">45 minutes</SelectItem>
-                        <SelectItem value="60">1 hour</SelectItem>
-                        <SelectItem value="90">1.5 hours</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {mounted ? (
+                      <Select value={demoDuration} onValueChange={setDemoDuration}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15">15 minutes</SelectItem>
+                          <SelectItem value="30">30 minutes</SelectItem>
+                          <SelectItem value="45">45 minutes</SelectItem>
+                          <SelectItem value="60">1 hour</SelectItem>
+                          <SelectItem value="90">1.5 hours</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="h-10 rounded-md border bg-muted animate-pulse" />
+                    )}
                   </div>
                 </div>
 
@@ -920,19 +999,23 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   </div>
                   <div className="space-y-2">
                     <Label>Validity *</Label>
-                    <Select value={validity} onValueChange={setValidity}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="30">30 Days</SelectItem>
-                        <SelectItem value="60">60 Days</SelectItem>
-                        <SelectItem value="90">90 Days</SelectItem>
-                        <SelectItem value="180">180 Days</SelectItem>
-                        <SelectItem value="365">365 Days (1 Year)</SelectItem>
-                        <SelectItem value="non_recurring">Non Recurring</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {mounted ? (
+                      <Select value={validity} onValueChange={setValidity}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="30">30 Days</SelectItem>
+                          <SelectItem value="60">60 Days</SelectItem>
+                          <SelectItem value="90">90 Days</SelectItem>
+                          <SelectItem value="180">180 Days</SelectItem>
+                          <SelectItem value="365">365 Days (1 Year)</SelectItem>
+                          <SelectItem value="non_recurring">Non Recurring</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="h-10 rounded-md border bg-muted animate-pulse" />
+                    )}
                   </div>
                 </div>
                 
@@ -1112,28 +1195,83 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
           </TabsContent>
         </Tabs>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
-          </Button>
-          {canEditStatus && (
-            <Button 
-              onClick={handleUpdateStatus} 
-              disabled={isSaving || !hasChanges}
-              variant={hasChanges ? 'default' : 'secondary'}
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                'Save Changes'
-              )}
+        <DialogFooter className="flex flex-col sm:flex-row gap-2">
+          <div className="flex gap-2 flex-1">
+            {isAdmin && (
+              <Button 
+                variant="destructive" 
+                size="sm"
+                onClick={() => setShowDeleteDialog(true)}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Close
             </Button>
-          )}
+            {canEditStatus && (
+              <Button 
+                onClick={handleUpdateStatus} 
+                disabled={isSaving || !hasChanges}
+                variant={hasChanges ? 'default' : 'secondary'}
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </Button>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              Delete Lead?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>This will permanently delete <strong>{currentLead?.name}</strong> and all associated data including:</p>
+                <ul className="list-disc list-inside mt-2 text-sm text-muted-foreground">
+                  <li>All activities and notes</li>
+                  <li>Scheduled demos/meetings</li>
+                  <li>Call recordings</li>
+                  <li>Subscriptions</li>
+                </ul>
+                <p className="mt-2 text-red-600 font-medium">This action cannot be undone!</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDeleteLead}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Lead'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }
