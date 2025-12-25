@@ -57,6 +57,8 @@ type Subscription = {
   amount_credited: number
   amount_pending: number
   notes: string | null
+  product_id: string | null
+  product?: { id: string; name: string } | null
   created_at: string
   leads: {
     id: string
@@ -97,10 +99,15 @@ export default function SubscriptionsPage() {
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
   const [showFilters, setShowFilters] = useState(false)
+  const [phoneSearch, setPhoneSearch] = useState<string>('')
+  
+  // Hydration fix - only render Radix UI components after mount
+  const [mounted, setMounted] = useState(false)
 
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'super_admin'
 
   useEffect(() => {
+    setMounted(true)
     fetchData()
   }, [orgSlug])
 
@@ -150,6 +157,7 @@ export default function SubscriptionsPage() {
       setProducts(productsData || [])
 
       // Fetch subscriptions with lead info and assignee name
+      // Note: product_id will only work after running migration 020
       const { data: subsData, error } = await supabase
         .from('customer_subscriptions')
         .select(`
@@ -172,14 +180,48 @@ export default function SubscriptionsPage() {
         console.error('Error fetching subscriptions:', error)
         setSubscriptions([])
       } else {
+        // Get lead IDs to fetch their products from lead_activities
+        const leadIds = (subsData || []).map(s => s.leads?.id).filter(Boolean) as string[]
+        
+        // Fetch the most recent product_id for each lead from lead_activities
+        let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
+        if (leadIds.length > 0) {
+          const { data: activitiesWithProducts } = await supabase
+            .from('lead_activities')
+            .select('lead_id, product_id, products(id, name)')
+            .in('lead_id', leadIds)
+            .not('product_id', 'is', null)
+            .order('created_at', { ascending: false })
+          
+          // Build map of lead_id -> most recent product
+          if (activitiesWithProducts) {
+            for (const activity of activitiesWithProducts) {
+              if (activity.product_id && !leadProductMap[activity.lead_id]) {
+                const productData = (activity as any).products as { id: string; name: string } | null
+                if (productData) {
+                  leadProductMap[activity.lead_id] = {
+                    product_id: activity.product_id,
+                    product_name: productData.name
+                  }
+                }
+              }
+            }
+          }
+        }
+
         // Filter client-side for sales reps (only their assigned/created leads)
-        let filteredSubs = (subsData || []).map(sub => ({
-          ...sub,
-          leads: sub.leads ? {
-            ...sub.leads,
-            assignee: (sub.leads as unknown as { assignee: { name: string } | null }).assignee
-          } : null
-        })) as Subscription[]
+        let filteredSubs = (subsData || []).map(sub => {
+          const productInfo = sub.leads?.id ? leadProductMap[sub.leads.id] : null
+          return {
+            ...sub,
+            product_id: productInfo?.product_id || null,
+            product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
+            leads: sub.leads ? {
+              ...sub.leads,
+              assignee: (sub.leads as unknown as { assignee: { name: string } | null }).assignee
+            } : null
+          }
+        }) as Subscription[]
         
         if (profile.role === 'sales') {
           filteredSubs = filteredSubs.filter(sub => 
@@ -268,6 +310,15 @@ export default function SubscriptionsPage() {
         if (sub.leads?.assigned_to !== selectedSalesRep) return false
       }
       
+      // Product filter
+      if (selectedProduct !== 'all') {
+        if (selectedProduct === 'none') {
+          if (sub.product_id) return false
+        } else {
+          if (sub.product_id !== selectedProduct) return false
+        }
+      }
+      
       // Deal value filter
       if (dealValueOperator !== 'all' && dealValueAmount) {
         const targetAmount = parseFloat(dealValueAmount)
@@ -315,14 +366,21 @@ export default function SubscriptionsPage() {
         if (subDate > toDate) return false
       }
       
+      // Phone search filter
+      if (phoneSearch) {
+        const searchTerm = phoneSearch.replace(/[^\d]/g, '')
+        const leadPhone = (sub.leads?.phone || '').replace(/[^\d]/g, '')
+        if (!leadPhone.includes(searchTerm)) return false
+      }
+      
       return true
     })
-  }, [subscriptions, filter, isAdmin, selectedSalesRep, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo])
+  }, [subscriptions, filter, isAdmin, selectedSalesRep, selectedProduct, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo, phoneSearch])
 
   // Check if any filter is active
   const hasActiveFilters = filter !== 'all' || selectedSalesRep !== 'all' || 
     selectedProduct !== 'all' || dealValueOperator !== 'all' || 
-    paymentFilter !== 'all' || daysLeftOperator !== 'all' || dateFrom || dateTo
+    paymentFilter !== 'all' || daysLeftOperator !== 'all' || dateFrom || dateTo || phoneSearch
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -336,6 +394,7 @@ export default function SubscriptionsPage() {
     setDaysLeftValue('')
     setDateFrom('')
     setDateTo('')
+    setPhoneSearch('')
   }
 
   // Calculate stats from filtered subscriptions
@@ -448,49 +507,68 @@ export default function SubscriptionsPage() {
                 </CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {/* Sales Rep Filter - Admin Only */}
-                {isAdmin && salesTeam.length > 0 && (
-                  <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue placeholder="Sales Rep" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Reps</SelectItem>
-                      {salesTeam.map((rep) => (
-                        <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                {mounted && (
+                  <>
+                    {/* Sales Rep Filter - Admin Only */}
+                    {isAdmin && salesTeam.length > 0 && (
+                      <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                        <SelectTrigger className="w-[140px]">
+                          <SelectValue placeholder="Sales Rep" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Reps</SelectItem>
+                          {salesTeam.map((rep) => (
+                            <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {/* Product Filter */}
+                    {products.length > 0 && (
+                      <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                        <SelectTrigger className="w-[150px]">
+                          <Package className="h-4 w-4 mr-2" />
+                          <SelectValue placeholder="Product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Products</SelectItem>
+                          <SelectItem value="none">No Product</SelectItem>
+                          {products.map((product) => (
+                            <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </>
                 )}
 
-                {/* Product Filter */}
-                {products.length > 0 && (
-                  <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                {/* Phone Search */}
+                <div className="relative">
+                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search by phone..."
+                    value={phoneSearch}
+                    onChange={(e) => setPhoneSearch(e.target.value)}
+                    className="w-[160px] pl-8 h-9"
+                  />
+                </div>
+
+                {mounted && (
+                  <Select value={filter} onValueChange={setFilter}>
                     <SelectTrigger className="w-[130px]">
-                      <Package className="h-4 w-4 mr-2" />
-                      <SelectValue placeholder="Product" />
+                      <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Products</SelectItem>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
-                      ))}
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="non_recurring">Non Recurring</SelectItem>
+                      <SelectItem value="paused">Paused</SelectItem>
+                      <SelectItem value="inactive">Expired</SelectItem>
                     </SelectContent>
                   </Select>
                 )}
-
-                <Select value={filter} onValueChange={setFilter}>
-                  <SelectTrigger className="w-[130px]">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="non_recurring">Non Recurring</SelectItem>
-                    <SelectItem value="paused">Paused</SelectItem>
-                    <SelectItem value="inactive">Expired</SelectItem>
-                  </SelectContent>
-                </Select>
 
                 <Button 
                   variant="outline" 
@@ -515,7 +593,7 @@ export default function SubscriptionsPage() {
             </div>
 
             {/* Extended Filters */}
-            {showFilters && (
+            {showFilters && mounted && (
               <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
                 {/* Deal Value Filter */}
                 <div className="flex items-center gap-1">
@@ -629,7 +707,9 @@ export default function SubscriptionsPage() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b text-left">
+                        <th className="py-3 px-2 font-medium w-10">#</th>
                         <th className="py-3 px-2 font-medium">Customer</th>
+                        <th className="py-3 px-2 font-medium">Product</th>
                         <th className="py-3 px-2 font-medium">Deal Value</th>
                         <th className="py-3 px-2 font-medium">Paid / Pending</th>
                         <th className="py-3 px-2 font-medium">Period</th>
@@ -639,12 +719,17 @@ export default function SubscriptionsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredSubscriptions.map((sub) => {
+                      {filteredSubscriptions.map((sub, index) => {
                         const statusInfo = getSubscriptionStatus(sub)
                         const daysInfo = getDaysRemaining(sub)
                         
                         return (
                           <tr key={sub.id} className="border-b last:border-0 hover:bg-muted/50">
+                            <td className="py-3 px-2">
+                              <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium">
+                                {index + 1}
+                              </span>
+                            </td>
                             <td className="py-3 px-2">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
@@ -676,6 +761,16 @@ export default function SubscriptionsPage() {
                                   )}
                                 </div>
                               </div>
+                            </td>
+                            <td className="py-3 px-2">
+                              {sub.product ? (
+                                <Badge variant="outline" className="border-purple-500 text-purple-600">
+                                  <Package className="h-3 w-3 mr-1" />
+                                  {sub.product.name}
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">-</span>
+                              )}
                             </td>
                             <td className="py-3 px-2">
                               <span className="font-semibold">₹{sub.deal_value.toLocaleString()}</span>
@@ -735,19 +830,24 @@ export default function SubscriptionsPage() {
 
                 {/* Mobile Cards */}
                 <div className="md:hidden space-y-3">
-                  {filteredSubscriptions.map((sub) => {
+                  {filteredSubscriptions.map((sub, index) => {
                     const statusInfo = getSubscriptionStatus(sub)
                     const daysInfo = getDaysRemaining(sub)
                     
                     return (
                       <div key={sub.id} className="border rounded-lg p-4 space-y-3">
-                        {/* Header: Phone (primary) + Status */}
+                        {/* Header: Serial + Phone (primary) + Status */}
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <Phone className="h-4 w-4 text-primary shrink-0" />
-                              <p className="font-semibold text-lg truncate">{sub.leads?.phone || 'Unknown'}</p>
-                            </div>
+                          <div className="flex items-start gap-3 min-w-0 flex-1">
+                            {/* Serial Number */}
+                            <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
+                              {index + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <Phone className="h-4 w-4 text-primary shrink-0" />
+                                <p className="font-semibold text-lg truncate">{sub.leads?.phone || 'Unknown'}</p>
+                              </div>
                             {sub.leads?.name && sub.leads.name !== sub.leads.phone && (
                               <p className="text-sm text-muted-foreground truncate mt-0.5">{sub.leads.name}</p>
                             )}
@@ -757,10 +857,19 @@ export default function SubscriptionsPage() {
                                 <span className="truncate">{sub.leads.custom_fields.company}</span>
                               </div>
                             )}
+                            </div>
                           </div>
-                          <Badge className={`${statusInfo.color} shrink-0`}>
-                            {statusInfo.label}
-                          </Badge>
+                          <div className="flex flex-wrap gap-2 shrink-0">
+                            <Badge className={statusInfo.color}>
+                              {statusInfo.label}
+                            </Badge>
+                            {sub.product && (
+                              <Badge variant="outline" className="border-purple-500 text-purple-600">
+                                <Package className="h-3 w-3 mr-1" />
+                                {sub.product.name}
+                              </Badge>
+                            )}
+                          </div>
                         </div>
 
                         {/* Email */}

@@ -11,8 +11,8 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "BharatCRM - Digitizing MSMEs of Bharat | by neesac.ai",
-  description: "Empowering MSMEs with smart CRM solutions. Manage leads, track follow-ups, and grow your business the Bharat way. A product of neesac.ai",
+  title: "BharatCRM",
+  description: "Smart CRM solutions by neesac.ai. Manage leads, track follow-ups, and grow your business.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

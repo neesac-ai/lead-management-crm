@@ -19,3 +19,4 @@ SET details = REPLACE(details::text, 'demo_completed', 'meeting_completed')::jso
 WHERE details::text LIKE '%demo_completed%';
 
 
+

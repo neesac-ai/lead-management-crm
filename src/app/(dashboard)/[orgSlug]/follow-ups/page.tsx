@@ -48,6 +48,8 @@ type FollowUp = {
   lead_id: string
   next_followup: string
   comments: string | null
+  product_id: string | null
+  product?: { id: string; name: string } | null
   leads: {
     id: string
     name: string
@@ -110,6 +112,7 @@ export default function FollowUpsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [phoneSearch, setPhoneSearch] = useState<string>('')
 
   useEffect(() => {
     setMounted(true)
@@ -247,19 +250,22 @@ export default function FollowUpsPage() {
         const leadIds = leads.map(l => l.id)
         
         // Get activities with next_followup for these leads
+        // product_id already exists from migration 007
         const { data } = await supabase
           .from('lead_activities')
           .select(`
-            id, lead_id, next_followup, comments, 
+            id, lead_id, next_followup, comments, product_id,
+            products(id, name),
             leads(id, name, email, phone, status, custom_fields, assigned_to, assignee:users!leads_assigned_to_fkey(name))
           `)
           .in('lead_id', leadIds)
           .not('next_followup', 'is', null)
           .order('next_followup', { ascending: true })
 
-        // Map with assignee info
+        // Map with assignee info and product
         const followUpsWithAssignee = (data || []).map(f => ({
           ...f,
+          product: (f as any).products as { id: string; name: string } | null,
           leads: f.leads ? {
             ...f.leads,
             assignee: (f.leads as unknown as { assignee: { name: string } | null }).assignee
@@ -288,6 +294,15 @@ export default function FollowUpsPage() {
         if (f.leads?.assigned_to !== selectedSalesRep) return false
       }
       
+      // Product filter
+      if (selectedProduct !== 'all') {
+        if (selectedProduct === 'none') {
+          if (f.product_id) return false
+        } else {
+          if (f.product_id !== selectedProduct) return false
+        }
+      }
+      
       // Date range filter
       if (dateFrom) {
         const followUpDate = new Date(f.next_followup)
@@ -302,13 +317,20 @@ export default function FollowUpsPage() {
         if (followUpDate > toDate) return false
       }
       
+      // Phone search filter
+      if (phoneSearch) {
+        const searchTerm = phoneSearch.replace(/[^\d]/g, '')
+        const leadPhone = (f.leads?.phone || '').replace(/[^\d]/g, '')
+        if (!leadPhone.includes(searchTerm)) return false
+      }
+      
       return true
     })
-  }, [followUps, isAdmin, selectedSalesRep, dateFrom, dateTo, showUpcomingOnly])
+  }, [followUps, isAdmin, selectedSalesRep, selectedProduct, dateFrom, dateTo, showUpcomingOnly, phoneSearch])
 
   // Check if any filter is active
   const hasActiveFilters = selectedSalesRep !== 'all' || selectedProduct !== 'all' || 
-    dateFrom || dateTo || !showUpcomingOnly
+    dateFrom || dateTo || !showUpcomingOnly || phoneSearch
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -317,6 +339,7 @@ export default function FollowUpsPage() {
     setDateFrom('')
     setDateTo('')
     setShowUpcomingOnly(true)
+    setPhoneSearch('')
   }
 
   const isOverdue = (date: string) => new Date(date) < new Date()
@@ -342,36 +365,53 @@ export default function FollowUpsPage() {
                 <CardDescription>{filteredFollowUps.length} follow-up{filteredFollowUps.length !== 1 ? 's' : ''}</CardDescription>
               </div>
               <div className="flex items-center gap-2">
-                {/* Sales Rep Filter - Admin Only */}
-                {isAdmin && salesTeam.length > 0 && (
-                  <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                    <SelectTrigger className="w-[150px]">
-                      <SelectValue placeholder="Sales Rep" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Reps</SelectItem>
-                      {salesTeam.map((rep) => (
-                        <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                {mounted && (
+                  <>
+                    {/* Sales Rep Filter - Admin Only */}
+                    {isAdmin && salesTeam.length > 0 && (
+                      <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                        <SelectTrigger className="w-[150px]">
+                          <SelectValue placeholder="Sales Rep" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Reps</SelectItem>
+                          {salesTeam.map((rep) => (
+                            <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {/* Product Filter */}
+                    {products.length > 0 && (
+                      <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                        <SelectTrigger className="w-[150px]">
+                          <Package className="h-4 w-4 mr-2" />
+                          <SelectValue placeholder="Product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Products</SelectItem>
+                          <SelectItem value="none">No Product</SelectItem>
+                          {products.map((product) => (
+                            <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </>
                 )}
 
-                {/* Product Filter */}
-                {products.length > 0 && (
-                  <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                    <SelectTrigger className="w-[140px]">
-                      <Package className="h-4 w-4 mr-2" />
-                      <SelectValue placeholder="Product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Products</SelectItem>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                {/* Phone Search */}
+                <div className="relative">
+                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search by phone..."
+                    value={phoneSearch}
+                    onChange={(e) => setPhoneSearch(e.target.value)}
+                    className="w-[160px] pl-8 h-9"
+                  />
+                </div>
 
                 <Button 
                   variant="outline" 
@@ -439,7 +479,7 @@ export default function FollowUpsPage() {
               </div>
             ) : filteredFollowUps.length > 0 ? (
               <div className="space-y-3">
-                {filteredFollowUps.map((followUp) => (
+                {filteredFollowUps.map((followUp, index) => (
                   <div 
                     key={followUp.id} 
                     className={`p-4 rounded-lg border bg-card ${
@@ -447,13 +487,18 @@ export default function FollowUpsPage() {
                       isTodayDate(followUp.next_followup) ? 'border-yellow-500/50 bg-yellow-500/5' : ''
                     }`}
                   >
-                    {/* Top row: Phone (primary) + Time Badge */}
+                    {/* Top row: Serial + Phone (primary) + Time Badge */}
                     <div className="flex items-start justify-between gap-2 mb-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <Phone className="h-4 w-4 text-primary shrink-0" />
-                          <p className="font-semibold truncate text-lg">{followUp.leads?.phone}</p>
-                        </div>
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        {/* Serial Number */}
+                        <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-primary shrink-0" />
+                            <p className="font-semibold truncate text-lg">{followUp.leads?.phone}</p>
+                          </div>
                         {followUp.leads?.name && followUp.leads.name !== followUp.leads.phone && (
                           <p className="text-sm text-muted-foreground truncate mt-0.5">
                             {followUp.leads.name}
@@ -465,16 +510,25 @@ export default function FollowUpsPage() {
                             <span className="truncate">{followUp.leads.custom_fields.company}</span>
                           </div>
                         )}
+                        </div>
                       </div>
-                      {isOverdue(followUp.next_followup) ? (
-                        <Badge variant="destructive" className="shrink-0">Overdue</Badge>
-                      ) : isTodayDate(followUp.next_followup) ? (
-                        <Badge className="bg-yellow-500 shrink-0">Today</Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {formatDistanceToNow(new Date(followUp.next_followup), { addSuffix: true })}
-                        </span>
-                      )}
+                      <div className="flex flex-wrap gap-2 shrink-0 items-center">
+                        {isOverdue(followUp.next_followup) ? (
+                          <Badge variant="destructive">Overdue</Badge>
+                        ) : isTodayDate(followUp.next_followup) ? (
+                          <Badge className="bg-yellow-500">Today</Badge>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {formatDistanceToNow(new Date(followUp.next_followup), { addSuffix: true })}
+                          </span>
+                        )}
+                        {followUp.product && (
+                          <Badge variant="outline" className="border-purple-500 text-purple-600">
+                            <Package className="h-3 w-3 mr-1" />
+                            {followUp.product.name}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
 
                     {/* Email */}
@@ -571,33 +625,35 @@ export default function FollowUpsPage() {
       </div>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Follow-up</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this follow-up? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteFollowUp}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                'Delete'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {mounted && (
+        <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Follow-up</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete this follow-up? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteFollowUp}
+                disabled={isDeleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }

@@ -37,7 +37,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { LeadDetailDialog } from '@/components/leads/lead-detail-dialog'
-import { Target, Plus, Loader2, Phone, Mail, User, UserCircle, AlertTriangle, Upload, FileSpreadsheet, CheckCircle, AlertCircle, X, UserCheck, Users, Filter, Calendar, Package, Trash2 } from 'lucide-react'
+import { Target, Plus, Loader2, Phone, Mail, User, UserCircle, AlertTriangle, Upload, FileSpreadsheet, CheckCircle, AlertCircle, X, UserCheck, Users, Filter, Calendar, Package, Trash2, TrendingUp } from 'lucide-react'
 import { differenceInDays } from 'date-fns'
 import { toast } from 'sonner'
 
@@ -48,12 +48,15 @@ type Lead = {
   phone: string | null
   source: string
   status: string
+  subscription_type?: string | null
+  product_id?: string | null
   custom_fields: { company?: string } | null
   created_at: string
   created_by: string | null
   assigned_to: string | null
   creator: { name: string } | null
   assignee: { name: string } | null
+  product?: { id: string; name: string } | null
 }
 
 type UserProfile = {
@@ -160,6 +163,7 @@ export default function LeadsPage() {
   
   // Filter state
   const [statusFilter, setStatusFilter] = useState('all')
+  const [subscriptionTypeFilter, setSubscriptionTypeFilter] = useState('all')
   const [tags, setTags] = useState<Tag[]>([])
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all')
   const [leadTags, setLeadTags] = useState<Record<string, string[]>>({}) // leadId -> tagIds
@@ -174,17 +178,19 @@ export default function LeadsPage() {
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
   const [showFilters, setShowFilters] = useState(false)
+  const [phoneSearch, setPhoneSearch] = useState<string>('')
+  
+  // Delete confirmation state
+  const [deleteConfirmText, setDeleteConfirmText] = useState<string>('')
+  const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null)
+  const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false)
+  const [isDeletingSingle, setIsDeletingSingle] = useState(false)
   
   // Duplicate detection state
   const [duplicateLead, setDuplicateLead] = useState<DuplicateLead | null>(null)
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
   
-  // Bulk delete state
-  const [isDeleteMode, setIsDeleteMode] = useState(false)
-  const [selectedForDelete, setSelectedForDelete] = useState<Set<string>>(new Set())
-  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
   
   // Import dialog state
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
@@ -194,6 +200,13 @@ export default function LeadsPage() {
   const [importResult, setImportResult] = useState<{ success: number; failed: number; skipped: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Hydration fix - only render Radix UI components after mount
+  const [mounted, setMounted] = useState(false)
+  
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     fetchUserAndLeads()
@@ -225,10 +238,11 @@ export default function LeadsPage() {
     
     // Use a single query with JOIN for users - much faster than N+1 queries
     // Using foreign key relationships defined in Supabase
+    // Note: product_id and product relation will only work after running migration 020
     let query = supabase
       .from('leads')
       .select(`
-        id, name, email, phone, source, status, custom_fields, created_at, created_by, assigned_to,
+        id, name, email, phone, source, status, subscription_type, custom_fields, created_at, created_by, assigned_to,
         creator:users!leads_created_by_fkey(name),
         assignee:users!leads_assigned_to_fkey(name)
       `)
@@ -248,12 +262,46 @@ export default function LeadsPage() {
       return
     }
 
+    // Get lead IDs to fetch their products from lead_activities
+    const leadIds = (leadsData || []).map(l => l.id)
+    
+    // Fetch the most recent product_id for each lead from lead_activities
+    let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
+    if (leadIds.length > 0) {
+      const { data: activitiesWithProducts } = await supabase
+        .from('lead_activities')
+        .select('lead_id, product_id, products(id, name)')
+        .in('lead_id', leadIds)
+        .not('product_id', 'is', null)
+        .order('created_at', { ascending: false })
+      
+      // Build map of lead_id -> most recent product
+      if (activitiesWithProducts) {
+        for (const activity of activitiesWithProducts) {
+          if (activity.product_id && !leadProductMap[activity.lead_id]) {
+            const productData = activity.products as { id: string; name: string } | null
+            if (productData) {
+              leadProductMap[activity.lead_id] = {
+                product_id: activity.product_id,
+                product_name: productData.name
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Map leads - relationships already included
-    const leadsWithUsers = (leadsData || []).map(lead => ({
-      ...lead,
-      creator: lead.creator as { name: string } | null,
-      assignee: lead.assignee as { name: string } | null,
-    }))
+    const leadsWithUsers = (leadsData || []).map(lead => {
+      const productInfo = leadProductMap[lead.id]
+      return {
+        ...lead,
+        creator: lead.creator as { name: string } | null,
+        assignee: lead.assignee as { name: string } | null,
+        product_id: productInfo?.product_id || null,
+        product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
+      }
+    })
 
     setLeads(leadsWithUsers as Lead[])
 
@@ -459,6 +507,24 @@ export default function LeadsPage() {
     // Status filter
     if (statusFilter !== 'all' && lead.status !== statusFilter) return false
     
+    // Subscription type filter
+    if (subscriptionTypeFilter !== 'all') {
+      if (subscriptionTypeFilter === 'not_set') {
+        if (lead.subscription_type) return false
+      } else {
+        if (lead.subscription_type !== subscriptionTypeFilter) return false
+      }
+    }
+    
+    // Product filter
+    if (selectedProduct !== 'all') {
+      if (selectedProduct === 'none') {
+        if (lead.product_id) return false
+      } else {
+        if (lead.product_id !== selectedProduct) return false
+      }
+    }
+    
     // Tag filter
     if (selectedTagFilter !== 'all') {
       const leadTagIds = leadTags[lead.id] || []
@@ -501,94 +567,71 @@ export default function LeadsPage() {
       if (leadDate > toDate) return false
     }
     
+    // Phone search filter
+    if (phoneSearch) {
+      const searchTerm = phoneSearch.replace(/[^\d]/g, '') // Remove non-digits
+      const leadPhone = (lead.phone || '').replace(/[^\d]/g, '')
+      if (!leadPhone.includes(searchTerm)) return false
+    }
+    
     return true
   })
 
   // Check if any filter is active
-  const hasActiveFilters = statusFilter !== 'all' || selectedTagFilter !== 'all' || 
-    selectedSalesRep !== 'all' || selectedProduct !== 'all' || 
-    (leadAgeOperator !== 'all' && leadAgeDays) || dateFrom || dateTo
+  const hasActiveFilters = statusFilter !== 'all' || subscriptionTypeFilter !== 'all' || 
+    selectedProduct !== 'all' || selectedTagFilter !== 'all' || 
+    selectedSalesRep !== 'all' || 
+    (leadAgeOperator !== 'all' && leadAgeDays) || dateFrom || dateTo || phoneSearch
 
   // Clear all filters
   const clearAllFilters = () => {
     setStatusFilter('all')
+    setSubscriptionTypeFilter('all')
+    setSelectedProduct('all')
     setSelectedTagFilter('all')
     setSelectedSalesRep('all')
-    setSelectedProduct('all')
     setLeadAgeOperator('all')
     setLeadAgeDays('')
     setDateFrom('')
     setDateTo('')
+    setPhoneSearch('')
   }
 
-  // Bulk delete functions
-  const toggleDeleteMode = () => {
-    if (isDeleteMode) {
-      // Exit delete mode
-      setIsDeleteMode(false)
-      setSelectedForDelete(new Set())
-    } else {
-      // Enter delete mode
-      setIsDeleteMode(true)
+
+  // Single lead delete with confirmation
+  const handleSingleLeadDelete = async () => {
+    if (!leadToDelete || deleteConfirmText.toLowerCase() !== 'delete') {
+      toast.error('Please type "delete" to confirm')
+      return
     }
-  }
-
-  const toggleLeadSelection = (leadId: string) => {
-    setSelectedForDelete(prev => {
-      const next = new Set(prev)
-      if (next.has(leadId)) {
-        next.delete(leadId)
-      } else {
-        next.add(leadId)
-      }
-      return next
-    })
-  }
-
-  const selectAllFiltered = () => {
-    if (selectedForDelete.size === filteredLeads.length) {
-      setSelectedForDelete(new Set())
-    } else {
-      setSelectedForDelete(new Set(filteredLeads.map(l => l.id)))
-    }
-  }
-
-  const handleBulkDelete = async () => {
-    if (selectedForDelete.size === 0) return
     
-    setIsDeleting(true)
-    let successCount = 0
-    let failCount = 0
-
-    for (const leadId of selectedForDelete) {
-      try {
-        const response = await fetch(`/api/leads/${leadId}`, {
-          method: 'DELETE',
-        })
-        
-        if (response.ok) {
-          successCount++
-        } else {
-          failCount++
-        }
-      } catch (error) {
-        console.error('Error deleting lead:', error)
-        failCount++
+    setIsDeletingSingle(true)
+    try {
+      const response = await fetch(`/api/leads/${leadToDelete.id}`, {
+        method: 'DELETE',
+      })
+      
+      if (response.ok) {
+        toast.success('Lead deleted successfully')
+        if (userProfile) fetchLeads(userProfile)
+      } else {
+        toast.error('Failed to delete lead')
       }
+    } catch (error) {
+      console.error('Error deleting lead:', error)
+      toast.error('Failed to delete lead')
     }
+    
+    setIsDeletingSingle(false)
+    setShowDeleteConfirmDialog(false)
+    setLeadToDelete(null)
+    setDeleteConfirmText('')
+  }
 
-    setIsDeleting(false)
-    setShowBulkDeleteDialog(false)
-    setSelectedForDelete(new Set())
-    setIsDeleteMode(false)
-
-    if (successCount > 0) {
-      toast.success(`${successCount} lead(s) deleted successfully`)
-      if (userProfile) fetchLeads(userProfile)
-    }
-    if (failCount > 0) {
-      toast.error(`Failed to delete ${failCount} lead(s)`)
-    }
+  const openDeleteConfirmDialog = (lead: Lead) => {
+    setLeadToDelete(lead)
+    setDeleteConfirmText('')
+    setShowDeleteConfirmDialog(true)
   }
 
   // Import functions
@@ -852,105 +895,109 @@ export default function LeadsPage() {
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  {isDeleteMode ? (
-                    <>
-                      <Button variant="ghost" onClick={toggleDeleteMode}>
-                        Cancel
-                      </Button>
-                      <Button 
-                        variant="destructive" 
-                        onClick={() => setShowBulkDeleteDialog(true)}
-                        disabled={selectedForDelete.size === 0}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Delete ({selectedForDelete.size})
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      {/* Import button - available for both admin and sales */}
-                      <Button variant="outline" onClick={() => { resetImportDialog(); setIsImportDialogOpen(true) }}>
-                        <Upload className="mr-2 h-4 w-4" />
-                        Import
-                      </Button>
-                      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                        <DialogTrigger asChild>
-                          <Button>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add Lead
-                          </Button>
-                        </DialogTrigger>
-                      </Dialog>
-                    </>
+                  {/* Import button - available for both admin and sales */}
+                  <Button variant="outline" onClick={() => { resetImportDialog(); setIsImportDialogOpen(true) }}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Import
+                  </Button>
+                  {mounted && (
+                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button>
+                          <Plus className="mr-2 h-4 w-4" />
+                          Add Lead
+                        </Button>
+                      </DialogTrigger>
+                    </Dialog>
                   )}
                 </div>
               </div>
-              {/* Delete button - Admin Only - Far Right */}
-              {isAdmin && !isDeleteMode && (
-                <Button 
-                  variant="outline" 
-                  onClick={toggleDeleteMode}
-                  className="text-red-600 border-red-200 hover:bg-red-50 hover:border-red-300"
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete
-                </Button>
-              )}
             </div>
             
             {/* Filters */}
             <div className="space-y-3">
               {/* Primary filters row */}
               <div className="flex flex-wrap items-center gap-2">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        <div className="flex items-center gap-2">
-                          {option.value !== 'all' && (
-                            <div className={`w-2 h-2 rounded-full ${statusColors[option.value] || 'bg-gray-500'}`} />
-                          )}
-                          {option.label}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {mounted && (
+                  <>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-[160px]">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {statusOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            <div className="flex items-center gap-2">
+                              {option.value !== 'all' && (
+                                <div className={`w-2 h-2 rounded-full ${statusColors[option.value] || 'bg-gray-500'}`} />
+                              )}
+                              {option.label}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
 
-                {/* Sales Rep Filter - Admin Only */}
-                {isAdmin && salesTeam.length > 0 && (
-                  <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                    <SelectTrigger className="w-[150px]">
-                      <SelectValue placeholder="Sales Rep" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Reps</SelectItem>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {salesTeam.map((rep) => (
-                        <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    {/* Subscription Type Filter */}
+                    <Select value={subscriptionTypeFilter} onValueChange={setSubscriptionTypeFilter}>
+                      <SelectTrigger className="w-[180px]">
+                        <TrendingUp className="h-4 w-4 mr-2" />
+                        <SelectValue placeholder="Subscription" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Subscriptions</SelectItem>
+                        <SelectItem value="trial">Trial</SelectItem>
+                        <SelectItem value="paid">Paid</SelectItem>
+                        <SelectItem value="not_set">Not Specified</SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {/* Sales Rep Filter - Admin Only */}
+                    {isAdmin && salesTeam.length > 0 && (
+                      <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                        <SelectTrigger className="w-[150px]">
+                          <SelectValue placeholder="Sales Rep" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Reps</SelectItem>
+                          <SelectItem value="unassigned">Unassigned</SelectItem>
+                          {salesTeam.map((rep) => (
+                            <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {/* Product Filter */}
+                    {products.length > 0 && (
+                      <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                        <SelectTrigger className="w-[150px]">
+                          <Package className="h-4 w-4 mr-2" />
+                          <SelectValue placeholder="Product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Products</SelectItem>
+                          <SelectItem value="none">No Product</SelectItem>
+                          {products.map((product) => (
+                            <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </>
                 )}
 
-                {/* Product Filter */}
-                {products.length > 0 && (
-                  <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                    <SelectTrigger className="w-[140px]">
-                      <Package className="h-4 w-4 mr-2" />
-                      <SelectValue placeholder="Product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Products</SelectItem>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                {/* Phone Search */}
+                <div className="relative">
+                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search by phone..."
+                    value={phoneSearch}
+                    onChange={(e) => setPhoneSearch(e.target.value)}
+                    className="w-[160px] pl-8 h-9"
+                  />
+                </div>
 
                 <Button 
                   variant="outline" 
@@ -974,7 +1021,7 @@ export default function LeadsPage() {
               </div>
 
               {/* Extended filters row */}
-              {showFilters && (
+              {showFilters && mounted && (
                 <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/50 rounded-lg">
                   {/* Tag Filter */}
                   {tags.length > 0 && (
@@ -1055,49 +1102,22 @@ export default function LeadsPage() {
               </div>
             ) : filteredLeads.length > 0 ? (
               <div className="space-y-3">
-                {/* Select All in Delete Mode */}
-                {isDeleteMode && (
-                  <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border">
-                    <Checkbox 
-                      checked={selectedForDelete.size === filteredLeads.length && filteredLeads.length > 0}
-                      onCheckedChange={selectAllFiltered}
-                    />
-                    <span className="text-sm font-medium">
-                      {selectedForDelete.size === filteredLeads.length 
-                        ? `All ${filteredLeads.length} selected` 
-                        : `Select all ${filteredLeads.length} leads`}
-                    </span>
-                  </div>
-                )}
-                {filteredLeads.map((lead) => (
+                {filteredLeads.map((lead, index) => (
                   <div 
                     key={lead.id} 
-                    className={`p-4 rounded-lg border bg-card transition-colors ${
-                      isDeleteMode 
-                        ? selectedForDelete.has(lead.id) 
-                          ? 'border-red-500 bg-red-50 dark:bg-red-950/20' 
-                          : 'hover:bg-muted/50 cursor-pointer'
-                        : 'hover:bg-muted/50 cursor-pointer'
-                    }`}
+                    className="p-4 rounded-lg border bg-card transition-colors hover:bg-muted/50 cursor-pointer"
                     onClick={() => {
-                      if (isDeleteMode) {
-                        toggleLeadSelection(lead.id)
-                      } else {
-                        setSelectedLead(lead)
-                        setIsDetailOpen(true)
-                      }
+                      setSelectedLead(lead)
+                      setIsDetailOpen(true)
                     }}
                   >
-                    {/* Top row: Checkbox (delete mode) / Phone (primary) + Status */}
+                    {/* Top row: Serial + Phone (primary) + Status + Delete */}
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-start gap-3 min-w-0 flex-1">
-                        {isDeleteMode && (
-                          <Checkbox 
-                            checked={selectedForDelete.has(lead.id)}
-                            onCheckedChange={() => toggleLeadSelection(lead.id)}
-                            className="mt-1"
-                          />
-                        )}
+                        {/* Serial Number */}
+                        <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
+                          {index + 1}
+                        </span>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <Phone className="h-4 w-4 text-primary shrink-0" />
@@ -1115,9 +1135,22 @@ export default function LeadsPage() {
                           )}
                         </div>
                       </div>
-                      <Badge className={`${statusColors[lead.status] || 'bg-gray-500'} shrink-0`}>
-                        {getStatusLabel(lead.status)}
-                      </Badge>
+                      <div className="flex flex-wrap gap-2 shrink-0">
+                        <Badge className={`${statusColors[lead.status] || 'bg-gray-500'}`}>
+                          {getStatusLabel(lead.status)}
+                        </Badge>
+                        {lead.subscription_type && (
+                          <Badge variant="outline" className={lead.subscription_type === 'trial' ? 'border-blue-500 text-blue-600' : 'border-green-500 text-green-600'}>
+                            {lead.subscription_type === 'trial' ? 'Trial' : 'Paid'}
+                          </Badge>
+                        )}
+                        {lead.product && (
+                          <Badge variant="outline" className="border-purple-500 text-purple-600">
+                            <Package className="h-3 w-3 mr-1" />
+                            {lead.product.name}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                     
                     {/* Tags */}
@@ -1159,12 +1192,26 @@ export default function LeadsPage() {
                           {getLeadAge(lead.created_at)}d
                         </span>
                       </div>
-                      <div className="text-right">
-                        {lead.assignee ? (
-                          <span className="text-primary">→ {lead.assignee.name}</span>
-                        ) : isAdmin ? (
-                          <span className="text-yellow-600">Unassigned</span>
-                        ) : null}
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          {lead.assignee ? (
+                            <span className="text-primary">→ {lead.assignee.name}</span>
+                          ) : isAdmin ? (
+                            <span className="text-yellow-600">Unassigned</span>
+                          ) : null}
+                        </div>
+                        {/* Delete button */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-100"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            openDeleteConfirmDialog(lead)
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -1214,6 +1261,9 @@ export default function LeadsPage() {
         isAdmin={isAdmin} // Admin can unassign leads
       />
 
+      {/* Dialogs - only render after mount to prevent hydration issues */}
+      {mounted && (
+        <>
       {/* Duplicate Lead Dialog (Admin Only) */}
       <AlertDialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
         <AlertDialogContent>
@@ -1519,35 +1569,72 @@ export default function LeadsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Bulk Delete Confirmation Dialog */}
-      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-red-500" />
-              Delete {selectedForDelete.size} Lead{selectedForDelete.size !== 1 ? 's' : ''}?
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
+      {/* Single Lead Delete Confirmation Dialog - Type 'delete' to confirm */}
+      <Dialog open={showDeleteConfirmDialog} onOpenChange={(open) => {
+        setShowDeleteConfirmDialog(open)
+        if (!open) {
+          setLeadToDelete(null)
+          setDeleteConfirmText('')
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Lead Permanently
+            </DialogTitle>
+            <DialogDescription asChild>
               <div>
-                <p>This will permanently delete the selected leads and all associated data including:</p>
+                {leadToDelete && (
+                  <div className="my-3 p-3 bg-muted rounded-lg">
+                    <p className="font-medium">{leadToDelete.name}</p>
+                    <p className="text-sm text-muted-foreground">{leadToDelete.phone}</p>
+                    {leadToDelete.email && <p className="text-sm text-muted-foreground">{leadToDelete.email}</p>}
+                  </div>
+                )}
+                <p className="text-sm">This will permanently delete this lead and all associated data including:</p>
                 <ul className="list-disc list-inside mt-2 text-sm text-muted-foreground">
                   <li>All activities and notes</li>
                   <li>Scheduled demos/meetings</li>
                   <li>Call recordings</li>
                   <li>Subscriptions</li>
                 </ul>
-                <p className="mt-2 text-red-600 font-medium">This action cannot be undone!</p>
+                <p className="mt-3 font-medium text-red-600">This action cannot be undone!</p>
               </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleBulkDelete}
-              className="bg-red-600 hover:bg-red-700"
-              disabled={isDeleting}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="delete-confirm" className="text-sm font-medium">
+                Type <span className="font-bold text-red-600">delete</span> to confirm:
+              </Label>
+              <Input
+                id="delete-confirm"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="Type 'delete' here"
+                className="border-red-200 focus-visible:ring-red-500"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteConfirmDialog(false)
+                setLeadToDelete(null)
+                setDeleteConfirmText('')
+              }}
+              disabled={isDeletingSingle}
             >
-              {isDeleting ? (
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleSingleLeadDelete}
+              disabled={isDeletingSingle || deleteConfirmText.toLowerCase() !== 'delete'}
+            >
+              {isDeletingSingle ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Deleting...
@@ -1555,13 +1642,15 @@ export default function LeadsPage() {
               ) : (
                 <>
                   <Trash2 className="mr-2 h-4 w-4" />
-                  Delete {selectedForDelete.size} Lead{selectedForDelete.size !== 1 ? 's' : ''}
+                  Delete Lead
                 </>
               )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+        </>
+      )}
     </div>
   )
 }

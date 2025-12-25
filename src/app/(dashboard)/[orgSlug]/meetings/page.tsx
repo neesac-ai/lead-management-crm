@@ -48,6 +48,8 @@ type Demo = {
   status: string
   google_meet_link: string | null
   notes: string | null
+  product_id: string | null
+  product?: { id: string; name: string } | null
   leads: {
     id: string
     name: string
@@ -117,6 +119,7 @@ export default function MeetingsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [phoneSearch, setPhoneSearch] = useState<string>('')
 
   useEffect(() => {
     setMounted(true)
@@ -257,10 +260,11 @@ export default function MeetingsPage() {
         const leadIds = leads.map(l => l.id)
         
         // Get only scheduled demos for these leads with lead status and assignee info
+        // Note: product_id will only work after running migration 020
         const { data } = await supabase
           .from('demos')
           .select(`
-            id, scheduled_at, status, google_meet_link, notes, 
+            id, scheduled_at, status, google_meet_link, notes,
             leads(id, name, email, phone, status, custom_fields, assigned_to, assignee:users!leads_assigned_to_fkey(name))
           `)
           .in('lead_id', leadIds)
@@ -270,6 +274,8 @@ export default function MeetingsPage() {
         // Map the lead status field
         const meetingsWithStatus = (data || []).map(meeting => ({
           ...meeting,
+          product_id: (meeting as any).product_id || null,
+          product: (meeting as any).product as { id: string; name: string } | null || null,
           leads: meeting.leads ? {
             ...meeting.leads,
             lead_status: (meeting.leads as unknown as { status: string }).status,
@@ -304,6 +310,15 @@ export default function MeetingsPage() {
         if (m.leads?.assigned_to !== selectedSalesRep) return false
       }
       
+      // Product filter
+      if (selectedProduct !== 'all') {
+        if (selectedProduct === 'none') {
+          if (m.product_id) return false
+        } else {
+          if (m.product_id !== selectedProduct) return false
+        }
+      }
+      
       // Date range filter
       if (dateFrom) {
         const meetingDate = new Date(m.scheduled_at)
@@ -318,13 +333,20 @@ export default function MeetingsPage() {
         if (meetingDate > toDate) return false
       }
       
+      // Phone search filter
+      if (phoneSearch) {
+        const searchTerm = phoneSearch.replace(/[^\d]/g, '')
+        const leadPhone = (m.leads?.phone || '').replace(/[^\d]/g, '')
+        if (!leadPhone.includes(searchTerm)) return false
+      }
+      
       return true
     })
-  }, [meetings, isAdmin, selectedSalesRep, dateFrom, dateTo, showUpcomingOnly])
+  }, [meetings, isAdmin, selectedSalesRep, selectedProduct, dateFrom, dateTo, showUpcomingOnly, phoneSearch])
 
   // Check if any filter is active
   const hasActiveFilters = selectedSalesRep !== 'all' || selectedProduct !== 'all' || 
-    dateFrom || dateTo || !showUpcomingOnly
+    dateFrom || dateTo || !showUpcomingOnly || phoneSearch
 
   // Clear all filters
   const clearAllFilters = () => {
@@ -333,6 +355,7 @@ export default function MeetingsPage() {
     setDateFrom('')
     setDateTo('')
     setShowUpcomingOnly(true)
+    setPhoneSearch('')
   }
 
   return (
@@ -351,36 +374,53 @@ export default function MeetingsPage() {
                 <CardDescription>{filteredMeetings.length} meeting{filteredMeetings.length !== 1 ? 's' : ''}</CardDescription>
               </div>
               <div className="flex items-center gap-2">
-                {/* Sales Rep Filter - Admin Only */}
-                {isAdmin && salesTeam.length > 0 && (
-                  <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                    <SelectTrigger className="w-[150px]">
-                      <SelectValue placeholder="Sales Rep" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Reps</SelectItem>
-                      {salesTeam.map((rep) => (
-                        <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                {mounted && (
+                  <>
+                    {/* Sales Rep Filter - Admin Only */}
+                    {isAdmin && salesTeam.length > 0 && (
+                      <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
+                        <SelectTrigger className="w-[150px]">
+                          <SelectValue placeholder="Sales Rep" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Reps</SelectItem>
+                          {salesTeam.map((rep) => (
+                            <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {/* Product Filter */}
+                    {products.length > 0 && (
+                      <Select value={selectedProduct} onValueChange={setSelectedProduct}>
+                        <SelectTrigger className="w-[150px]">
+                          <Package className="h-4 w-4 mr-2" />
+                          <SelectValue placeholder="Product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Products</SelectItem>
+                          <SelectItem value="none">No Product</SelectItem>
+                          {products.map((product) => (
+                            <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </>
                 )}
 
-                {/* Product Filter */}
-                {products.length > 0 && (
-                  <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                    <SelectTrigger className="w-[140px]">
-                      <Package className="h-4 w-4 mr-2" />
-                      <SelectValue placeholder="Product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Products</SelectItem>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>{product.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                {/* Phone Search */}
+                <div className="relative">
+                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="Search by phone..."
+                    value={phoneSearch}
+                    onChange={(e) => setPhoneSearch(e.target.value)}
+                    className="w-[160px] pl-8 h-9"
+                  />
+                </div>
 
                 <Button 
                   variant="outline" 
@@ -448,7 +488,7 @@ export default function MeetingsPage() {
               </div>
             ) : filteredMeetings.length > 0 ? (
               <div className="space-y-3">
-                {filteredMeetings.map((meeting) => (
+                {filteredMeetings.map((meeting, index) => (
                   <div 
                     key={meeting.id} 
                     className={`p-4 rounded-lg border bg-card ${
@@ -456,28 +496,42 @@ export default function MeetingsPage() {
                         ? 'border-purple-500/50 bg-purple-500/5' : ''
                     }`}
                   >
-                    {/* Top row: Phone (primary) + Meeting Status */}
+                    {/* Top row: Serial + Phone (primary) + Meeting Status */}
                     <div className="flex items-start justify-between gap-2 mb-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <Phone className="h-4 w-4 text-primary shrink-0" />
-                          <p className="font-semibold truncate text-lg">{meeting.leads?.phone}</p>
-                        </div>
-                        {meeting.leads?.name && meeting.leads.name !== meeting.leads.phone && (
-                          <p className="text-sm text-muted-foreground truncate mt-0.5">
-                            {meeting.leads.name}
-                          </p>
-                        )}
-                        {meeting.leads?.custom_fields?.company && (
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Building2 className="h-3 w-3" />
-                            <span className="truncate">{meeting.leads.custom_fields.company}</span>
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        {/* Serial Number */}
+                        <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-primary shrink-0" />
+                            <p className="font-semibold truncate text-lg">{meeting.leads?.phone}</p>
                           </div>
+                          {meeting.leads?.name && meeting.leads.name !== meeting.leads.phone && (
+                            <p className="text-sm text-muted-foreground truncate mt-0.5">
+                              {meeting.leads.name}
+                            </p>
+                          )}
+                          {meeting.leads?.custom_fields?.company && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Building2 className="h-3 w-3" />
+                              <span className="truncate">{meeting.leads.custom_fields.company}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 shrink-0">
+                        <Badge className={`${demoStatusColors[meeting.status] || 'bg-gray-500'}`}>
+                          {meeting.status}
+                        </Badge>
+                        {meeting.product && (
+                          <Badge variant="outline" className="border-purple-500 text-purple-600">
+                            <Package className="h-3 w-3 mr-1" />
+                            {meeting.product.name}
+                          </Badge>
                         )}
                       </div>
-                      <Badge className={`${demoStatusColors[meeting.status] || 'bg-gray-500'} shrink-0`}>
-                        {meeting.status}
-                      </Badge>
                     </div>
 
                     {/* Email */}
@@ -580,6 +634,7 @@ export default function MeetingsPage() {
       </div>
 
       {/* Delete Confirmation Dialog */}
+      {mounted && (
       <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -608,6 +663,7 @@ export default function MeetingsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      )}
     </div>
   )
 }

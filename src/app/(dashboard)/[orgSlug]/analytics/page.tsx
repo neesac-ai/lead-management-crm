@@ -204,7 +204,7 @@ export default function AnalyticsPage() {
       // Fetch leads - only columns needed for analytics
       let leadsQuery = supabase
         .from('leads')
-        .select('id, status, assigned_to, created_at')
+        .select('id, status, subscription_type, assigned_to, created_at')
         .eq('org_id', currentOrgId)
 
       if (userData.role === 'sales') {
@@ -637,6 +637,11 @@ export default function AnalyticsPage() {
   const actionedLeadsCount = totalLeads - statusBreakdown.new
   const actionRate = totalLeads > 0 ? Math.round((actionedLeadsCount / totalLeads) * 100) : 0
   const conversionRate = actionedLeadsCount > 0 ? Math.round((wonDeals / actionedLeadsCount) * 100) : 0
+  
+  // Subscription type breakdown
+  const trialLeads = filteredLeads.filter(l => l.subscription_type === 'trial').length
+  const paidLeads = filteredLeads.filter(l => l.subscription_type === 'paid').length
+  const unspecifiedLeads = filteredLeads.filter(l => !l.subscription_type).length
 
   if (loading) {
     return (
@@ -787,6 +792,47 @@ export default function AnalyticsPage() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Subscription Type Breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5" />
+                  Subscription Type Breakdown
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Trial</p>
+                      <p className="text-2xl font-bold text-blue-600">{trialLeads}</p>
+                    </div>
+                    <Badge variant="outline" className="border-blue-500 text-blue-600">
+                      {totalLeads > 0 ? Math.round((trialLeads / totalLeads) * 100) : 0}%
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Paid</p>
+                      <p className="text-2xl font-bold text-green-600">{paidLeads}</p>
+                    </div>
+                    <Badge variant="outline" className="border-green-500 text-green-600">
+                      {totalLeads > 0 ? Math.round((paidLeads / totalLeads) * 100) : 0}%
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Not Specified</p>
+                      <p className="text-2xl font-bold text-gray-600">{unspecifiedLeads}</p>
+                    </div>
+                    <Badge variant="outline" className="border-gray-500 text-gray-600">
+                      {totalLeads > 0 ? Math.round((unspecifiedLeads / totalLeads) * 100) : 0}%
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Status Breakdown */}
             <Card>

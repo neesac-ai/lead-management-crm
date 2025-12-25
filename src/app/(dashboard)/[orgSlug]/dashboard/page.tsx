@@ -67,13 +67,13 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   // Build leads query based on role
   let leadsQuery = supabase
     .from('leads')
-    .select('id, status', { count: 'exact' })
+    .select('id, status, subscription_type', { count: 'exact' })
     .eq('org_id', org.id)
 
   if (!isAdmin && profile?.id) {
     leadsQuery = supabase
       .from('leads')
-      .select('id, status', { count: 'exact' })
+      .select('id, status, subscription_type', { count: 'exact' })
       .eq('org_id', org.id)
       .or(`assigned_to.eq.${profile.id},created_by.eq.${profile.id}`)
   }
@@ -104,7 +104,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       .eq('org_id', org.id),
   ])
 
-  type LeadData = { id: string; status: string }
+  type LeadData = { id: string; status: string; subscription_type?: string | null }
   type DemoData = { id: string; status: string; scheduled_at: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
   type FollowupCountData = { id: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
   type SubscriptionData = { id: string; status: string; deal_value: number; amount_credited: number; amount_pending: number; validity_days: number; leads: { assigned_to: string | null; created_by: string | null } | null }
@@ -116,6 +116,8 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   const totalLeads = leadsResult.count || 0
   const newLeads = leadsData.filter(l => l.status === 'new').length
+  const trialLeads = leadsData.filter(l => l.subscription_type === 'trial').length
+  const paidLeads = leadsData.filter(l => l.subscription_type === 'paid').length
   
   // Filter demos for sales users (only their assigned/created leads)
   let filteredDemos = demosData
@@ -164,7 +166,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       title: 'Total Leads',
       value: totalLeads.toString(),
       icon: Target,
-      description: `${newLeads} new leads`,
+      description: `${newLeads} new ${trialLeads > 0 || paidLeads > 0 ? `| ${trialLeads} trial | ${paidLeads} paid` : ''}`,
       href: `/${orgSlug}/leads`,
     },
     {

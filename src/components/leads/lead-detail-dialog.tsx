@@ -65,6 +65,7 @@ type Lead = {
   phone: string | null
   source: string
   status: string
+  subscription_type?: string | null
   custom_fields: { company?: string } | null
   created_at: string
   assigned_to?: string | null
@@ -109,6 +110,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   const [isSaving, setIsSaving] = useState(false)
   const [isUnassigning, setIsUnassigning] = useState(false)
   const [status, setStatus] = useState('new')
+  const [subscriptionType, setSubscriptionType] = useState<string>('')
   const [comment, setComment] = useState('')
   const [followupDate, setFollowupDate] = useState('')
   const [demoDate, setDemoDate] = useState('')
@@ -177,7 +179,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     const supabase = createClient()
     const { data, error } = await supabase
       .from('leads')
-      .select('id, name, email, phone, source, status, custom_fields, created_at, assigned_to, assignee:users!assigned_to(name)')
+      .select('id, name, email, phone, source, status, subscription_type, custom_fields, created_at, assigned_to, assignee:users!assigned_to(name)')
       .eq('id', leadId)
       .single()
     
@@ -377,6 +379,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       setCurrentLead(lead)
       setStatus(lead.status)
       setInitialStatus(lead.status)
+      setSubscriptionType(lead.subscription_type || '')
       setComment('')
       setFollowupDate('')
       setDemoDate('')
@@ -427,18 +430,46 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
   const handleUpdateStatus = async () => {
     if (!lead) return
+    
+    // Validate Deal Won requires subscription type
+    if (status === 'deal_won' && !subscriptionType) {
+      toast.error('Please select a subscription type (Trial or Paid)')
+      return
+    }
+    
+    if (status === 'deal_won' && !dealValue) {
+      toast.error('Please enter the deal value')
+      return
+    }
+    
     setIsSaving(true)
 
     const supabase = createClient()
     
-    // Update lead status
-    const { error: leadError } = await supabase
+    // Build update data - only include subscription_type if it's a valid value
+    const updateData: Record<string, unknown> = {
+      status,
+      updated_at: new Date().toISOString()
+    }
+    
+    // Only include subscription_type if it's trial or paid (valid values)
+    if (subscriptionType === 'trial' || subscriptionType === 'paid') {
+      updateData.subscription_type = subscriptionType
+    }
+    
+    console.log('Updating lead with data:', updateData)
+    
+    const { error: leadError, data: updateResult } = await supabase
       .from('leads')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update(updateData)
       .eq('id', lead.id)
+      .select()
+
+    console.log('Update result:', updateResult, 'Error:', leadError)
 
     if (leadError) {
-      toast.error('Failed to update status')
+      console.error('Failed to update lead:', JSON.stringify(leadError, null, 2))
+      toast.error(`Failed to update status: ${leadError.message || 'Unknown error'}`)
       setIsSaving(false)
       return
     }
@@ -474,6 +505,9 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     const commentParts: string[] = []
     if (comment) commentParts.push(comment)
     if (productName) commentParts.push(`Product: ${productName}`)
+    if (subscriptionType && subscriptionType !== lead.subscription_type) {
+      commentParts.push(`Subscription: ${subscriptionType.charAt(0).toUpperCase() + subscriptionType.slice(1)}`)
+    }
     
     // Add meeting/follow-up date info to comments
     if (status === 'demo_booked' && demoDate) {
@@ -668,7 +702,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                      comment.trim() !== '' ||
                      followupDate !== '' ||
                      demoDate !== '' ||
-                     (status === 'deal_won' && dealValue !== '')
+                     (status === 'deal_won' && dealValue !== '' && subscriptionType !== '')
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -821,6 +855,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     Select N/A if no specific product was discussed
                   </p>
                 </div>
+
               </div>
             ) : (
               <div className="p-3 bg-muted/50 rounded-lg text-sm text-muted-foreground">
@@ -986,6 +1021,71 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   <span className="font-medium">Deal Won - Create Subscription</span>
                 </div>
                 
+                {/* Subscription Type Selection - Required for Deal Won */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" />
+                      Subscription Type *
+                    </Label>
+                    {mounted ? (
+                      <Select 
+                        value={subscriptionType || ''} 
+                        onValueChange={(value) => {
+                          setSubscriptionType(value)
+                          // Reset validity when subscription type changes
+                          if (value === 'trial') {
+                            setValidity('7')
+                          } else if (value === 'paid') {
+                            setValidity('30')
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="trial">Trial</SelectItem>
+                          <SelectItem value="paid">Paid</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="h-10 rounded-md border bg-muted animate-pulse" />
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Validity *</Label>
+                    {mounted ? (
+                      <Select value={validity} onValueChange={setValidity} disabled={!subscriptionType}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select validity" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {subscriptionType === 'trial' ? (
+                            <>
+                              <SelectItem value="7">7 Days</SelectItem>
+                              <SelectItem value="14">14 Days</SelectItem>
+                            </>
+                          ) : subscriptionType === 'paid' ? (
+                            <>
+                              <SelectItem value="30">30 Days</SelectItem>
+                              <SelectItem value="60">60 Days</SelectItem>
+                              <SelectItem value="90">90 Days</SelectItem>
+                              <SelectItem value="180">180 Days</SelectItem>
+                              <SelectItem value="365">365 Days (1 Year)</SelectItem>
+                              <SelectItem value="non_recurring">Non Recurring</SelectItem>
+                            </>
+                          ) : (
+                            <SelectItem value="placeholder" disabled>Select subscription type first</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <div className="h-10 rounded-md border bg-muted animate-pulse" />
+                    )}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Deal Value (₹) *</Label>
@@ -998,24 +1098,13 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Validity *</Label>
-                    {mounted ? (
-                      <Select value={validity} onValueChange={setValidity}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="30">30 Days</SelectItem>
-                          <SelectItem value="60">60 Days</SelectItem>
-                          <SelectItem value="90">90 Days</SelectItem>
-                          <SelectItem value="180">180 Days</SelectItem>
-                          <SelectItem value="365">365 Days (1 Year)</SelectItem>
-                          <SelectItem value="non_recurring">Non Recurring</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <div className="h-10 rounded-md border bg-muted animate-pulse" />
-                    )}
+                    <Label>Amount Credited (₹)</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g., 25000"
+                      value={amountCredited}
+                      onChange={(e) => setAmountCredited(e.target.value)}
+                    />
                   </div>
                 </div>
                 
@@ -1040,25 +1129,17 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>Amount Credited (₹)</Label>
-                    <Input
-                      type="number"
-                      placeholder="e.g., 25000"
-                      value={amountCredited}
-                      onChange={(e) => setAmountCredited(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Amount Pending (₹)</Label>
-                    <Input
-                      type="text"
-                      value={`₹${amountPending.toLocaleString()}`}
-                      disabled
-                      className="bg-muted"
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <Label>Amount Pending (₹)</Label>
+                  <Input
+                    type="text"
+                    value={`₹${amountPending.toLocaleString()}`}
+                    disabled
+                    className="bg-muted"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Auto-calculated: Deal Value - Amount Credited
+                  </p>
                 </div>
               </div>
             )}
@@ -1196,18 +1277,6 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
         </Tabs>
 
         <DialogFooter className="flex flex-col sm:flex-row gap-2">
-          <div className="flex gap-2 flex-1">
-            {isAdmin && (
-              <Button 
-                variant="destructive" 
-                size="sm"
-                onClick={() => setShowDeleteDialog(true)}
-              >
-                <Trash2 className="h-4 w-4 mr-1" />
-                Delete
-              </Button>
-            )}
-          </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Close
@@ -1231,47 +1300,6 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
           </div>
         </DialogFooter>
       </DialogContent>
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-red-500" />
-              Delete Lead?
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                <p>This will permanently delete <strong>{currentLead?.name}</strong> and all associated data including:</p>
-                <ul className="list-disc list-inside mt-2 text-sm text-muted-foreground">
-                  <li>All activities and notes</li>
-                  <li>Scheduled demos/meetings</li>
-                  <li>Call recordings</li>
-                  <li>Subscriptions</li>
-                </ul>
-                <p className="mt-2 text-red-600 font-medium">This action cannot be undone!</p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={handleDeleteLead}
-              className="bg-red-600 hover:bg-red-700"
-              disabled={isDeleting}
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                'Delete Lead'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Dialog>
   )
 }
