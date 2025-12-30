@@ -207,9 +207,20 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       )
     }
 
-    items.push(
-      { title: 'Subscriptions', href: `${baseUrl}/subscriptions`, icon: <CreditCard className="w-5 h-5" /> },
-    )
+    // Subscriptions - only show for non-accountant roles (accountant sees approved ones only)
+    if (user?.role !== 'accountant') {
+      items.push(
+        { title: 'Subscriptions', href: `${baseUrl}/subscriptions`, icon: <CreditCard className="w-5 h-5" /> },
+      )
+    }
+
+    // Accountant-specific: Approvals page
+    if (user?.role === 'accountant') {
+      items.push(
+        { title: 'Approvals', href: `${baseUrl}/approvals`, icon: <FileText className="w-5 h-5" /> },
+        { title: 'Subscriptions', href: `${baseUrl}/subscriptions`, icon: <CreditCard className="w-5 h-5" /> },
+      )
+    }
 
     if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
       items.push(

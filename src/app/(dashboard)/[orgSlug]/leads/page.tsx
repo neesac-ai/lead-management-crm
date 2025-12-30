@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/select'
 import { LeadDetailDialog } from '@/components/leads/lead-detail-dialog'
 import { Target, Plus, Loader2, Phone, Mail, User, UserCircle, AlertTriangle, Upload, FileSpreadsheet, CheckCircle, AlertCircle, X, UserCheck, Users, Filter, Calendar, Package, Trash2, TrendingUp } from 'lucide-react'
-import { differenceInDays } from 'date-fns'
+import { differenceInDays, parseISO } from 'date-fns'
 import { toast } from 'sonner'
 
 type Lead = {
@@ -57,6 +57,13 @@ type Lead = {
   creator: { name: string } | null
   assignee: { name: string } | null
   product?: { id: string; name: string } | null
+  subscription?: {
+    id: string
+    status: string
+    approval_status?: 'pending' | 'approved' | 'rejected' | null
+    start_date?: string
+    end_date?: string
+  } | null
 }
 
 type UserProfile = {
@@ -291,28 +298,106 @@ export default function LeadsPage() {
       }
     }
 
+    // Fetch subscription data for leads with deal_won status
+    const dealWonLeadIds = (leadsData || []).filter(l => l.status === 'deal_won').map(l => l.id)
+    let subscriptionMap: Record<string, any> = {}
+    let approvalMap: Record<string, any> = {}
+    
+    if (dealWonLeadIds.length > 0) {
+      // Fetch approved subscriptions
+      const { data: subscriptionsData } = await supabase
+        .from('customer_subscriptions')
+        .select('id, lead_id, status, start_date, end_date')
+        .in('lead_id', dealWonLeadIds)
+      
+      if (subscriptionsData) {
+        subscriptionsData.forEach(sub => {
+          // Calculate actual status based on dates (same logic as subscriptions page)
+          let calculatedStatus = sub.status
+          
+          // If status is 'paused', keep it as paused
+          if (sub.status === 'paused') {
+            calculatedStatus = 'paused'
+          } else if (sub.end_date) {
+            // Calculate status based on end_date
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            const endDate = parseISO(sub.end_date)
+            endDate.setHours(0, 0, 0, 0)
+            
+            // If end_date is in the past, status is expired (inactive)
+            if (endDate < today) {
+              calculatedStatus = 'expired'
+            } else {
+              // If end_date is in the future and status is active, keep it active
+              calculatedStatus = 'active'
+            }
+          }
+          
+          subscriptionMap[sub.lead_id] = {
+            id: sub.id,
+            status: calculatedStatus,
+            approval_status: 'approved' as const,
+            start_date: sub.start_date,
+            end_date: sub.end_date,
+          }
+        })
+      }
+      
+      // Fetch pending approvals
+      try {
+        const { data: approvalsData } = await supabase
+          .from('subscription_approvals')
+          .select('lead_id, status')
+          .in('lead_id', dealWonLeadIds)
+          .eq('status', 'pending')
+        
+        if (approvalsData) {
+          approvalsData.forEach(approval => {
+            if (!subscriptionMap[approval.lead_id]) {
+              approvalMap[approval.lead_id] = {
+                approval_status: 'pending' as const,
+              }
+            }
+          })
+        }
+      } catch (err) {
+        // Table might not exist, ignore
+      }
+    }
+
     // Map leads - relationships already included
     const leadsWithUsers = (leadsData || []).map(lead => {
       const productInfo = leadProductMap[lead.id]
+      const subscriptionInfo = subscriptionMap[lead.id] || approvalMap[lead.id] || null
       return {
         ...lead,
         creator: lead.creator as { name: string } | null,
         assignee: lead.assignee as { name: string } | null,
         product_id: productInfo?.product_id || null,
         product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
+        subscription: subscriptionInfo,
       }
     })
 
     setLeads(leadsWithUsers as Lead[])
 
-    // Fetch tags for the organization
-    const { data: tagsData } = await supabase
-      .from('lead_tags')
-      .select('id, name, color')
-      .eq('org_id', profile.org_id)
-      .order('name')
-    
-    setTags((tagsData || []) as Tag[])
+    // Fetch tags for the organization (gracefully handle if table doesn't exist)
+    try {
+      const { data: tagsData, error: tagsError } = await supabase
+        .from('lead_tags')
+        .select('id, name, color')
+        .eq('org_id', profile.org_id)
+        .order('name')
+      
+      if (tagsError && tagsError.code !== '42P01' && tagsError.code !== 'PGRST116') {
+        console.warn('Error fetching tags:', tagsError)
+      }
+      setTags((tagsData || []) as Tag[])
+    } catch (err) {
+      console.warn('Tags table may not exist:', err)
+      setTags([])
+    }
 
     // Fetch sales team for admin filter
     if (profile.role === 'admin') {
@@ -336,23 +421,32 @@ export default function LeadsPage() {
     
     setProducts((productsData || []) as Product[])
 
-    // Fetch tag assignments for all leads
+    // Fetch tag assignments for all leads (gracefully handle if table doesn't exist)
     if (leadsData && leadsData.length > 0) {
-      const leadIds = leadsData.map(l => l.id)
-      const { data: assignments } = await supabase
-        .from('lead_tag_assignments')
-        .select('lead_id, tag_id')
-        .in('lead_id', leadIds)
-      
-      // Group by lead_id
-      const tagsByLead: Record<string, string[]> = {}
-      assignments?.forEach(a => {
-        if (!tagsByLead[a.lead_id]) {
-          tagsByLead[a.lead_id] = []
+      try {
+        const leadIds = leadsData.map(l => l.id)
+        const { data: assignments, error: assignmentsError } = await supabase
+          .from('lead_tag_assignments')
+          .select('lead_id, tag_id')
+          .in('lead_id', leadIds)
+        
+        if (assignmentsError && assignmentsError.code !== '42P01' && assignmentsError.code !== 'PGRST116') {
+          console.warn('Error fetching tag assignments:', assignmentsError)
         }
-        tagsByLead[a.lead_id].push(a.tag_id)
-      })
-      setLeadTags(tagsByLead)
+        
+        // Group by lead_id
+        const tagsByLead: Record<string, string[]> = {}
+        assignments?.forEach(a => {
+          if (!tagsByLead[a.lead_id]) {
+            tagsByLead[a.lead_id] = []
+          }
+          tagsByLead[a.lead_id].push(a.tag_id)
+        })
+        setLeadTags(tagsByLead)
+      } catch (err) {
+        console.warn('Tag assignments table may not exist:', err)
+        setLeadTags({})
+      }
     }
   }
 
@@ -1150,6 +1244,30 @@ export default function LeadsPage() {
                             {lead.product.name}
                           </Badge>
                         )}
+                        {/* Subscription status for deal won leads */}
+                        {lead.status === 'deal_won' && lead.subscription && (
+                          <>
+                            {lead.subscription.approval_status === 'pending' ? (
+                              <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50">
+                                Pending Approval
+                              </Badge>
+                            ) : lead.subscription.approval_status === 'approved' ? (
+                              <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50">
+                                Approved
+                              </Badge>
+                            ) : null}
+                            {lead.subscription.status && (
+                              <Badge variant="outline" className={
+                                lead.subscription.status === 'active' ? 'border-green-500 text-green-600' :
+                                lead.subscription.status === 'paused' ? 'border-yellow-500 text-yellow-600' :
+                                lead.subscription.status === 'expired' ? 'border-red-500 text-red-600' :
+                                'border-gray-500 text-gray-600'
+                              }>
+                                {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
+                              </Badge>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
                     
@@ -1182,6 +1300,47 @@ export default function LeadsPage() {
                         </span>
                       )}
                     </div>
+                    
+                    {/* Subscription Details for Deal Won */}
+                    {lead.status === 'deal_won' && lead.subscription && (
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground mb-2 p-2 bg-muted/50 rounded-md">
+                        {lead.subscription.approval_status && (
+                          <span className="flex items-center gap-1">
+                            <span className="font-medium">Approval:</span>
+                            <span className={
+                              lead.subscription.approval_status === 'pending' ? 'text-yellow-600' :
+                              lead.subscription.approval_status === 'approved' ? 'text-green-600' :
+                              'text-red-600'
+                            }>
+                              {lead.subscription.approval_status === 'pending' ? 'Pending' :
+                               lead.subscription.approval_status === 'approved' ? 'Approved' :
+                               'Rejected'}
+                            </span>
+                          </span>
+                        )}
+                        {lead.subscription.status && (
+                          <span className="flex items-center gap-1">
+                            <span className="font-medium">Status:</span>
+                            <span className={
+                              lead.subscription.status === 'active' ? 'text-green-600' :
+                              lead.subscription.status === 'paused' ? 'text-yellow-600' :
+                              lead.subscription.status === 'expired' ? 'text-red-600' :
+                              'text-gray-600'
+                            }>
+                              {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
+                            </span>
+                          </span>
+                        )}
+                        {lead.subscription.start_date && lead.subscription.end_date && (
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            <span>
+                              {new Date(lead.subscription.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - {new Date(lead.subscription.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    )}
                     
                     {/* Bottom row: Source + Age + Assignment */}
                     <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">

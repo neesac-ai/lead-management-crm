@@ -1,5 +1,5 @@
 // Service Worker for Lead Management CRM
-const CACHE_NAME = 'lead-crm-v1';
+const CACHE_NAME = 'lead-crm-v3'; // Updated version to force cache refresh
 const OFFLINE_URL = '/offline.html';
 
 // Files to cache for offline use
@@ -7,8 +7,8 @@ const STATIC_ASSETS = [
   '/',
   '/offline.html',
   '/manifest.json',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png',
+  '/icons/android/android-launchericon-192-192.png',
+  '/icons/android/android-launchericon-512-512.png',
 ];
 
 // Install event - cache static assets
@@ -88,8 +88,8 @@ self.addEventListener('push', (event) => {
     const data = event.data.json();
     const options = {
       body: data.body,
-      icon: '/icons/icon-192x192.png',
-      badge: '/icons/icon-96x96.png',
+      icon: '/icons/android/android-launchericon-192-192.png',
+      badge: '/icons/android/android-launchericon-96-96.png',
       vibrate: [100, 50, 100],
       data: {
         url: data.url || '/',
