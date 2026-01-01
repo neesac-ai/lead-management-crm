@@ -18,6 +18,7 @@ import {
   Bell,
   Video,
   Phone,
+  FileText,
 } from 'lucide-react'
 
 // Force dynamic rendering to always fetch fresh data
@@ -59,18 +60,19 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   // Fetch stats based on user role
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
+  const isAccountant = profile?.role === 'accountant'
   
   // Calculate current time in IST for filtering
   const nowForStats = new Date()
   const nowISO = nowForStats.toISOString()
   
-  // Build leads query based on role
+  // Build leads query based on role (skip for accountant)
   let leadsQuery = supabase
     .from('leads')
     .select('id, status, subscription_type', { count: 'exact' })
     .eq('org_id', org.id)
 
-  if (!isAdmin && profile?.id) {
+  if (!isAdmin && !isAccountant && profile?.id) {
     leadsQuery = supabase
       .from('leads')
       .select('id, status, subscription_type', { count: 'exact' })
@@ -94,15 +96,36 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     .not('next_followup', 'is', null)
     .gte('next_followup', nowISO)
 
-  const [leadsResult, demosResult, followupsResult, subscriptionsResult] = await Promise.all([
-    leadsQuery,
-    demosQuery,
-    followupsQuery,
-    supabase
-      .from('customer_subscriptions')
-      .select('id, status, deal_value, amount_credited, amount_pending, validity_days, leads(assigned_to, created_by)')
-      .eq('org_id', org.id),
-  ])
+  // Fetch subscriptions
+  const subscriptionsQuery = supabase
+    .from('customer_subscriptions')
+    .select('id, status, deal_value, amount_credited, amount_pending, validity_days, leads(assigned_to, created_by)')
+    .eq('org_id', org.id)
+
+  // Fetch pending approvals for accountant
+  const pendingApprovalsQuery = supabase
+    .from('subscription_approvals')
+    .select('id', { count: 'exact' })
+    .eq('org_id', org.id)
+    .eq('status', 'pending')
+
+  const queries: Promise<any>[] = []
+  
+  // Only fetch leads/demos/followups if not accountant
+  if (!isAccountant) {
+    queries.push(leadsQuery, demosQuery, followupsQuery, subscriptionsQuery)
+  } else {
+    queries.push(
+      Promise.resolve({ data: [], count: 0 }),
+      Promise.resolve({ data: [] }),
+      Promise.resolve({ data: [] }),
+      subscriptionsQuery
+    )
+  }
+  
+  queries.push(pendingApprovalsQuery)
+  
+  const [leadsResult, demosResult, followupsResult, subscriptionsResult, approvalsResult] = await Promise.all(queries)
 
   type LeadData = { id: string; status: string; subscription_type?: string | null }
   type DemoData = { id: string; status: string; scheduled_at: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
@@ -161,7 +184,26 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const totalCredited = filteredSubscriptions.reduce((sum, s) => sum + (s.amount_credited || 0), 0)
   const totalPending = filteredSubscriptions.reduce((sum, s) => sum + (s.amount_pending || 0), 0)
 
-  const stats = [
+  // Get pending approvals count for accountant
+  const pendingApprovalsCount = (approvalsResult?.count || 0) as number
+
+  // Build stats based on role
+  const stats = isAccountant ? [
+    {
+      title: 'Pending Approvals',
+      value: pendingApprovalsCount.toString(),
+      icon: FileText,
+      description: 'Awaiting review',
+      href: `/${orgSlug}/approvals`,
+    },
+    {
+      title: 'Active Subscriptions',
+      value: activeSubscriptions.toString(),
+      icon: Users,
+      description: 'Currently active',
+      href: `/${orgSlug}/subscriptions`,
+    },
+  ] : [
     {
       title: 'Total Leads',
       value: totalLeads.toString(),
@@ -239,7 +281,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     accountantCount = accountantCountResult || 0
   }
 
-  // Get recent leads (filtered for sales users)
+  // Get recent leads (filtered for sales users, skip for accountants)
   let recentLeadsQuery = supabase
     .from('leads')
     .select('id, name, status, created_at')
@@ -258,12 +300,17 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       .limit(5)
   }
 
-  const { data: recentLeadsData } = await recentLeadsQuery
+  // Skip recent leads query for accountants
+  const recentLeadsResult = isAccountant 
+    ? Promise.resolve({ data: [] })
+    : recentLeadsQuery
+
+  const { data: recentLeadsData } = await recentLeadsResult
 
   type RecentLead = { id: string; name: string; status: string; created_at: string }
   const recentLeads = (recentLeadsData || []) as RecentLead[]
 
-  // Get upcoming follow-ups (filtered for sales users)
+  // Get upcoming follow-ups (filtered for sales users, skip for accountants)
   // Only show follow-ups that haven't passed yet
   const now = new Date()
   const currentTimeISO = now.toISOString()
@@ -277,24 +324,27 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   
   type FollowupDataRaw = { id: string; next_followup: string | null; leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } }
   
-  // Fetch upcoming follow-ups (from current time to end of today)
-  const { data: allTodayFollowups } = await supabase
-    .from('lead_activities')
-    .select(`
-      id,
-      next_followup,
-      leads!inner(id, name, phone, org_id, assigned_to, created_by)
-    `)
-    .eq('leads.org_id', org.id)
-    .gte('next_followup', currentTimeISO)
-    .lte('next_followup', todayEndISO)
-    .order('next_followup', { ascending: true })
-    .limit(20)
+  // Fetch upcoming follow-ups (from current time to end of today) - skip for accountants
+  const followupsQueryForToday = isAccountant
+    ? Promise.resolve({ data: [] })
+    : supabase
+        .from('lead_activities')
+        .select(`
+          id,
+          next_followup,
+          leads!inner(id, name, phone, org_id, assigned_to, created_by)
+        `)
+        .eq('leads.org_id', org.id)
+        .gte('next_followup', currentTimeISO)
+        .lte('next_followup', todayEndISO)
+        .order('next_followup', { ascending: true })
+        .limit(20)
   
+  const { data: allTodayFollowups } = await followupsQueryForToday
   let todayFollowupsData = (allTodayFollowups || []) as FollowupDataRaw[]
   
   // Filter for sales users - only their assigned/created leads
-  if (profile?.role === 'sales' && profile?.id) {
+  if (!isAccountant && profile?.role === 'sales' && profile?.id) {
     todayFollowupsData = todayFollowupsData.filter(f => 
       f.leads?.assigned_to === profile.id || f.leads?.created_by === profile.id
     )
@@ -303,7 +353,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   type FollowupData = { id: string; next_followup: string | null; leads: { id: string; name: string; phone: string | null } }
   const todayFollowups = todayFollowupsData.slice(0, 10) as FollowupData[]
 
-  // Get upcoming demos/meetings (filtered for sales users)
+  // Get upcoming demos/meetings (filtered for sales users, skip for accountants)
   type TodayDemoData = { 
     id: string; 
     scheduled_at: string; 
@@ -311,26 +361,29 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } 
   }
 
-  // Fetch upcoming demos (from current time to end of today) - only ones that haven't passed
-  const { data: allTodayDemos } = await supabase
-    .from('demos')
-    .select(`
-      id,
-      scheduled_at,
-      google_meet_link,
-      leads!inner(id, name, phone, org_id, assigned_to, created_by)
-    `)
-    .eq('leads.org_id', org.id)
-    .eq('status', 'scheduled')
-    .gte('scheduled_at', currentTimeISO)
-    .lte('scheduled_at', todayEndISO)
-    .order('scheduled_at', { ascending: true })
-    .limit(20)
+  // Fetch upcoming demos (from current time to end of today) - only ones that haven't passed - skip for accountants
+  const demosQueryForToday = isAccountant
+    ? Promise.resolve({ data: [] })
+    : supabase
+        .from('demos')
+        .select(`
+          id,
+          scheduled_at,
+          google_meet_link,
+          leads!inner(id, name, phone, org_id, assigned_to, created_by)
+        `)
+        .eq('leads.org_id', org.id)
+        .eq('status', 'scheduled')
+        .gte('scheduled_at', currentTimeISO)
+        .lte('scheduled_at', todayEndISO)
+        .order('scheduled_at', { ascending: true })
+        .limit(20)
 
+  const { data: allTodayDemos } = await demosQueryForToday
   let todayDemosData = (allTodayDemos || []) as TodayDemoData[]
   
   // Filter for sales users - only their assigned/created leads
-  if (profile?.role === 'sales' && profile?.id) {
+  if (!isAccountant && profile?.role === 'sales' && profile?.id) {
     todayDemosData = todayDemosData.filter(d => 
       d.leads?.assigned_to === profile.id || d.leads?.created_by === profile.id
     )
@@ -579,9 +632,56 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
         )}
 
         {/* Main Content Grid */}
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* Recent Leads */}
+        {isAccountant ? (
+          /* Accountant Dashboard - Pending Approvals Quick Action */
           <Card className="animate-fade-in animate-delay-400">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Pending Approvals</CardTitle>
+                <CardDescription>Subscription requests awaiting your review</CardDescription>
+              </div>
+              <Link href={`/${orgSlug}/approvals`}>
+                <Button variant="ghost" size="sm">
+                  View all
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
+            </CardHeader>
+            <CardContent>
+              {pendingApprovalsCount > 0 ? (
+                <div className="space-y-4">
+                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-yellow-900">
+                          {pendingApprovalsCount} subscription{pendingApprovalsCount > 1 ? 's' : ''} pending approval
+                        </p>
+                        <p className="text-sm text-yellow-700 mt-1">
+                          Review and approve subscription requests from sales team
+                        </p>
+                      </div>
+                      <Link href={`/${orgSlug}/approvals`}>
+                        <Button>
+                          Review Now
+                          <ArrowRight className="ml-2 h-4 w-4" />
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-50 text-green-500" />
+                  <p>No pending approvals</p>
+                  <p className="text-xs mt-1">All subscription requests have been reviewed</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Recent Leads */}
+            <Card className="animate-fade-in animate-delay-400">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Recent Leads</CardTitle>
@@ -675,7 +775,8 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
               )}
             </CardContent>
           </Card>
-        </div>
+          </div>
+        )}
 
       </div>
     </div>

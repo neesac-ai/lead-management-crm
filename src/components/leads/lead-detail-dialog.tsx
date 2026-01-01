@@ -650,26 +650,60 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
           .single()
 
         if (leadData?.org_id) {
-          const { error: subError } = await supabase
-            .from('customer_subscriptions')
-            .insert({
-              org_id: leadData.org_id,
-              lead_id: lead.id,
-              start_date: subscriptionStartDate,
-              end_date: endDateValue,
-              validity_days: validityDays,
-              status: 'active',
-              deal_value: parseFloat(dealValue),
-              amount_credited: parseFloat(amountCredited || '0'),
-              // amount_pending is auto-calculated by the database (deal_value - amount_credited)
-              notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
-            })
+          // Check if approval entry already exists
+          const { data: existingApproval } = await supabase
+            .from('subscription_approvals')
+            .select('id, status')
+            .eq('lead_id', lead.id)
+            .eq('status', 'pending')
+            .single()
 
-          if (subError) {
-            console.error('Failed to create subscription:', subError)
-            toast.error('Lead updated but subscription creation failed')
+          if (existingApproval) {
+            // Update existing pending approval
+            const { error: approvalError } = await supabase
+              .from('subscription_approvals')
+              .update({
+                subscription_type: subscriptionType,
+                start_date: subscriptionStartDate,
+                end_date: endDateValue,
+                validity_days: validityDays,
+                deal_value: parseFloat(dealValue),
+                amount_credited: parseFloat(amountCredited || '0'),
+                notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', existingApproval.id)
+
+            if (approvalError) {
+              console.error('Failed to update approval:', approvalError)
+              toast.error('Lead updated but approval update failed')
+            } else {
+              toast.success('Subscription approval request updated! Waiting for accountant approval.')
+            }
           } else {
-            toast.success('Subscription created successfully!')
+            // Create new approval entry (not direct subscription)
+            const { error: approvalError } = await supabase
+              .from('subscription_approvals')
+              .insert({
+                org_id: leadData.org_id,
+                lead_id: lead.id,
+                subscription_type: subscriptionType,
+                start_date: subscriptionStartDate,
+                end_date: endDateValue,
+                validity_days: validityDays,
+                deal_value: parseFloat(dealValue),
+                amount_credited: parseFloat(amountCredited || '0'),
+                notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
+                status: 'pending',
+                created_by: profile.id,
+              })
+
+            if (approvalError) {
+              console.error('Failed to create approval:', approvalError)
+              toast.error('Lead updated but approval creation failed')
+            } else {
+              toast.success('Subscription approval request created! Waiting for accountant approval.')
+            }
           }
         }
       }

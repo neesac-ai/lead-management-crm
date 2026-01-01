@@ -42,6 +42,7 @@ import {
   Menu,
   Package,
   Plug,
+  CheckCircle2,
 } from 'lucide-react'
 import type { AuthUser, UserRole } from '@/types'
 
@@ -215,6 +216,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
 
     if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
       items.push(
+        { title: 'Approvals', href: `${baseUrl}/approvals`, icon: <CheckCircle2 className="w-5 h-5" /> },
         { title: 'Payments', href: `${baseUrl}/payments`, icon: <CreditCard className="w-5 h-5" /> },
         { title: 'Invoices', href: `${baseUrl}/invoices`, icon: <FileText className="w-5 h-5" /> },
       )
