@@ -48,7 +48,6 @@ type Product = {
 
 type Subscription = {
   id: string
-  org_id?: string
   lead_id: string
   start_date: string
   end_date: string
@@ -58,12 +57,9 @@ type Subscription = {
   amount_credited: number
   amount_pending: number
   notes: string | null
-  product_id?: string | null
+  product_id: string | null
   product?: { id: string; name: string } | null
   created_at: string
-  updated_at?: string
-  approval_status?: 'approved' | 'pending' // Added to distinguish approved vs pending
-  approval_id?: string // ID of approval if pending
   leads: {
     id: string
     name: string
@@ -104,7 +100,6 @@ export default function SubscriptionsPage() {
   const [dateTo, setDateTo] = useState<string>('')
   const [showFilters, setShowFilters] = useState(false)
   const [phoneSearch, setPhoneSearch] = useState<string>('')
-  const [showApprovedOnly, setShowApprovedOnly] = useState<boolean>(true) // Default to approved only
   
   // Hydration fix - only render Radix UI components after mount
   const [mounted, setMounted] = useState(false)
@@ -161,142 +156,40 @@ export default function SubscriptionsPage() {
         .order('name')
       setProducts(productsData || [])
 
-      // Fetch subscriptions (without leads join to avoid RLS issues)
-      // We'll fetch leads separately for better RLS handling
+      // Fetch subscriptions with lead info and assignee name
+      // Note: product_id will only work after running migration 020
       const { data: subsData, error } = await supabase
         .from('customer_subscriptions')
-        .select('*')
+        .select(`
+          *,
+          leads (
+            id,
+            name,
+            email,
+            phone,
+            custom_fields,
+            assigned_to,
+            created_by,
+            assignee:users!leads_assigned_to_fkey(name)
+          )
+        `)
         .eq('org_id', orgData.id)
         .order('created_at', { ascending: false })
 
-      // Fetch pending approvals and merge with subscriptions
-      // First get the approvals (gracefully handle if table doesn't exist yet)
-      let pendingApprovalsData: any[] = []
-      try {
-        const { data: pendingData, error: pendingError } = await supabase
-          .from('subscription_approvals')
-          .select('*')
-          .eq('org_id', orgData.id)
-          .eq('status', 'pending')
-          .order('created_at', { ascending: false })
-
-        if (pendingError) {
-          // If table doesn't exist (code 42P01 or PGRST116), just continue without pending approvals
-          if (pendingError.code !== '42P01' && pendingError.code !== 'PGRST116' && !pendingError.message?.includes('does not exist')) {
-            console.error('Error fetching pending approvals:', pendingError)
-          }
-          // Otherwise, table doesn't exist yet - this is okay, just continue
-        } else {
-          pendingApprovalsData = pendingData || []
-        }
-      } catch (err: any) {
-        // Catch any unexpected errors (like table not existing)
-        console.warn('Could not fetch pending approvals (table may not exist):', err?.message || err)
-        // Continue without pending approvals
-        pendingApprovalsData = []
-      }
-
-      // Then fetch leads data separately for pending approvals
-      let pendingLeadsMap: Record<string, any> = {}
-      if (pendingApprovalsData && pendingApprovalsData.length > 0) {
-        const pendingLeadIds = pendingApprovalsData.map(a => a.lead_id).filter(Boolean) as string[]
-        if (pendingLeadIds.length > 0) {
-          const { data: pendingLeadsData } = await supabase
-            .from('leads')
-            .select(`
-              id,
-              name,
-              email,
-              phone,
-              custom_fields,
-              assigned_to,
-              created_by,
-              assignee:users!leads_assigned_to_fkey(name)
-            `)
-            .in('id', pendingLeadIds)
-          
-          if (pendingLeadsData) {
-            pendingLeadsData.forEach(lead => {
-              pendingLeadsMap[lead.id] = lead
-            })
-          }
-        }
-      }
-
       if (error) {
-        console.error('Error fetching subscriptions:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint,
-          error
-        })
-        
-        // If it's a table not found error, set empty array and continue
-        if (error.code === '42P01' || error.code === 'PGRST116' || error.message?.includes('does not exist')) {
-          console.warn('Subscriptions table may not exist yet, continuing with empty list')
-          setSubscriptions([])
-          setIsLoading(false)
-          return
-        }
-        
-        toast.error(`Failed to load subscriptions: ${error.message || 'Unknown error'}`)
+        console.error('Error fetching subscriptions:', error)
         setSubscriptions([])
-        setIsLoading(false)
-        return
-      }
-      
-      // Handle case where subsData is null or undefined
-      const subscriptionsData = subsData || []
-      
-      if (subscriptionsData.length > 0 || subsData !== null) {
-        // Fetch leads separately for all roles to avoid RLS join issues
-        let approvedLeadsMap: Record<string, any> = {}
-        if (subscriptionsData.length > 0) {
-          const approvedLeadIds = subscriptionsData.map(s => s.lead_id).filter(Boolean) as string[]
-          if (approvedLeadIds.length > 0) {
-            const { data: approvedLeadsData, error: leadsError } = await supabase
-              .from('leads')
-              .select(`
-                id,
-                name,
-                email,
-                phone,
-                custom_fields,
-                assigned_to,
-                created_by,
-                assignee:users!leads_assigned_to_fkey(name)
-              `)
-              .in('id', approvedLeadIds)
-            
-            if (leadsError) {
-              console.warn('Error fetching leads for subscriptions:', leadsError)
-              // Continue without leads data - subscriptions will still show
-            } else if (approvedLeadsData) {
-              approvedLeadsData.forEach(lead => {
-                approvedLeadsMap[lead.id] = lead
-              })
-            }
-          }
-        }
-
-        // Get all lead IDs (from both approved subscriptions and pending approvals)
-        // Use lead_id from subscription if leads data is not available (for accountants)
-        const allLeadIds = [
-          ...subscriptionsData.map(s => {
-            if (s.leads?.id) return s.leads.id
-            return s.lead_id
-          }),
-          ...(pendingApprovalsData || []).map(a => a.lead_id)
-        ].filter(Boolean) as string[]
+      } else {
+        // Get lead IDs to fetch their products from lead_activities
+        const leadIds = (subsData || []).map(s => s.leads?.id).filter(Boolean) as string[]
         
         // Fetch the most recent product_id for each lead from lead_activities
         let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
-        if (allLeadIds.length > 0) {
+        if (leadIds.length > 0) {
           const { data: activitiesWithProducts } = await supabase
             .from('lead_activities')
             .select('lead_id, product_id, products(id, name)')
-            .in('lead_id', allLeadIds)
+            .in('lead_id', leadIds)
             .not('product_id', 'is', null)
             .order('created_at', { ascending: false })
           
@@ -316,80 +209,29 @@ export default function SubscriptionsPage() {
           }
         }
 
-        // Map approved subscriptions - all existing subscriptions are approved (created before approval workflow)
-        let approvedSubs = subscriptionsData.map(sub => {
-          // Use separately fetched leads data
-          const leadId = sub.lead_id
-          const leadData = leadId ? approvedLeadsMap[leadId] : null
-          
-          const productInfo = leadId ? leadProductMap[leadId] : null
+        // Filter client-side for sales reps (only their assigned/created leads)
+        let filteredSubs = (subsData || []).map(sub => {
+          const productInfo = sub.leads?.id ? leadProductMap[sub.leads.id] : null
           return {
             ...sub,
-            approval_status: 'approved' as const, // All existing subscriptions are approved
             product_id: productInfo?.product_id || null,
             product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
-            leads: leadData ? {
-              ...leadData,
-              assignee: (leadData as unknown as { assignee: { name: string } | null }).assignee
+            leads: sub.leads ? {
+              ...sub.leads,
+              assignee: (sub.leads as unknown as { assignee: { name: string } | null }).assignee
             } : null
           }
         }) as Subscription[]
-
-        // Map pending approvals as subscriptions
-        let pendingSubs: Subscription[] = []
-        if (pendingApprovalsData && pendingApprovalsData.length > 0) {
-          pendingSubs = pendingApprovalsData.map(approval => {
-            // Use the shared leadProductMap instead of separate pendingLeadProductMap
-            const productInfo = approval.lead_id ? leadProductMap[approval.lead_id] : null
-            const leadData = approval.lead_id ? pendingLeadsMap[approval.lead_id] : null
-            return {
-              id: approval.id, // Use approval ID as subscription ID for pending
-              org_id: approval.org_id,
-              lead_id: approval.lead_id,
-              start_date: approval.start_date,
-              end_date: approval.end_date,
-              validity_days: approval.validity_days,
-              status: 'pending' as string, // Status is pending
-              deal_value: approval.deal_value,
-              amount_credited: approval.amount_credited,
-              amount_pending: approval.deal_value - approval.amount_credited,
-              notes: approval.notes,
-              created_at: approval.created_at,
-              updated_at: approval.updated_at,
-              approval_status: 'pending' as const,
-              approval_id: approval.id,
-              product_id: productInfo?.product_id || null,
-              product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
-              leads: leadData ? {
-                ...leadData,
-                assignee: (leadData as unknown as { assignee: { name: string } | null }).assignee
-              } : null
-            }
-          }) as Subscription[]
-        }
-
-        // Combine approved and pending
-        let allSubs = [...approvedSubs, ...pendingSubs]
         
-        // Filter client-side for sales reps (only their assigned/created leads)
         if (profile.role === 'sales') {
-          allSubs = allSubs.filter(sub => 
+          filteredSubs = filteredSubs.filter(sub => 
             sub.leads?.assigned_to === profile.id || sub.leads?.created_by === profile.id
           )
         }
-        setSubscriptions(allSubs)
-      } else {
-        // No subscriptions data returned (but no error) - set empty array
-        setSubscriptions([])
+        setSubscriptions(filteredSubs)
       }
-    } catch (error: any) {
-      console.error('Error in fetchData:', {
-        message: error?.message,
-        stack: error?.stack,
-        error
-      })
-      toast.error('An error occurred while loading subscriptions')
-      setSubscriptions([])
+    } catch (error) {
+      console.error('Error:', error)
     } finally {
       setIsLoading(false)
     }
@@ -397,11 +239,6 @@ export default function SubscriptionsPage() {
 
   // Calculate subscription status based on dates
   function getSubscriptionStatus(sub: Subscription): { status: string; color: string; label: string } {
-    // If this is a pending approval, show it differently
-    if (sub.approval_status === 'pending') {
-      return { status: 'pending_approval', color: 'bg-yellow-500', label: 'Pending Approval' }
-    }
-    
     if (sub.status === 'paused') {
       return { status: 'paused', color: 'bg-yellow-500', label: 'Paused' }
     }
@@ -463,16 +300,6 @@ export default function SubscriptionsPage() {
   // Filter subscriptions by all criteria
   const filteredSubscriptions = useMemo(() => {
     return subscriptions.filter(sub => {
-      // Approval status filter (approved only vs all)
-      // If showApprovedOnly is true, only show approved (or undefined for backward compatibility with old subscriptions)
-      if (showApprovedOnly) {
-        // Exclude pending approvals, but include approved and undefined (old subscriptions without approval_status)
-        if (sub.approval_status === 'pending') {
-          return false
-        }
-        // Include if approved or undefined (undefined means it's an old subscription, considered approved)
-      }
-      
       // Status filter
       if (filter !== 'all') {
         const status = getSubscriptionStatus(sub)
@@ -548,7 +375,7 @@ export default function SubscriptionsPage() {
       
       return true
     })
-  }, [subscriptions, filter, isAdmin, selectedSalesRep, selectedProduct, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo, phoneSearch, showApprovedOnly])
+  }, [subscriptions, filter, isAdmin, selectedSalesRep, selectedProduct, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo, phoneSearch])
 
   // Check if any filter is active
   const hasActiveFilters = filter !== 'all' || selectedSalesRep !== 'all' || 
@@ -571,7 +398,6 @@ export default function SubscriptionsPage() {
   }
 
   // Calculate stats from filtered subscriptions
-  // filteredSubscriptions already handles the showApprovedOnly filter, so use it directly
   const stats = useMemo(() => {
     const data = filteredSubscriptions
     
@@ -605,7 +431,7 @@ export default function SubscriptionsPage() {
       pausedCount,
       nonRecurringCount
     }
-  }, [filteredSubscriptions, showApprovedOnly])
+  }, [filteredSubscriptions])
 
   // Format currency
   const formatCurrency = (amount: number) => {
@@ -632,29 +458,6 @@ export default function SubscriptionsPage() {
       />
       
       <div className="flex-1 p-4 lg:p-6 space-y-4">
-        {/* Toggle for Approved Only vs All */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Button
-              variant={showApprovedOnly ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowApprovedOnly(true)}
-            >
-              Approved Only
-            </Button>
-            <Button
-              variant={!showApprovedOnly ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setShowApprovedOnly(false)}
-            >
-              All Subscriptions
-            </Button>
-          </div>
-          <div className="text-sm text-muted-foreground">
-            Showing {showApprovedOnly ? 'approved' : 'all'} subscriptions
-          </div>
-        </div>
-
         {/* Stats Summary */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           <Card className="p-3">
@@ -910,7 +713,6 @@ export default function SubscriptionsPage() {
                         <th className="py-3 px-2 font-medium">Deal Value</th>
                         <th className="py-3 px-2 font-medium">Paid / Pending</th>
                         <th className="py-3 px-2 font-medium">Period</th>
-                        <th className="py-3 px-2 font-medium text-center">Approval</th>
                         <th className="py-3 px-2 font-medium text-center">Status</th>
                         <th className="py-3 px-2 font-medium text-center">Days Left</th>
                         {isAdmin && <th className="py-3 px-2 font-medium text-center">Actions</th>}
@@ -992,17 +794,6 @@ export default function SubscriptionsPage() {
                               </div>
                             </td>
                             <td className="py-3 px-2 text-center">
-                              {sub.approval_status === 'pending' ? (
-                                <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50">
-                                  Pending Approval
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50">
-                                  Approved
-                                </Badge>
-                              )}
-                            </td>
-                            <td className="py-3 px-2 text-center">
                               <Badge className={statusInfo.color}>
                                 {statusInfo.label}
                               </Badge>
@@ -1014,7 +805,7 @@ export default function SubscriptionsPage() {
                             </td>
                             {isAdmin && (
                               <td className="py-3 px-2 text-center">
-                                {statusInfo.status !== 'inactive' && statusInfo.status !== 'pending_approval' && (
+                                {statusInfo.status !== 'inactive' && (
                                   <Button
                                     size="sm"
                                     variant="ghost"
@@ -1069,15 +860,6 @@ export default function SubscriptionsPage() {
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2 shrink-0">
-                            {sub.approval_status === 'pending' ? (
-                              <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50">
-                                Pending Approval
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50">
-                                Approved
-                              </Badge>
-                            )}
                             <Badge className={statusInfo.color}>
                               {statusInfo.label}
                             </Badge>
@@ -1141,8 +923,8 @@ export default function SubscriptionsPage() {
                             <Clock className="h-3 w-3" />
                             {format(parseISO(sub.start_date), 'dd MMM')} - {sub.validity_days >= 36500 ? 'Non Recurring' : format(parseISO(sub.end_date), 'dd MMM yyyy')}
                           </div>
-                          {/* Only admin can pause/resume subscriptions (not for pending approvals) */}
-                          {isAdmin && statusInfo.status !== 'inactive' && statusInfo.status !== 'pending_approval' && (
+                          {/* Only admin can pause/resume subscriptions */}
+                          {isAdmin && statusInfo.status !== 'inactive' && (
                             <Button
                               size="sm"
                               variant="outline"

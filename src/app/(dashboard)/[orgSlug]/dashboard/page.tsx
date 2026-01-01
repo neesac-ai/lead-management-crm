@@ -18,7 +18,6 @@ import {
   Bell,
   Video,
   Phone,
-  FileText,
 } from 'lucide-react'
 
 // Force dynamic rendering to always fetch fresh data
@@ -60,19 +59,18 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   // Fetch stats based on user role
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
-  const isAccountant = profile?.role === 'accountant'
   
   // Calculate current time in IST for filtering
   const nowForStats = new Date()
   const nowISO = nowForStats.toISOString()
   
-  // Build leads query based on role (skip for accountant)
+  // Build leads query based on role
   let leadsQuery = supabase
     .from('leads')
     .select('id, status, subscription_type', { count: 'exact' })
     .eq('org_id', org.id)
 
-  if (!isAdmin && !isAccountant && profile?.id) {
+  if (!isAdmin && profile?.id) {
     leadsQuery = supabase
       .from('leads')
       .select('id, status, subscription_type', { count: 'exact' })
@@ -96,36 +94,15 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     .not('next_followup', 'is', null)
     .gte('next_followup', nowISO)
 
-  // Fetch subscriptions
-  const subscriptionsQuery = supabase
-    .from('customer_subscriptions')
-    .select('id, status, deal_value, amount_credited, amount_pending, validity_days, leads(assigned_to, created_by)')
-    .eq('org_id', org.id)
-
-  // Fetch pending approvals for accountant
-  const pendingApprovalsQuery = supabase
-    .from('subscription_approvals')
-    .select('id', { count: 'exact' })
-    .eq('org_id', org.id)
-    .eq('status', 'pending')
-
-  const queries: Promise<any>[] = []
-  
-  // Only fetch leads/demos/followups if not accountant
-  if (!isAccountant) {
-    queries.push(leadsQuery, demosQuery, followupsQuery, subscriptionsQuery)
-  } else {
-    queries.push(
-      Promise.resolve({ data: [], count: 0 }),
-      Promise.resolve({ data: [] }),
-      Promise.resolve({ data: [] }),
-      subscriptionsQuery
-    )
-  }
-  
-  queries.push(pendingApprovalsQuery)
-  
-  const [leadsResult, demosResult, followupsResult, subscriptionsResult, approvalsResult] = await Promise.all(queries)
+  const [leadsResult, demosResult, followupsResult, subscriptionsResult] = await Promise.all([
+    leadsQuery,
+    demosQuery,
+    followupsQuery,
+    supabase
+      .from('customer_subscriptions')
+      .select('id, status, deal_value, amount_credited, amount_pending, validity_days, leads(assigned_to, created_by)')
+      .eq('org_id', org.id),
+  ])
 
   type LeadData = { id: string; status: string; subscription_type?: string | null }
   type DemoData = { id: string; status: string; scheduled_at: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
@@ -184,26 +161,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const totalCredited = filteredSubscriptions.reduce((sum, s) => sum + (s.amount_credited || 0), 0)
   const totalPending = filteredSubscriptions.reduce((sum, s) => sum + (s.amount_pending || 0), 0)
 
-  // Get pending approvals count for accountant
-  const pendingApprovalsCount = (approvalsResult?.count || 0) as number
-
-  // Build stats based on role
-  const stats = isAccountant ? [
-    {
-      title: 'Pending Approvals',
-      value: pendingApprovalsCount.toString(),
-      icon: FileText,
-      description: 'Awaiting review',
-      href: `/${orgSlug}/approvals`,
-    },
-    {
-      title: 'Active Subscriptions',
-      value: activeSubscriptions.toString(),
-      icon: Users,
-      description: 'Currently active',
-      href: `/${orgSlug}/subscriptions`,
-    },
-  ] : [
+  const stats = [
     {
       title: 'Total Leads',
       value: totalLeads.toString(),
@@ -621,15 +579,15 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
         )}
 
         {/* Main Content Grid */}
-        {isAccountant ? (
-          /* Accountant Dashboard - Pending Approvals Quick Action */
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Recent Leads */}
           <Card className="animate-fade-in animate-delay-400">
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle>Pending Approvals</CardTitle>
-                <CardDescription>Subscription requests awaiting your review</CardDescription>
+                <CardTitle>Recent Leads</CardTitle>
+                <CardDescription>Latest leads added to the system</CardDescription>
               </div>
-              <Link href={`/${orgSlug}/approvals`}>
+              <Link href={`/${orgSlug}/leads`}>
                 <Button variant="ghost" size="sm">
                   View all
                   <ArrowRight className="ml-2 h-4 w-4" />
@@ -637,135 +595,87 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
               </Link>
             </CardHeader>
             <CardContent>
-              {pendingApprovalsCount > 0 ? (
-                <div className="space-y-4">
-                  <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-yellow-900">
-                          {pendingApprovalsCount} subscription{pendingApprovalsCount > 1 ? 's' : ''} pending approval
-                        </p>
-                        <p className="text-sm text-yellow-700 mt-1">
-                          Review and approve subscription requests from sales team
+              {recentLeads && recentLeads.length > 0 ? (
+                <div className="space-y-3">
+                  {recentLeads.map((lead) => (
+                    <Link 
+                      key={lead.id} 
+                      href={`/${orgSlug}/leads/${lead.id}`}
+                      className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className={`w-2 h-2 rounded-full ${getStatusColor(lead.status)}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate">{lead.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {getStatusLabel(lead.status)}
                         </p>
                       </div>
-                      <Link href={`/${orgSlug}/approvals`}>
-                        <Button>
-                          Review Now
-                          <ArrowRight className="ml-2 h-4 w-4" />
-                        </Button>
-                      </Link>
-                    </div>
-                  </div>
+                      <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
+                    </Link>
+                  ))}
                 </div>
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
-                  <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-50 text-green-500" />
-                  <p>No pending approvals</p>
-                  <p className="text-xs mt-1">All subscription requests have been reviewed</p>
+                  <Target className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No leads yet</p>
+                  <Link href={`/${orgSlug}/leads/new`}>
+                    <Button variant="link" className="mt-2">
+                      Add your first lead
+                    </Button>
+                  </Link>
                 </div>
               )}
             </CardContent>
           </Card>
-        ) : (
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Recent Leads */}
-            <Card className="animate-fade-in animate-delay-400">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Recent Leads</CardTitle>
-                  <CardDescription>Latest leads added to the system</CardDescription>
-                </div>
-                <Link href={`/${orgSlug}/leads`}>
-                  <Button variant="ghost" size="sm">
-                    View all
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </Link>
-              </CardHeader>
-              <CardContent>
-                {recentLeads && recentLeads.length > 0 ? (
-                  <div className="space-y-3">
-                    {recentLeads.map((lead) => (
-                      <Link 
-                        key={lead.id} 
-                        href={`/${orgSlug}/leads/${lead.id}`}
-                        className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors"
-                      >
-                        <div className={`w-2 h-2 rounded-full ${getStatusColor(lead.status)}`} />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{lead.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {getStatusLabel(lead.status)}
-                          </p>
-                        </div>
-                        <ArrowUpRight className="h-4 w-4 text-muted-foreground" />
-                      </Link>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Target className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>No leads yet</p>
-                    <Link href={`/${orgSlug}/leads/new`}>
-                      <Button variant="link" className="mt-2">
-                        Add your first lead
-                      </Button>
-                    </Link>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
 
-            {/* Lead Status Overview */}
-            <Card className="animate-fade-in animate-delay-500">
-              <CardHeader>
-                <CardTitle>Lead Status Overview</CardTitle>
-                <CardDescription>Quick breakdown of your pipeline</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {leadsData.length > 0 ? (
-                  <div className="space-y-3">
-                    {(() => {
-                      const statusCounts = leadsData.reduce((acc, lead) => {
-                        acc[lead.status] = (acc[lead.status] || 0) + 1
-                        return acc
-                      }, {} as Record<string, number>)
-                      
-                      const statusOrder = ['new', 'call_not_picked', 'follow_up_again', 'demo_booked', 'demo_completed', 'deal_won', 'deal_lost', 'not_interested']
-                      
-                      return statusOrder
-                        .filter(status => statusCounts[status])
-                        .map(status => {
-                          const count = statusCounts[status]
-                          const percentage = Math.round((count / leadsData.length) * 100)
-                          return (
-                            <div key={status} className="space-y-1">
-                              <div className="flex items-center justify-between text-sm">
-                                <span>{getStatusLabel(status)}</span>
-                                <span className="text-muted-foreground">{count} ({percentage}%)</span>
-                              </div>
-                              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                                <div 
-                                  className={`h-full ${getStatusColor(status)} transition-all`}
-                                  style={{ width: `${percentage}%` }}
-                                />
-                              </div>
+          {/* Lead Status Overview */}
+          <Card className="animate-fade-in animate-delay-500">
+            <CardHeader>
+              <CardTitle>Lead Status Overview</CardTitle>
+              <CardDescription>Quick breakdown of your pipeline</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {leadsData.length > 0 ? (
+                <div className="space-y-3">
+                  {(() => {
+                    const statusCounts = leadsData.reduce((acc, lead) => {
+                      acc[lead.status] = (acc[lead.status] || 0) + 1
+                      return acc
+                    }, {} as Record<string, number>)
+                    
+                    const statusOrder = ['new', 'call_not_picked', 'follow_up_again', 'demo_booked', 'demo_completed', 'deal_won', 'deal_lost', 'not_interested']
+                    
+                    return statusOrder
+                      .filter(status => statusCounts[status])
+                      .map(status => {
+                        const count = statusCounts[status]
+                        const percentage = Math.round((count / leadsData.length) * 100)
+                        return (
+                          <div key={status} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <span>{getStatusLabel(status)}</span>
+                              <span className="text-muted-foreground">{count} ({percentage}%)</span>
                             </div>
-                          )
-                        })
-                    })()}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Target className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>No leads to analyze</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full ${getStatusColor(status)} transition-all`}
+                                style={{ width: `${percentage}%` }}
+                              />
+                            </div>
+                          </div>
+                        )
+                      })
+                  })()}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Target className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>No leads to analyze</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
       </div>
     </div>

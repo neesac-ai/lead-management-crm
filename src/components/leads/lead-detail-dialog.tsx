@@ -152,6 +152,17 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    company: '',
+    source: 'manual',
+  })
+  
   // Hydration fix for Radix UI
   const [mounted, setMounted] = useState(false)
   
@@ -188,6 +199,14 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       return null
     }
     return data as Lead
+  }
+
+  const refreshLeadData = async () => {
+    if (!lead?.id) return
+    const updatedLead = await fetchLeadData(lead.id)
+    if (updatedLead) {
+      setCurrentLead(updatedLead)
+    }
   }
 
   const checkGoogleConnection = async () => {
@@ -393,6 +412,16 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       setAmountCredited('')
       setExistingSubscriptionId(null)
       
+      // Initialize edit form data
+      setEditFormData({
+        name: lead.name || '',
+        email: lead.email || '',
+        phone: lead.phone || '',
+        company: lead.custom_fields?.company || '',
+        source: lead.source || 'manual',
+      })
+      setIsEditMode(false)
+      
       fetchActivities(lead.id)
       fetchCallRecordings(lead.id)
       checkGoogleConnection()
@@ -578,7 +607,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       }
     }
 
-    // If deal_won, create pending approval for accountant (instead of direct subscription)
+    // If deal_won, create or update subscription entry
     if (status === 'deal_won') {
       if (!dealValue || !subscriptionStartDate) {
         toast.error('Please fill in deal value and start date')
@@ -591,36 +620,57 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
         ? new Date(new Date(subscriptionStartDate).getTime() + 36500 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         : calculateEndDate(subscriptionStartDate, validity)
 
-      // Get org_id from lead
-      const { data: leadData } = await supabase
-        .from('leads')
-        .select('org_id')
-        .eq('id', lead.id)
-        .single()
-
-      if (leadData?.org_id) {
-        // Create pending approval instead of direct subscription
-        const { error: approvalError } = await supabase
-          .from('subscription_approvals')
-          .insert({
-            org_id: leadData.org_id,
-            lead_id: lead.id,
-            subscription_type: subscriptionType || null,
+      if (existingSubscriptionId) {
+        // Update existing subscription
+        const { error: subError } = await supabase
+          .from('customer_subscriptions')
+          .update({
             start_date: subscriptionStartDate,
             end_date: endDateValue,
             validity_days: validityDays,
             deal_value: parseFloat(dealValue),
             amount_credited: parseFloat(amountCredited || '0'),
             notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
-            status: 'pending',
-            created_by: profile.id,
+            updated_at: new Date().toISOString(),
           })
+          .eq('id', existingSubscriptionId)
 
-        if (approvalError) {
-          console.error('Failed to create approval request:', approvalError)
-          toast.error('Lead updated but approval request creation failed')
+        if (subError) {
+          console.error('Failed to update subscription:', subError)
+          toast.error('Failed to update subscription')
         } else {
-          toast.success('Deal won! Subscription sent to accountant for approval.')
+          toast.success('Subscription updated successfully!')
+        }
+      } else {
+        // Get org_id from lead for new subscription
+        const { data: leadData } = await supabase
+          .from('leads')
+          .select('org_id')
+          .eq('id', lead.id)
+          .single()
+
+        if (leadData?.org_id) {
+          const { error: subError } = await supabase
+            .from('customer_subscriptions')
+            .insert({
+              org_id: leadData.org_id,
+              lead_id: lead.id,
+              start_date: subscriptionStartDate,
+              end_date: endDateValue,
+              validity_days: validityDays,
+              status: 'active',
+              deal_value: parseFloat(dealValue),
+              amount_credited: parseFloat(amountCredited || '0'),
+              // amount_pending is auto-calculated by the database (deal_value - amount_credited)
+              notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
+            })
+
+          if (subError) {
+            console.error('Failed to create subscription:', subError)
+            toast.error('Lead updated but subscription creation failed')
+          } else {
+            toast.success('Subscription created successfully!')
+          }
         }
       }
     }
@@ -687,17 +737,40 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <User className="h-5 w-5" />
-            {currentLead.name}
-            {currentLead.custom_fields?.company && (
-              <span className="text-muted-foreground font-normal text-base">
-                @ {currentLead.custom_fields.company}
-              </span>
+          <div className="flex items-center justify-between">
+            <DialogTitle className="flex items-center gap-2">
+              <User className="h-5 w-5" />
+              {isEditMode ? 'Edit Lead' : currentLead.name}
+              {!isEditMode && currentLead.custom_fields?.company && (
+                <span className="text-muted-foreground font-normal text-base">
+                  @ {currentLead.custom_fields.company}
+                </span>
+              )}
+            </DialogTitle>
+            {(isAdmin || canEditStatus) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (isEditMode) {
+                    // Cancel edit - reset form
+                    setEditFormData({
+                      name: currentLead.name || '',
+                      email: currentLead.email || '',
+                      phone: currentLead.phone || '',
+                      company: currentLead.custom_fields?.company || '',
+                      source: currentLead.source || 'manual',
+                    })
+                  }
+                  setIsEditMode(!isEditMode)
+                }}
+              >
+                {isEditMode ? 'Cancel' : 'Edit'}
+              </Button>
             )}
-          </DialogTitle>
+          </div>
           <DialogDescription>
-            View and update lead details
+            {isEditMode ? 'Edit lead information' : 'View and update lead details'}
           </DialogDescription>
         </DialogHeader>
 
@@ -709,33 +782,190 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
           </TabsList>
 
           <TabsContent value="details" className="space-y-4 mt-4">
-            {/* Lead Info */}
-            <div className="space-y-3 p-4 bg-muted/50 rounded-lg">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <Mail className="h-4 w-4 text-muted-foreground" />
-                  <span className="truncate">{currentLead.email || 'No email'}</span>
+            {/* Edit Mode - Lead Info Form */}
+            {isEditMode ? (
+              <div className="space-y-4 p-4 border rounded-lg">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-phone">Phone *</Label>
+                    <Input
+                      id="edit-phone"
+                      type="tel"
+                      value={editFormData.phone}
+                      onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                      placeholder="+91 98765 43210"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-name">Name</Label>
+                    <Input
+                      id="edit-name"
+                      value={editFormData.name}
+                      onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                      placeholder="John Doe"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Building2 className="h-4 w-4 text-muted-foreground" />
-                  <span className="truncate">{currentLead.custom_fields?.company || 'No company'}</span>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-company">Company</Label>
+                    <Input
+                      id="edit-company"
+                      value={editFormData.company}
+                      onChange={(e) => setEditFormData({ ...editFormData, company: e.target.value })}
+                      placeholder="Acme Inc."
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="edit-email">Email</Label>
+                    <Input
+                      id="edit-email"
+                      type="email"
+                      value={editFormData.email}
+                      onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                      placeholder="john@example.com"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm col-span-2">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span>Added {formatDistanceToNow(new Date(currentLead.created_at), { addSuffix: true })}</span>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="edit-source">Source</Label>
+                  {mounted ? (
+                    <Select value={editFormData.source} onValueChange={(value) => setEditFormData({ ...editFormData, source: value })}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">Manual</SelectItem>
+                        <SelectItem value="facebook">Facebook</SelectItem>
+                        <SelectItem value="instagram">Instagram</SelectItem>
+                        <SelectItem value="linkedin">LinkedIn</SelectItem>
+                        <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                        <SelectItem value="google">Google Ads</SelectItem>
+                        <SelectItem value="website">Website</SelectItem>
+                        <SelectItem value="referral">Referral</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="h-10 rounded-md border bg-muted animate-pulse" />
+                  )}
+                </div>
+                
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    onClick={async () => {
+                      if (!editFormData.phone.trim()) {
+                        toast.error('Phone number is required')
+                        return
+                      }
+                      
+                      setIsSavingEdit(true)
+                      try {
+                        const response = await fetch(`/api/leads/${lead.id}`, {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            name: editFormData.name.trim(),
+                            email: editFormData.email.trim() || null,
+                            phone: editFormData.phone.trim() || null,
+                            source: editFormData.source,
+                            custom_fields: {
+                              company: editFormData.company.trim() || undefined,
+                            },
+                          }),
+                        })
+                        
+                        if (!response.ok) {
+                          const data = await response.json()
+                          throw new Error(data.error || 'Failed to update lead')
+                        }
+                        
+                        const data = await response.json()
+                        toast.success('Lead updated successfully')
+                        
+                        // Refresh lead data to get the latest from database
+                        await refreshLeadData()
+                        
+                        setIsEditMode(false)
+                        onUpdate()
+                      } catch (error) {
+                        console.error('Error updating lead:', error)
+                        toast.error(error instanceof Error ? error.message : 'Failed to update lead')
+                      } finally {
+                        setIsSavingEdit(false)
+                      }
+                    }}
+                    disabled={isSavingEdit || !editFormData.phone.trim()}
+                  >
+                    {isSavingEdit ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      'Save Changes'
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditFormData({
+                        name: currentLead.name || '',
+                        email: currentLead.email || '',
+                        phone: currentLead.phone || '',
+                        company: currentLead.custom_fields?.company || '',
+                        source: currentLead.source || 'manual',
+                      })
+                      setIsEditMode(false)
+                    }}
+                    disabled={isSavingEdit}
+                  >
+                    Cancel
+                  </Button>
                 </div>
               </div>
-              
-              {/* Quick Contact Actions */}
-              <div className="pt-3 border-t border-border">
-                <p className="text-xs text-muted-foreground mb-2">Quick Actions</p>
-                <ContactActions 
-                  phone={currentLead.phone} 
-                  email={currentLead.email}
-                  name={currentLead.name}
-                />
+            ) : (
+              /* View Mode - Lead Info Display */
+              <div className="space-y-3 p-4 bg-muted/50 rounded-lg">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Mail className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate">{currentLead.email || 'No email'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Building2 className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate">{currentLead.custom_fields?.company || 'No company'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Phone className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate">{currentLead.phone || 'No phone'}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">Source:</span>
+                    <Badge variant="outline">{currentLead.source || 'manual'}</Badge>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm col-span-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <span>Added {formatDistanceToNow(new Date(currentLead.created_at), { addSuffix: true })}</span>
+                  </div>
+                </div>
+                
+                {/* Quick Contact Actions */}
+                <div className="pt-3 border-t border-border">
+                  <p className="text-xs text-muted-foreground mb-2">Quick Actions</p>
+                  <ContactActions 
+                    phone={currentLead.phone} 
+                    email={currentLead.email}
+                    name={currentLead.name}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Current Status */}
             <div className="flex items-center gap-2">

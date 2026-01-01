@@ -48,9 +48,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Cannot delete admin accounts through this endpoint' }, { status: 403 })
     }
 
-    // Step 1: Unassign all leads and clear created_by (preserve the lead data)
-    // First, unassign leads assigned to this user
-    const { error: assignedLeadsError } = await adminSupabase
+    // Step 1: Unassign all leads (preserve the lead data)
+    const { error: leadsError } = await adminSupabase
       .from('leads')
       .update({ 
         assigned_to: null, 
@@ -58,24 +57,8 @@ export async function DELETE(
       })
       .eq('assigned_to', userId)
 
-    if (assignedLeadsError) {
-      console.error('Error unassigning leads:', assignedLeadsError)
-    }
-
-    // Second, clear created_by for leads created by this user
-    const { error: createdLeadsError } = await adminSupabase
-      .from('leads')
-      .update({ 
-        created_by: null, 
-        updated_at: new Date().toISOString() 
-      })
-      .eq('created_by', userId)
-
-    if (createdLeadsError) {
-      console.error('Error clearing created_by from leads:', createdLeadsError)
-      return NextResponse.json({ 
-        error: `Failed to update leads: ${createdLeadsError.message}` 
-      }, { status: 500 })
+    if (leadsError) {
+      console.error('Error unassigning leads:', leadsError)
     }
 
     // Step 2: Update user_id in lead_activities to admin (preserve activity history)
@@ -96,26 +79,6 @@ export async function DELETE(
 
     if (approvedByError) {
       console.error('Error updating approved_by:', approvedByError)
-    }
-
-    // Step 3b: Update subscription_approvals references (if table exists)
-    try {
-      // Clear created_by, approved_by, and requested_by references
-      const { error: approvalsError } = await adminSupabase
-        .from('subscription_approvals')
-        .update({ 
-          created_by: adminProfile.id,
-          approved_by: adminProfile.id,
-          requested_by: adminProfile.id
-        })
-        .or(`created_by.eq.${userId},approved_by.eq.${userId},requested_by.eq.${userId}`)
-
-      if (approvalsError && approvalsError.code !== '42P01' && approvalsError.code !== 'PGRST116') {
-        console.error('Error updating subscription_approvals:', approvalsError)
-      }
-    } catch (err) {
-      // Table might not exist, ignore
-      console.log('subscription_approvals table may not exist')
     }
 
     // Step 4: Delete impersonation logs for this user (if any)

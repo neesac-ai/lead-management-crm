@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/select'
 import { LeadDetailDialog } from '@/components/leads/lead-detail-dialog'
 import { Target, Plus, Loader2, Phone, Mail, User, UserCircle, AlertTriangle, Upload, FileSpreadsheet, CheckCircle, AlertCircle, X, UserCheck, Users, Filter, Calendar, Package, Trash2, TrendingUp } from 'lucide-react'
-import { differenceInDays, parseISO } from 'date-fns'
+import { differenceInDays } from 'date-fns'
 import { toast } from 'sonner'
 
 type Lead = {
@@ -57,13 +57,6 @@ type Lead = {
   creator: { name: string } | null
   assignee: { name: string } | null
   product?: { id: string; name: string } | null
-  subscription?: {
-    id: string
-    status: string
-    approval_status?: 'pending' | 'approved' | 'rejected' | null
-    start_date?: string
-    end_date?: string
-  } | null
 }
 
 type UserProfile = {
@@ -193,6 +186,12 @@ export default function LeadsPage() {
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false)
   const [isDeletingSingle, setIsDeletingSingle] = useState(false)
   
+  // Bulk delete state
+  const [selectedLeadsForDelete, setSelectedLeadsForDelete] = useState<Set<string>>(new Set())
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false)
+  const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState<string>('')
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false)
+  
   // Duplicate detection state
   const [duplicateLead, setDuplicateLead] = useState<DuplicateLead | null>(null)
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
@@ -298,106 +297,28 @@ export default function LeadsPage() {
       }
     }
 
-    // Fetch subscription data for leads with deal_won status
-    const dealWonLeadIds = (leadsData || []).filter(l => l.status === 'deal_won').map(l => l.id)
-    let subscriptionMap: Record<string, any> = {}
-    let approvalMap: Record<string, any> = {}
-    
-    if (dealWonLeadIds.length > 0) {
-      // Fetch approved subscriptions
-      const { data: subscriptionsData } = await supabase
-        .from('customer_subscriptions')
-        .select('id, lead_id, status, start_date, end_date')
-        .in('lead_id', dealWonLeadIds)
-      
-      if (subscriptionsData) {
-        subscriptionsData.forEach(sub => {
-          // Calculate actual status based on dates (same logic as subscriptions page)
-          let calculatedStatus = sub.status
-          
-          // If status is 'paused', keep it as paused
-          if (sub.status === 'paused') {
-            calculatedStatus = 'paused'
-          } else if (sub.end_date) {
-            // Calculate status based on end_date
-            const today = new Date()
-            today.setHours(0, 0, 0, 0)
-            const endDate = parseISO(sub.end_date)
-            endDate.setHours(0, 0, 0, 0)
-            
-            // If end_date is in the past, status is expired (inactive)
-            if (endDate < today) {
-              calculatedStatus = 'expired'
-            } else {
-              // If end_date is in the future and status is active, keep it active
-              calculatedStatus = 'active'
-            }
-          }
-          
-          subscriptionMap[sub.lead_id] = {
-            id: sub.id,
-            status: calculatedStatus,
-            approval_status: 'approved' as const,
-            start_date: sub.start_date,
-            end_date: sub.end_date,
-          }
-        })
-      }
-      
-      // Fetch pending approvals
-      try {
-        const { data: approvalsData } = await supabase
-          .from('subscription_approvals')
-          .select('lead_id, status')
-          .in('lead_id', dealWonLeadIds)
-          .eq('status', 'pending')
-        
-        if (approvalsData) {
-          approvalsData.forEach(approval => {
-            if (!subscriptionMap[approval.lead_id]) {
-              approvalMap[approval.lead_id] = {
-                approval_status: 'pending' as const,
-              }
-            }
-          })
-        }
-      } catch (err) {
-        // Table might not exist, ignore
-      }
-    }
-
     // Map leads - relationships already included
     const leadsWithUsers = (leadsData || []).map(lead => {
       const productInfo = leadProductMap[lead.id]
-      const subscriptionInfo = subscriptionMap[lead.id] || approvalMap[lead.id] || null
       return {
         ...lead,
         creator: lead.creator as { name: string } | null,
         assignee: lead.assignee as { name: string } | null,
         product_id: productInfo?.product_id || null,
         product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
-        subscription: subscriptionInfo,
       }
     })
 
     setLeads(leadsWithUsers as Lead[])
 
-    // Fetch tags for the organization (gracefully handle if table doesn't exist)
-    try {
-      const { data: tagsData, error: tagsError } = await supabase
-        .from('lead_tags')
-        .select('id, name, color')
-        .eq('org_id', profile.org_id)
-        .order('name')
-      
-      if (tagsError && tagsError.code !== '42P01' && tagsError.code !== 'PGRST116') {
-        console.warn('Error fetching tags:', tagsError)
-      }
-      setTags((tagsData || []) as Tag[])
-    } catch (err) {
-      console.warn('Tags table may not exist:', err)
-      setTags([])
-    }
+    // Fetch tags for the organization
+    const { data: tagsData } = await supabase
+      .from('lead_tags')
+      .select('id, name, color')
+      .eq('org_id', profile.org_id)
+      .order('name')
+    
+    setTags((tagsData || []) as Tag[])
 
     // Fetch sales team for admin filter
     if (profile.role === 'admin') {
@@ -421,32 +342,23 @@ export default function LeadsPage() {
     
     setProducts((productsData || []) as Product[])
 
-    // Fetch tag assignments for all leads (gracefully handle if table doesn't exist)
+    // Fetch tag assignments for all leads
     if (leadsData && leadsData.length > 0) {
-      try {
-        const leadIds = leadsData.map(l => l.id)
-        const { data: assignments, error: assignmentsError } = await supabase
-          .from('lead_tag_assignments')
-          .select('lead_id, tag_id')
-          .in('lead_id', leadIds)
-        
-        if (assignmentsError && assignmentsError.code !== '42P01' && assignmentsError.code !== 'PGRST116') {
-          console.warn('Error fetching tag assignments:', assignmentsError)
+      const leadIds = leadsData.map(l => l.id)
+      const { data: assignments } = await supabase
+        .from('lead_tag_assignments')
+        .select('lead_id, tag_id')
+        .in('lead_id', leadIds)
+      
+      // Group by lead_id
+      const tagsByLead: Record<string, string[]> = {}
+      assignments?.forEach(a => {
+        if (!tagsByLead[a.lead_id]) {
+          tagsByLead[a.lead_id] = []
         }
-        
-        // Group by lead_id
-        const tagsByLead: Record<string, string[]> = {}
-        assignments?.forEach(a => {
-          if (!tagsByLead[a.lead_id]) {
-            tagsByLead[a.lead_id] = []
-          }
-          tagsByLead[a.lead_id].push(a.tag_id)
-        })
-        setLeadTags(tagsByLead)
-      } catch (err) {
-        console.warn('Tag assignments table may not exist:', err)
-        setLeadTags({})
-      }
+        tagsByLead[a.lead_id].push(a.tag_id)
+      })
+      setLeadTags(tagsByLead)
     }
   }
 
@@ -726,6 +638,79 @@ export default function LeadsPage() {
     setLeadToDelete(lead)
     setDeleteConfirmText('')
     setShowDeleteConfirmDialog(true)
+  }
+
+  const handleSelectLeadForDelete = (leadId: string) => {
+    setSelectedLeadsForDelete(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(leadId)) {
+        newSet.delete(leadId)
+      } else {
+        newSet.add(leadId)
+      }
+      return newSet
+    })
+  }
+
+  const handleSelectAllForDelete = () => {
+    if (selectedLeadsForDelete.size === filteredLeads.length) {
+      setSelectedLeadsForDelete(new Set())
+    } else {
+      setSelectedLeadsForDelete(new Set(filteredLeads.map(l => l.id)))
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (bulkDeleteConfirmText.toLowerCase() !== 'delete') {
+      toast.error('Please type "delete" to confirm')
+      return
+    }
+
+    if (selectedLeadsForDelete.size === 0) {
+      toast.error('No leads selected')
+      return
+    }
+
+    setIsDeletingBulk(true)
+    try {
+      const leadIds = Array.from(selectedLeadsForDelete)
+      let successCount = 0
+      let failCount = 0
+
+      for (const leadId of leadIds) {
+        try {
+          const response = await fetch(`/api/leads/${leadId}`, {
+            method: 'DELETE',
+          })
+
+          if (response.ok) {
+            successCount++
+          } else {
+            failCount++
+          }
+        } catch (error) {
+          console.error(`Error deleting lead ${leadId}:`, error)
+          failCount++
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Successfully deleted ${successCount} lead(s)${failCount > 0 ? `. ${failCount} failed.` : ''}`)
+        setSelectedLeadsForDelete(new Set())
+        setBulkDeleteConfirmText('')
+        setShowBulkDeleteDialog(false)
+        if (userProfile) {
+          fetchLeads(userProfile)
+        }
+      } else {
+        toast.error('Failed to delete leads')
+      }
+    } catch (error) {
+      console.error('Bulk delete error:', error)
+      toast.error('Failed to delete leads')
+    } finally {
+      setIsDeletingBulk(false)
+    }
   }
 
   // Import functions
@@ -1196,6 +1181,28 @@ export default function LeadsPage() {
               </div>
             ) : filteredLeads.length > 0 ? (
               <div className="space-y-3">
+                {/* Bulk Delete Header - Admin Only */}
+                {isAdmin && selectedLeadsForDelete.size > 0 && (
+                  <div className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-red-700 dark:text-red-400">
+                        {selectedLeadsForDelete.size} lead(s) selected
+                      </span>
+                    </div>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => {
+                        setShowBulkDeleteDialog(true)
+                        setBulkDeleteConfirmText('')
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete Selected
+                    </Button>
+                  </div>
+                )}
+                
                 {filteredLeads.map((lead, index) => (
                   <div 
                     key={lead.id} 
@@ -1205,9 +1212,20 @@ export default function LeadsPage() {
                       setIsDetailOpen(true)
                     }}
                   >
-                    {/* Top row: Serial + Phone (primary) + Status + Delete */}
+                    {/* Top row: Checkbox (Admin) + Serial + Phone (primary) + Status + Delete */}
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="flex items-start gap-3 min-w-0 flex-1">
+                        {/* Checkbox for bulk delete - Admin only */}
+                        {isAdmin && (
+                          <Checkbox
+                            checked={selectedLeadsForDelete.has(lead.id)}
+                            onCheckedChange={(checked) => {
+                              handleSelectLeadForDelete(lead.id)
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="mt-1"
+                          />
+                        )}
                         {/* Serial Number */}
                         <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
                           {index + 1}
@@ -1244,30 +1262,6 @@ export default function LeadsPage() {
                             {lead.product.name}
                           </Badge>
                         )}
-                        {/* Subscription status for deal won leads */}
-                        {lead.status === 'deal_won' && lead.subscription && (
-                          <>
-                            {lead.subscription.approval_status === 'pending' ? (
-                              <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50">
-                                Pending Approval
-                              </Badge>
-                            ) : lead.subscription.approval_status === 'approved' ? (
-                              <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50">
-                                Approved
-                              </Badge>
-                            ) : null}
-                            {lead.subscription.status && (
-                              <Badge variant="outline" className={
-                                lead.subscription.status === 'active' ? 'border-green-500 text-green-600' :
-                                lead.subscription.status === 'paused' ? 'border-yellow-500 text-yellow-600' :
-                                lead.subscription.status === 'expired' ? 'border-red-500 text-red-600' :
-                                'border-gray-500 text-gray-600'
-                              }>
-                                {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
-                              </Badge>
-                            )}
-                          </>
-                        )}
                       </div>
                     </div>
                     
@@ -1301,47 +1295,6 @@ export default function LeadsPage() {
                       )}
                     </div>
                     
-                    {/* Subscription Details for Deal Won */}
-                    {lead.status === 'deal_won' && lead.subscription && (
-                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground mb-2 p-2 bg-muted/50 rounded-md">
-                        {lead.subscription.approval_status && (
-                          <span className="flex items-center gap-1">
-                            <span className="font-medium">Approval:</span>
-                            <span className={
-                              lead.subscription.approval_status === 'pending' ? 'text-yellow-600' :
-                              lead.subscription.approval_status === 'approved' ? 'text-green-600' :
-                              'text-red-600'
-                            }>
-                              {lead.subscription.approval_status === 'pending' ? 'Pending' :
-                               lead.subscription.approval_status === 'approved' ? 'Approved' :
-                               'Rejected'}
-                            </span>
-                          </span>
-                        )}
-                        {lead.subscription.status && (
-                          <span className="flex items-center gap-1">
-                            <span className="font-medium">Status:</span>
-                            <span className={
-                              lead.subscription.status === 'active' ? 'text-green-600' :
-                              lead.subscription.status === 'paused' ? 'text-yellow-600' :
-                              lead.subscription.status === 'expired' ? 'text-red-600' :
-                              'text-gray-600'
-                            }>
-                              {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
-                            </span>
-                          </span>
-                        )}
-                        {lead.subscription.start_date && lead.subscription.end_date && (
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            <span>
-                              {new Date(lead.subscription.start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} - {new Date(lead.subscription.end_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </span>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    
                     {/* Bottom row: Source + Age + Assignment */}
                     <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
                       <div className="flex items-center gap-2">
@@ -1359,18 +1312,20 @@ export default function LeadsPage() {
                             <span className="text-yellow-600">Unassigned</span>
                           ) : null}
                         </div>
-                        {/* Delete button */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-100"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            openDeleteConfirmDialog(lead)
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {/* Delete button - Admin only */}
+                        {(userProfile?.role === 'admin' || userProfile?.role === 'super_admin') && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-100"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openDeleteConfirmDialog(lead)
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1808,6 +1763,69 @@ export default function LeadsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedLeadsForDelete.size} Lead(s) Permanently</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <div className="text-sm mb-4">This will permanently delete {selectedLeadsForDelete.size} lead(s) and all associated data including:</div>
+                <ul className="list-disc list-inside text-sm space-y-1 mb-4">
+                  <li>All activities and notes</li>
+                  <li>All meetings/demos</li>
+                  <li>All call recordings</li>
+                  <li>All subscriptions</li>
+                </ul>
+                <div className="text-sm font-medium text-red-600 dark:text-red-400 mb-4">
+                  This action cannot be undone.
+                </div>
+                <div className="mt-4">
+                  <Label htmlFor="bulk-delete-confirm" className="text-sm">
+                    Type <strong>"delete"</strong> to confirm:
+                  </Label>
+                  <Input
+                    id="bulk-delete-confirm"
+                    value={bulkDeleteConfirmText}
+                    onChange={(e) => setBulkDeleteConfirmText(e.target.value)}
+                    placeholder="delete"
+                    className="mt-2"
+                    autoFocus
+                  />
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setBulkDeleteConfirmText('')
+                setShowBulkDeleteDialog(false)
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDelete}
+              disabled={isDeletingBulk || bulkDeleteConfirmText.toLowerCase() !== 'delete'}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeletingBulk ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete {selectedLeadsForDelete.size} Lead(s)
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
         </>
       )}
     </div>

@@ -1,5 +1,5 @@
 // Service Worker for Lead Management CRM
-const CACHE_NAME = 'lead-crm-v3'; // Updated version to force cache refresh
+const CACHE_NAME = 'lead-crm-v4';
 const OFFLINE_URL = '/offline.html';
 
 // Files to cache for offline use
@@ -9,6 +9,8 @@ const STATIC_ASSETS = [
   '/manifest.json',
   '/icons/android/android-launchericon-192-192.png',
   '/icons/android/android-launchericon-512-512.png',
+  '/icons/android/android-launchericon-96-96.png',
+  '/icons/ios/180.png',
 ];
 
 // Install event - cache static assets
