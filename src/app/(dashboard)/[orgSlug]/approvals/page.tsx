@@ -45,6 +45,12 @@ export default function ApprovalsPage() {
     fetchApprovals()
   }, [orgSlug, filter])
 
+  const handleRefresh = async () => {
+    setIsLoading(true)
+    await fetchApprovals()
+    setIsLoading(false)
+  }
+
   async function fetchApprovals() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -135,7 +141,12 @@ export default function ApprovalsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
+      <Header 
+        title="Pending Approvals"
+        description="Review and approve subscription requests"
+        onRefresh={handleRefresh}
+        isRefreshing={isLoading}
+      />
       <div className="container mx-auto p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>

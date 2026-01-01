@@ -172,6 +172,7 @@ export default function LeadsPage() {
   // Filter state
   const [statusFilter, setStatusFilter] = useState('all')
   const [subscriptionTypeFilter, setSubscriptionTypeFilter] = useState('all')
+  const [approvalStatusFilter, setApprovalStatusFilter] = useState('all')
   const [tags, setTags] = useState<Tag[]>([])
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all')
   const [leadTags, setLeadTags] = useState<Record<string, string[]>>({}) // leadId -> tagIds
@@ -577,8 +578,9 @@ export default function LeadsPage() {
     }
   }
 
-  const isAdmin = userProfile?.role === 'admin'
+  const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'super_admin'
   const isSales = userProfile?.role === 'sales'
+  const isAccountant = userProfile?.role === 'accountant'
 
   // Calculate lead age in days
   const getLeadAge = (createdAt: string): number => {
@@ -596,6 +598,17 @@ export default function LeadsPage() {
         if (lead.subscription_type) return false
       } else {
         if (lead.subscription_type !== subscriptionTypeFilter) return false
+      }
+    }
+    
+    // Approval status filter (only for deal_won leads with subscription)
+    if (approvalStatusFilter !== 'all') {
+      if (lead.status === 'deal_won' && lead.subscription) {
+        if (approvalStatusFilter === 'approved' && lead.subscription.approval_status !== 'approved') return false
+        if (approvalStatusFilter === 'pending' && lead.subscription.approval_status !== 'pending') return false
+      } else {
+        // If not deal_won or no subscription, exclude from filtered results
+        return false
       }
     }
     
@@ -662,6 +675,7 @@ export default function LeadsPage() {
 
   // Check if any filter is active
   const hasActiveFilters = statusFilter !== 'all' || subscriptionTypeFilter !== 'all' || 
+    approvalStatusFilter !== 'all' ||
     selectedProduct !== 'all' || selectedTagFilter !== 'all' || 
     selectedSalesRep !== 'all' || 
     (leadAgeOperator !== 'all' && leadAgeDays) || dateFrom || dateTo || phoneSearch
@@ -670,6 +684,7 @@ export default function LeadsPage() {
   const clearAllFilters = () => {
     setStatusFilter('all')
     setSubscriptionTypeFilter('all')
+    setApprovalStatusFilter('all')
     setSelectedProduct('all')
     setSelectedTagFilter('all')
     setSelectedSalesRep('all')
@@ -1030,11 +1045,21 @@ export default function LeadsPage() {
     }
   }
 
+  const handleRefresh = async () => {
+    if (userProfile) {
+      setIsLoading(true)
+      await fetchLeads(userProfile)
+      setIsLoading(false)
+    }
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       <Header 
         title="Leads" 
         description={isAdmin ? "View all leads and assign to sales team" : "Manage your assigned leads"}
+        onRefresh={handleRefresh}
+        isRefreshing={isLoading}
       />
       
       <div className="flex-1 p-4 lg:p-6">
@@ -1107,6 +1132,21 @@ export default function LeadsPage() {
                         <SelectItem value="not_set">Not Specified</SelectItem>
                       </SelectContent>
                     </Select>
+
+                    {/* Approval Status Filter - Admin and Sales Only */}
+                    {!isAccountant && (
+                      <Select value={approvalStatusFilter} onValueChange={setApprovalStatusFilter}>
+                        <SelectTrigger className="w-[180px]">
+                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                          <SelectValue placeholder="Approval Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Approval Status</SelectItem>
+                          <SelectItem value="approved">Approved</SelectItem>
+                          <SelectItem value="pending">Approval Pending</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
 
                     {/* Sales Rep Filter - Admin Only */}
                     {isAdmin && salesTeam.length > 0 && (

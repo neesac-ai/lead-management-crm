@@ -103,7 +103,7 @@ export default function SubscriptionsPage() {
   const [dateTo, setDateTo] = useState<string>('')
   const [showFilters, setShowFilters] = useState(false)
   const [phoneSearch, setPhoneSearch] = useState<string>('')
-  const [showApprovedOnly, setShowApprovedOnly] = useState<boolean>(true) // Default to approved only
+  const [approvalFilter, setApprovalFilter] = useState<'approved' | 'all' | 'pending'>('approved') // Default to approved only
   
   // Hydration fix - only render Radix UI components after mount
   const [mounted, setMounted] = useState(false)
@@ -399,15 +399,20 @@ export default function SubscriptionsPage() {
   // Filter subscriptions by all criteria
   const filteredSubscriptions = useMemo(() => {
     return subscriptions.filter(sub => {
-      // Approval status filter (approved only vs all)
-      // If showApprovedOnly is true, only show approved (or undefined for backward compatibility with old subscriptions)
-      if (showApprovedOnly) {
+      // Approval status filter (approved / all / pending)
+      if (approvalFilter === 'approved') {
         // Exclude pending approvals, but include approved and undefined (old subscriptions without approval_status)
         if (sub.approval_status === 'pending') {
           return false
         }
         // Include if approved or undefined (undefined means it's an old subscription, considered approved)
+      } else if (approvalFilter === 'pending') {
+        // Only show pending approvals
+        if (sub.approval_status !== 'pending') {
+          return false
+        }
       }
+      // If approvalFilter === 'all', show all subscriptions (no filtering)
       
       // Status filter
       if (filter !== 'all') {
@@ -484,7 +489,7 @@ export default function SubscriptionsPage() {
       
       return true
     })
-  }, [subscriptions, filter, isAdmin, selectedSalesRep, selectedProduct, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo, phoneSearch, showApprovedOnly])
+  }, [subscriptions, filter, isAdmin, selectedSalesRep, selectedProduct, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo, phoneSearch, approvalFilter])
 
   // Check if any filter is active
   const hasActiveFilters = filter !== 'all' || selectedSalesRep !== 'all' || 
@@ -559,34 +564,49 @@ export default function SubscriptionsPage() {
     )
   }
 
+  const handleRefresh = async () => {
+    setIsLoading(true)
+    await fetchData()
+    setIsLoading(false)
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       <Header 
         title="Subscriptions" 
         description="Manage customer subscriptions"
+        onRefresh={handleRefresh}
+        isRefreshing={isLoading}
       />
       
       <div className="flex-1 p-4 lg:p-6 space-y-4">
-        {/* Toggle for Approved Only vs All */}
+        {/* Toggle for Approval Status Filter */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Button
-              variant={showApprovedOnly ? 'default' : 'outline'}
+              variant={approvalFilter === 'approved' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setShowApprovedOnly(true)}
+              onClick={() => setApprovalFilter('approved')}
             >
               Approved Only
             </Button>
             <Button
-              variant={!showApprovedOnly ? 'default' : 'outline'}
+              variant={approvalFilter === 'pending' ? 'default' : 'outline'}
               size="sm"
-              onClick={() => setShowApprovedOnly(false)}
+              onClick={() => setApprovalFilter('pending')}
+            >
+              Approval Pending
+            </Button>
+            <Button
+              variant={approvalFilter === 'all' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setApprovalFilter('all')}
             >
               All Subscriptions
             </Button>
           </div>
           <div className="text-sm text-muted-foreground">
-            Showing {showApprovedOnly ? 'approved' : 'all'} subscriptions
+            Showing {approvalFilter === 'approved' ? 'approved' : approvalFilter === 'pending' ? 'approval pending' : 'all'} subscriptions
           </div>
         </div>
 
