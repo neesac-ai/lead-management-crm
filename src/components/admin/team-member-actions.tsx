@@ -30,6 +30,7 @@ import {
   Trash2,
   Loader2,
   AlertTriangle,
+  Users,
 } from 'lucide-react'
 
 interface TeamMemberActionsProps {
@@ -38,9 +39,10 @@ interface TeamMemberActionsProps {
   userEmail?: string
   isApproved: boolean
   isActive: boolean
+  managerId?: string | null
 }
 
-export function TeamMemberActions({ userId, userName, userEmail, isApproved, isActive }: TeamMemberActionsProps) {
+export function TeamMemberActions({ userId, userName, userEmail, isApproved, isActive, managerId }: TeamMemberActionsProps) {
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -178,6 +180,19 @@ export function TeamMemberActions({ userId, userName, userEmail, isApproved, isA
           )}
           {isApproved && (
             <>
+              <DropdownMenuItem 
+                onClick={() => {
+                  const event = new CustomEvent('openManagerDialog', { 
+                    detail: { id: userId, name: userName, manager_id: managerId }
+                  })
+                  window.dispatchEvent(event)
+                }}
+                className="text-blue-600"
+              >
+                <Users className="mr-2 h-4 w-4" />
+                Assign Manager
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem 
                 onClick={() => setShowDeactivateDialog(true)}
                 className={isActive ? "text-orange-600" : "text-green-600"}

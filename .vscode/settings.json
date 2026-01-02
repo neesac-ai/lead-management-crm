@@ -1,0 +1,20 @@
+{
+    // Auto-save settings
+    "files.autoSave": "afterDelay",
+    "files.autoSaveDelay": 1000,
+    // Additional helpful settings
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.fixAll.eslint": "explicit"
+    },
+    // Prevent files from opening automatically in preview mode
+    "workbench.editor.enablePreview": false,
+    "workbench.editor.enablePreviewFromQuickOpen": false,
+    "workbench.editor.revealIfOpen": false,
+    "workbench.editor.focusRecentEditorAfterClose": false,
+    // Don't auto-open files when navigating
+    "workbench.editor.openPositioning": "last",
+    "workbench.editor.closeOnFileDelete": false
+}

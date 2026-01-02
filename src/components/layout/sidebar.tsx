@@ -69,10 +69,10 @@ export function Sidebar({ orgSlug }: SidebarProps) {
     setMounted(true)
     const supabase = createClient()
     let userId: string | null = null
-    
+
     const fetchUser = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser()
-      
+
       if (authUser) {
         const { data: profile } = await supabase
           .from('users')
@@ -202,10 +202,21 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       )
     }
 
+    // Team is visible to everyone
+    items.push(
+      { title: 'Team', href: `${baseUrl}/team`, icon: <Users className="w-5 h-5" /> },
+    )
+
+    // Lead Assignment for admin, super_admin, and sales (managers will see it, pages handle filtering)
+    if (user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'sales') {
+      items.push(
+        { title: 'Lead Assignment', href: `${baseUrl}/assignment`, icon: <UserPlus className="w-5 h-5" /> },
+      )
+    }
+
+    // Integrations only for admin and super_admin
     if (user?.role === 'admin' || user?.role === 'super_admin') {
       items.push(
-        { title: 'Team', href: `${baseUrl}/team`, icon: <Users className="w-5 h-5" /> },
-        { title: 'Lead Assignment', href: `${baseUrl}/assignment`, icon: <UserPlus className="w-5 h-5" /> },
         { title: 'Integrations', href: `${baseUrl}/integrations`, icon: <Plug className="w-5 h-5" /> },
       )
     }
@@ -214,9 +225,16 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       { title: 'Subscriptions', href: `${baseUrl}/subscriptions`, icon: <CreditCard className="w-5 h-5" /> },
     )
 
-    if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
+    // Approvals only for accountants
+    if (user?.role === 'accountant') {
       items.push(
         { title: 'Approvals', href: `${baseUrl}/approvals`, icon: <CheckCircle2 className="w-5 h-5" /> },
+      )
+    }
+
+    // Payments and Invoices for accountant, admin, and super_admin
+    if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
+      items.push(
         { title: 'Payments', href: `${baseUrl}/payments`, icon: <CreditCard className="w-5 h-5" /> },
         { title: 'Invoices', href: `${baseUrl}/invoices`, icon: <FileText className="w-5 h-5" /> },
       )
@@ -250,7 +268,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
         {navItems.map((item) => {
           // Special handling for dashboard routes to prevent false positives
           const isDashboard = item.title === 'Dashboard'
-          const isActive = isDashboard 
+          const isActive = isDashboard
             ? pathname === item.href || pathname === item.href + '/'
             : pathname === item.href || pathname.startsWith(item.href + '/')
           return (
@@ -268,8 +286,8 @@ export function Sidebar({ orgSlug }: SidebarProps) {
               {item.icon}
               <span>{item.title}</span>
               {item.badge && (
-                <Badge 
-                  variant={isActive ? 'secondary' : 'outline'} 
+                <Badge
+                  variant={isActive ? 'secondary' : 'outline'}
                   className="ml-auto"
                 >
                   {item.badge}
@@ -367,7 +385,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
               by <span className="font-medium">neesac</span><span className="text-primary">.ai</span>
             </span>
           </div>
-          
+
           <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="lg:hidden">

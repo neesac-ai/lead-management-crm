@@ -33,10 +33,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { 
-  Loader2, 
-  Mail, 
-  Building2, 
+import {
+  Loader2,
+  Mail,
+  Building2,
   Calendar,
   MessageSquare,
   Clock,
@@ -126,14 +126,14 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   const [selectedProductId, setSelectedProductId] = useState<string>('na')
   const [initialStatus, setInitialStatus] = useState<string>('')
   const [initialProductId, setInitialProductId] = useState<string>('na')
-  
+
   // Deal Won fields
   const [dealValue, setDealValue] = useState<string>('')
   const [validity, setValidity] = useState<string>('30')
   const [subscriptionStartDate, setSubscriptionStartDate] = useState<string>('')
   const [amountCredited, setAmountCredited] = useState<string>('')
   const [existingSubscriptionId, setExistingSubscriptionId] = useState<string | null>(null)
-  
+
   // Call recordings
   type CallRecording = {
     id: string
@@ -147,11 +147,11 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   }
   const [callRecordings, setCallRecordings] = useState<CallRecording[]>([])
   const [isLoadingCalls, setIsLoadingCalls] = useState(false)
-  
+
   // Delete state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  
+
   // Edit mode state
   const [isEditMode, setIsEditMode] = useState(false)
   const [isSavingEdit, setIsSavingEdit] = useState(false)
@@ -162,14 +162,14 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     company: '',
     source: 'manual',
   })
-  
+
   // Hydration fix for Radix UI
   const [mounted, setMounted] = useState(false)
-  
+
   useEffect(() => {
     setMounted(true)
   }, [])
-  
+
   // Calculate end date and pending amount
   const calculateEndDate = (startDate: string, validityDays: string): string => {
     if (!startDate || validityDays === 'lifetime') return ''
@@ -177,12 +177,12 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     start.setDate(start.getDate() + parseInt(validityDays))
     return start.toISOString().split('T')[0]
   }
-  
-  const subscriptionEndDate = validity === 'non_recurring' 
-    ? 'Non Recurring' 
+
+  const subscriptionEndDate = validity === 'non_recurring'
+    ? 'Non Recurring'
     : calculateEndDate(subscriptionStartDate, validity)
-  
-  const amountPending = dealValue && amountCredited 
+
+  const amountPending = dealValue && amountCredited
     ? Math.max(0, parseFloat(dealValue) - parseFloat(amountCredited || '0'))
     : parseFloat(dealValue || '0')
 
@@ -190,15 +190,30 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     const supabase = createClient()
     const { data, error } = await supabase
       .from('leads')
-      .select('id, name, email, phone, source, status, subscription_type, custom_fields, created_at, assigned_to, assignee:users!assigned_to(name)')
+      .select('id, name, email, phone, source, status, subscription_type, custom_fields, created_at, assigned_to')
       .eq('id', leadId)
       .single()
-    
+
     if (error) {
       console.error('Error fetching lead:', error)
       return null
     }
-    return data as Lead
+
+    // Fetch assignee name separately if needed
+    let assignee = null
+    if (data.assigned_to) {
+      const { data: assigneeData } = await supabase
+        .from('users')
+        .select('name')
+        .eq('id', data.assigned_to)
+        .single()
+      assignee = assigneeData ? { name: assigneeData.name } : null
+    }
+
+    return {
+      ...data,
+      assignee,
+    } as Lead
   }
 
   const refreshLeadData = async () => {
@@ -230,7 +245,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
         .eq('org_id', profile.org_id)
         .eq('is_active', true)
         .order('name')
-      
+
       setProducts((productsData || []) as Product[])
     }
   }
@@ -246,7 +261,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       .order('created_at', { ascending: false })
       .limit(1)
       .single()
-    
+
     if (data?.product_id) {
       setSelectedProductId(data.product_id)
       setInitialProductId(data.product_id)
@@ -266,7 +281,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       .order('created_at', { ascending: false })
       .limit(1)
       .single()
-    
+
     if (data) {
       setExistingSubscriptionId(data.id)
       setDealValue(data.deal_value?.toString() || '')
@@ -288,7 +303,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       .eq('lead_id', leadId)
       .order('recording_date', { ascending: false })
       .limit(10)
-    
+
     if (error) {
       console.error('Error fetching call recordings:', error)
     } else {
@@ -308,7 +323,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
           toast.error('Please allow popups to connect Google Calendar')
           return
         }
-        
+
         // Poll to check if Google is connected after user completes auth
         toast.info('Complete Google sign-in in the new tab, then return here')
         const checkInterval = setInterval(async () => {
@@ -318,7 +333,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
             toast.success('Google Calendar connected!')
           }
         }, 2000)
-        
+
         // Stop polling after 2 minutes
         setTimeout(() => clearInterval(checkInterval), 120000)
       } else {
@@ -336,7 +351,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     try {
       // Get user's timezone
       const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-      
+
       const response = await fetch('/api/google/calendar/create-event', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -376,18 +391,64 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
   const fetchActivities = async (leadId: string) => {
     setIsLoadingActivities(true)
-    
+    console.log('[LEAD DIALOG] fetchActivities called for leadId:', leadId)
+
     const supabase = createClient()
-    const { data, error } = await supabase
+    // First fetch activities without foreign key relationship
+    console.log('[LEAD DIALOG] Querying lead_activities table...')
+    const { data: activitiesData, error } = await supabase
       .from('lead_activities')
-      .select('id, action_type, comments, action_date, next_followup, created_at, users!user_id(name)')
+      .select('id, action_type, comments, action_date, next_followup, created_at, user_id')
       .eq('lead_id', leadId)
       .order('created_at', { ascending: false })
 
     if (error) {
-      console.error('Error fetching activities:', error)
+      console.error('[LEAD DIALOG] ❌ ERROR fetching activities:', error)
+      console.error('[LEAD DIALOG] Error code:', error.code)
+      console.error('[LEAD DIALOG] Error message:', error.message)
+      console.error('[LEAD DIALOG] Error details:', JSON.stringify(error, null, 2))
+      setActivities([])
+      setIsLoadingActivities(false)
+      return
     }
-    setActivities((data || []) as Activity[])
+
+    console.log('[LEAD DIALOG] ✅ Activities fetched:', activitiesData?.length || 0)
+
+    // Fetch user names separately
+    const userIds = new Set<string>()
+    activitiesData?.forEach(activity => {
+      if (activity.user_id) userIds.add(activity.user_id)
+    })
+
+    let userMap: Record<string, { name: string }> = {}
+    if (userIds.size > 0) {
+      console.log('[LEAD DIALOG] Querying users table for', userIds.size, 'user IDs...')
+      const { data: usersData, error: usersError } = await supabase
+        .from('users')
+        .select('id, name')
+        .in('id', Array.from(userIds))
+
+      if (usersError) {
+        console.error('[LEAD DIALOG] ❌ ERROR fetching users:', usersError)
+      } else {
+        console.log('[LEAD DIALOG] ✅ Users fetched:', usersData?.length || 0)
+      }
+
+      if (usersData) {
+        usersData.forEach(user => {
+          userMap[user.id] = { name: user.name }
+        })
+      }
+    }
+
+    // Map activities with user data
+    const activitiesWithUsers = (activitiesData || []).map(activity => ({
+      ...activity,
+      users: activity.user_id ? (userMap[activity.user_id] || null) : null,
+    }))
+
+    console.log('[LEAD DIALOG] ✅ Setting activities:', activitiesWithUsers.length)
+    setActivities(activitiesWithUsers as Activity[])
     setIsLoadingActivities(false)
   }
 
@@ -411,7 +472,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       setSubscriptionStartDate('')
       setAmountCredited('')
       setExistingSubscriptionId(null)
-      
+
       // Initialize edit form data
       setEditFormData({
         name: lead.name || '',
@@ -421,13 +482,13 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
         source: lead.source || 'manual',
       })
       setIsEditMode(false)
-      
+
       fetchActivities(lead.id)
       fetchCallRecordings(lead.id)
       checkGoogleConnection()
       // Fetch last product used for this lead
       fetchLastProduct(lead.id)
-      
+
       // If status is deal_won, fetch existing subscription data
       if (lead.status === 'deal_won') {
         fetchExistingSubscription(lead.id)
@@ -441,7 +502,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     setIsUnassigning(true)
 
     const supabase = createClient()
-    
+
     const { error } = await supabase
       .from('leads')
       .update({ assigned_to: null, updated_at: new Date().toISOString() })
@@ -459,35 +520,35 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
   const handleUpdateStatus = async () => {
     if (!lead) return
-    
+
     // Validate Deal Won requires subscription type
     if (status === 'deal_won' && !subscriptionType) {
       toast.error('Please select a subscription type (Trial or Paid)')
       return
     }
-    
+
     if (status === 'deal_won' && !dealValue) {
       toast.error('Please enter the deal value')
       return
     }
-    
+
     setIsSaving(true)
 
     const supabase = createClient()
-    
+
     // Build update data - only include subscription_type if it's a valid value
     const updateData: Record<string, unknown> = {
       status,
       updated_at: new Date().toISOString()
     }
-    
+
     // Only include subscription_type if it's trial or paid (valid values)
     if (subscriptionType === 'trial' || subscriptionType === 'paid') {
       updateData.subscription_type = subscriptionType
     }
-    
+
     console.log('Updating lead with data:', updateData)
-    
+
     const { error: leadError, data: updateResult } = await supabase
       .from('leads')
       .update(updateData)
@@ -525,10 +586,10 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
 
     // Add activity log
     const statusLabel = statusOptions.find(s => s.value === status)?.label || status
-    const productName = selectedProductId && selectedProductId !== 'na' 
-      ? products.find(p => p.id === selectedProductId)?.name 
+    const productName = selectedProductId && selectedProductId !== 'na'
+      ? products.find(p => p.id === selectedProductId)?.name
       : null
-    
+
     // Build activity data - only include product_id if products table exists
     // Note: action_type is VARCHAR(50), so keep it short. Put extra info in comments.
     const commentParts: string[] = []
@@ -537,7 +598,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     if (subscriptionType && subscriptionType !== lead.subscription_type) {
       commentParts.push(`Subscription: ${subscriptionType.charAt(0).toUpperCase() + subscriptionType.slice(1)}`)
     }
-    
+
     // Add meeting/follow-up date info to comments
     if (status === 'demo_booked' && demoDate) {
       const meetingDateTime = new Date(demoDate)
@@ -548,7 +609,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       const followUpDateTime = new Date(followupDate)
       commentParts.push(`Follow-up: ${followUpDateTime.toLocaleDateString()} ${followUpDateTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
     }
-    
+
     const activityData: Record<string, unknown> = {
       lead_id: lead.id,
       user_id: profile.id,
@@ -584,9 +645,9 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       const localDate = new Date(demoDate)
       // Store as ISO string (UTC) - this is the correct way to store timestamps
       const scheduledAtISO = localDate.toISOString()
-      
+
       console.log('Storing meeting - input:', demoDate, 'as ISO:', scheduledAtISO)
-      
+
       // First create the demo entry in database
       const { error: demoError } = await supabase.from('demos').insert({
         lead_id: lead.id,
@@ -616,7 +677,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       }
 
       const validityDays = validity === 'non_recurring' ? 36500 : parseInt(validity) // 100 years for non-recurring
-      const endDateValue = validity === 'non_recurring' 
+      const endDateValue = validity === 'non_recurring'
         ? new Date(new Date(subscriptionStartDate).getTime() + 36500 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         : calculateEndDate(subscriptionStartDate, validity)
 
@@ -718,17 +779,17 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     setSubscriptionStartDate('')
     setAmountCredited('')
     setIsSaving(false)
-    
+
     // Refresh the leads list
     onUpdate()
-    
+
     // Close the dialog after successful save
     onOpenChange(false)
   }
 
   const handleDeleteLead = async () => {
     if (!lead) return
-    
+
     setIsDeleting(true)
     try {
       const response = await fetch(`/api/leads/${lead.id}`, {
@@ -758,14 +819,14 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   // Use currentLead (which gets refreshed after save) for display
   const currentStatus = statusOptions.find(s => s.value === currentLead.status)
   const selectedStatus = statusOptions.find(s => s.value === status)
-  
+
   // Check if there are unsaved changes
-  const hasChanges = status !== initialStatus || 
-                     selectedProductId !== initialProductId || 
-                     comment.trim() !== '' ||
-                     followupDate !== '' ||
-                     demoDate !== '' ||
-                     (status === 'deal_won' && dealValue !== '' && subscriptionType !== '')
+  const hasChanges = status !== initialStatus ||
+    selectedProductId !== initialProductId ||
+    comment.trim() !== '' ||
+    followupDate !== '' ||
+    demoDate !== '' ||
+    (status === 'deal_won' && dealValue !== '' && subscriptionType !== '')
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -831,7 +892,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                       required
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="edit-name">Name</Label>
                     <Input
@@ -842,7 +903,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     />
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="edit-company">Company</Label>
@@ -853,7 +914,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                       placeholder="Acme Inc."
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="edit-email">Email</Label>
                     <Input
@@ -865,7 +926,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="edit-source">Source</Label>
                   {mounted ? (
@@ -889,7 +950,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     <div className="h-10 rounded-md border bg-muted animate-pulse" />
                   )}
                 </div>
-                
+
                 <div className="flex gap-2 pt-2">
                   <Button
                     onClick={async () => {
@@ -897,7 +958,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                         toast.error('Phone number is required')
                         return
                       }
-                      
+
                       setIsSavingEdit(true)
                       try {
                         const response = await fetch(`/api/leads/${lead.id}`, {
@@ -913,18 +974,18 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                             },
                           }),
                         })
-                        
+
                         if (!response.ok) {
                           const data = await response.json()
                           throw new Error(data.error || 'Failed to update lead')
                         }
-                        
+
                         const data = await response.json()
                         toast.success('Lead updated successfully')
-                        
+
                         // Refresh lead data to get the latest from database
                         await refreshLeadData()
-                        
+
                         setIsEditMode(false)
                         onUpdate()
                       } catch (error) {
@@ -988,12 +1049,12 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     <span>Added {formatDistanceToNow(new Date(currentLead.created_at), { addSuffix: true })}</span>
                   </div>
                 </div>
-                
+
                 {/* Quick Contact Actions */}
                 <div className="pt-3 border-t border-border">
                   <p className="text-xs text-muted-foreground mb-2">Quick Actions</p>
-                  <ContactActions 
-                    phone={currentLead.phone} 
+                  <ContactActions
+                    phone={currentLead.phone}
                     email={currentLead.email}
                     name={currentLead.name}
                   />
@@ -1018,9 +1079,9 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     Assigned to: <strong>{currentLead.assignee?.name || 'Unknown'}</strong>
                   </span>
                 </div>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleUnassign}
                   disabled={isUnassigning}
                   className="text-red-600 hover:text-red-700 hover:bg-red-50"
@@ -1084,13 +1145,13 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                         <SelectItem value="na">
                           <span className="text-muted-foreground">N/A - No product</span>
                         </SelectItem>
-                          {products.map((product) => (
-                            <SelectItem key={product.id} value={product.id}>
-                              {product.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        {products.map((product) => (
+                          <SelectItem key={product.id} value={product.id}>
+                            {product.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   ) : (
                     <div className="h-10 rounded-md border bg-muted animate-pulse" />
                   )}
@@ -1128,7 +1189,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   <Video className="h-4 w-4" />
                   <span className="font-medium">Schedule Demo with Google Meet</span>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
@@ -1141,7 +1202,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                       onChange={(e) => setDemoDate(e.target.value)}
                     />
                   </div>
-                  
+
                   <div className="space-y-2">
                     <Label>Duration</Label>
                     {mounted ? (
@@ -1263,7 +1324,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                   <CheckCircle2 className="h-4 w-4" />
                   <span className="font-medium">Deal Won - Create Subscription</span>
                 </div>
-                
+
                 {/* Subscription Type Selection - Required for Deal Won */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
@@ -1272,8 +1333,8 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                       Subscription Type *
                     </Label>
                     {mounted ? (
-                      <Select 
-                        value={subscriptionType || ''} 
+                      <Select
+                        value={subscriptionType || ''}
                         onValueChange={(value) => {
                           setSubscriptionType(value)
                           // Reset validity when subscription type changes
@@ -1350,7 +1411,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     />
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <Label>Start Date *</Label>
@@ -1371,7 +1432,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     />
                   </div>
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label>Amount Pending (₹)</Label>
                   <Input
@@ -1418,7 +1479,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     const secs = seconds % 60
                     return `${mins}:${secs.toString().padStart(2, '0')}`
                   }
-                  
+
                   const getSentimentIcon = () => {
                     switch (call.sentiment) {
                       case 'positive': return <TrendingUp className="w-4 h-4 text-green-500" />
@@ -1426,10 +1487,10 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                       default: return <Minus className="w-4 h-4 text-yellow-500" />
                     }
                   }
-                  
+
                   return (
-                    <div 
-                      key={call.id} 
+                    <div
+                      key={call.id}
                       className="p-3 border rounded-lg bg-card"
                     >
                       <div className="flex items-center justify-between mb-2">
@@ -1445,7 +1506,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                             {formatDuration(call.duration_seconds)}
                           </span>
                           {call.drive_file_url && (
-                            <a 
+                            <a
                               href={call.drive_file_url}
                               target="_blank"
                               rel="noopener noreferrer"
@@ -1460,9 +1521,9 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                         <p className="text-sm text-muted-foreground line-clamp-2">{call.summary}</p>
                       ) : (
                         <p className="text-xs text-muted-foreground italic">
-                          {call.processing_status === 'pending' ? 'Pending analysis' : 
-                           call.processing_status === 'processing' ? 'Analyzing...' : 
-                           call.processing_status === 'failed' ? 'Analysis failed' : 'No summary'}
+                          {call.processing_status === 'pending' ? 'Pending analysis' :
+                            call.processing_status === 'processing' ? 'Analyzing...' :
+                              call.processing_status === 'failed' ? 'Analysis failed' : 'No summary'}
                         </p>
                       )}
                     </div>
@@ -1486,8 +1547,8 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
             ) : activities.length > 0 ? (
               <div className="space-y-3 max-h-[300px] overflow-y-auto">
                 {activities.map((activity) => (
-                  <div 
-                    key={activity.id} 
+                  <div
+                    key={activity.id}
                     className="p-3 border rounded-lg bg-card"
                   >
                     <div className="flex items-center justify-between mb-1">
@@ -1525,8 +1586,8 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
               Close
             </Button>
             {canEditStatus && (
-              <Button 
-                onClick={handleUpdateStatus} 
+              <Button
+                onClick={handleUpdateStatus}
                 disabled={isSaving || !hasChanges}
                 variant={hasChanges ? 'default' : 'secondary'}
               >

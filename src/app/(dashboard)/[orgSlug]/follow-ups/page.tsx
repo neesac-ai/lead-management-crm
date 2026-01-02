@@ -36,6 +36,7 @@ import {
 type SalesUser = {
   id: string
   name: string
+  email: string
 }
 
 type Product = {
@@ -58,7 +59,7 @@ type FollowUp = {
     status: string
     custom_fields: { company?: string } | null
     assigned_to: string | null
-    assignee?: { name: string } | null
+    assignee?: { name: string; email: string } | null
   }
 }
 
@@ -96,7 +97,7 @@ export default function FollowUpsPage() {
   const params = useParams()
   const router = useRouter()
   const orgSlug = params.orgSlug as string
-  
+
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [userTimezone] = useState(getUserTimezone())
@@ -121,15 +122,15 @@ export default function FollowUpsPage() {
 
   const handleDeleteFollowUp = async () => {
     if (!deleteId) return
-    
+
     setIsDeleting(true)
     const supabase = createClient()
-    
+
     const { error } = await supabase
       .from('lead_activities')
       .delete()
       .eq('id', deleteId)
-    
+
     if (error) {
       console.error('Error deleting follow-up:', error)
       toast.error('Failed to delete follow-up')
@@ -139,91 +140,120 @@ export default function FollowUpsPage() {
       // Refresh to invalidate cached pages like dashboard
       router.refresh()
     }
-    
+
     setIsDeleting(false)
     setDeleteId(null)
   }
 
   const handleLeadStatusChange = async (leadId: string, newStatus: string, followUpId: string) => {
     const supabase = createClient()
-    
+
     // Update lead status
     const { error } = await supabase
       .from('leads')
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .update({ status: newStatus, updated_at: new Date().toISOString() } as any)
       .eq('id', leadId)
-    
+
     if (error) {
       console.error('Error updating lead status:', error)
       toast.error('Failed to update lead status')
       return
     }
-    
+
     // If status is no longer "follow_up_again", clear the follow-up date to remove it from list
     if (newStatus !== 'follow_up_again') {
       // Clear the next_followup date from the activity to remove it from follow-ups list
       await supabase
         .from('lead_activities')
-        .update({ next_followup: null })
+        .update({ next_followup: null } as any)
         .eq('id', followUpId)
-      
+
       // Remove from local list
       setFollowUps(prev => prev.filter(f => f.id !== followUpId))
       toast.success('Lead status updated and follow-up removed from list')
     } else {
       // Just update local state
-      setFollowUps(prev => prev.map(f => 
-        f.leads.id === leadId 
+      setFollowUps(prev => prev.map(f =>
+        f.leads.id === leadId
           ? { ...f, leads: { ...f.leads, status: newStatus } }
           : f
       ))
       toast.success('Lead status updated')
     }
-    
+
     router.refresh()
   }
 
   const fetchFollowUps = async () => {
     const supabase = createClient()
-    
+
     // Get current user profile
     const { data: { user: authUser } } = await supabase.auth.getUser()
     if (!authUser) return
-    
+
     const { data: profile } = await supabase
       .from('users')
       .select('id, role, org_id')
       .eq('auth_id', authUser.id)
       .single()
-    
+
     if (!profile) return
-    
-    const adminRole = profile.role === 'admin' || profile.role === 'super_admin'
-    setIsAdmin(adminRole)
-    
-    // Fetch sales team for admin filter
-    if (adminRole && profile.org_id) {
-      const { data: teamData } = await supabase
+
+    const profileData = profile as { id: string; role: string; org_id: string }
+    const adminRole = profileData.role === 'admin' || profileData.role === 'super_admin'
+
+    // Check if user is a manager (sales with reportees)
+    let isManager = false
+    let accessibleUserIds: string[] = [profileData.id]
+
+    if (profileData.role === 'sales') {
+      try {
+        const { data: reportees } = await supabase
+          .rpc('get_all_reportees', { manager_user_id: profileData.id } as any)
+
+        const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
+        if (reporteeIds.length > 0) {
+          isManager = true
+          accessibleUserIds = [profileData.id, ...reporteeIds]
+        }
+      } catch (error) {
+        console.error('Error fetching reportees:', error)
+      }
+    }
+
+    const canViewTeam = adminRole || isManager
+    setIsAdmin(canViewTeam)
+
+    // Fetch sales team for admin/manager filter
+    if (canViewTeam && profileData.org_id) {
+      let teamQuery = supabase
         .from('users')
-        .select('id, name')
-        .eq('org_id', profile.org_id)
+        .select('id, name, email')
+        .eq('org_id', profileData.org_id)
         .eq('role', 'sales')
         .eq('is_approved', true)
         .eq('is_active', true)
+
+      // Managers see only their reportees + self
+      if (isManager && !adminRole) {
+        teamQuery = teamQuery.in('id', accessibleUserIds)
+      }
+
+      const { data: teamData } = await teamQuery
       setSalesTeam(teamData || [])
     }
 
     // Fetch products
-    if (profile.org_id) {
+    if (profileData.org_id) {
       const { data: productsData } = await supabase
         .from('products')
         .select('id, name')
-        .eq('org_id', profile.org_id)
+        .eq('org_id', profileData.org_id)
         .eq('is_active', true)
         .order('name')
       setProducts(productsData || [])
     }
-    
+
     // Get org ID from slug
     const { data: org } = await supabase
       .from('organizations')
@@ -232,44 +262,105 @@ export default function FollowUpsPage() {
       .single()
 
     if (org) {
-      // Build leads query - sales reps only see their assigned leads
+      const orgData = org as { id: string }
+      // Build leads query
       let leadsQuery = supabase
         .from('leads')
         .select('id')
-        .eq('org_id', org.id)
+        .eq('org_id', orgData.id)
         .eq('status', 'follow_up_again')
-      
-      // Sales reps only see follow-ups for leads assigned to them
-      if (!adminRole) {
-        leadsQuery = leadsQuery.eq('assigned_to', profile.id)
+
+      // Sales reps (non-managers) only see follow-ups for leads assigned to them
+      // Managers and admins see their team's follow-ups
+      if (!canViewTeam) {
+        leadsQuery = leadsQuery.eq('assigned_to', profileData.id)
+      } else if (isManager && !adminRole) {
+        // Manager: see leads assigned to self + reportees
+        leadsQuery = leadsQuery.in('assigned_to', accessibleUserIds)
       }
 
-      const { data: leads } = await leadsQuery
+      const { data: leadsDataFromQuery } = await leadsQuery
 
-      if (leads && leads.length > 0) {
-        const leadIds = leads.map(l => l.id)
-        
+      if (leadsDataFromQuery && leadsDataFromQuery.length > 0) {
+        const leadIds = (leadsDataFromQuery as Array<{ id: string }>).map(l => l.id)
+
         // Get activities with next_followup for these leads
-        // product_id already exists from migration 007
-        const { data } = await supabase
+        const { data: activitiesData } = await supabase
           .from('lead_activities')
-          .select(`
-            id, lead_id, next_followup, comments, product_id,
-            products(id, name),
-            leads(id, name, email, phone, status, custom_fields, assigned_to, assignee:users!leads_assigned_to_fkey(name))
-          `)
+          .select('id, lead_id, next_followup, comments, product_id')
           .in('lead_id', leadIds)
           .not('next_followup', 'is', null)
           .order('next_followup', { ascending: true })
 
-        // Map with assignee info and product
-        const followUpsWithAssignee = (data || []).map(f => ({
-          ...f,
-          product: (f as any).products as { id: string; name: string } | null,
-          leads: f.leads ? {
-            ...f.leads,
-            assignee: (f.leads as unknown as { assignee: { name: string } | null }).assignee
-          } : null
+        if (!activitiesData || activitiesData.length === 0) {
+          setFollowUps([])
+          return
+        }
+
+        const activities = activitiesData as Array<{ id: string; lead_id: string; next_followup: string; comments: string | null; product_id: string | null }>
+
+        // Fetch leads separately
+        const { data: leadsData } = await supabase
+          .from('leads')
+          .select('id, name, email, phone, status, custom_fields, assigned_to')
+          .in('id', leadIds)
+
+        const leads = (leadsData || []) as Array<{ id: string; name: string; email: string | null; phone: string | null; status: string; custom_fields: { company?: string } | null; assigned_to: string | null }>
+
+        // Fetch user names for assignees
+        const assigneeIds = new Set<string>()
+        leads.forEach(lead => {
+          if (lead.assigned_to) assigneeIds.add(lead.assigned_to)
+        })
+
+        let assigneeMap: Record<string, { name: string; email: string }> = {}
+        if (assigneeIds.size > 0) {
+          const { data: usersData } = await supabase
+            .from('users')
+            .select('id, name, email')
+            .in('id', Array.from(assigneeIds))
+
+          if (usersData) {
+            (usersData as Array<{ id: string; name: string; email: string }>).forEach(user => {
+              assigneeMap[user.id] = { name: user.name, email: user.email }
+            })
+          }
+        }
+
+        // Fetch products separately
+        const productIds = new Set<string>()
+        activities.forEach(activity => {
+          if (activity.product_id) productIds.add(activity.product_id)
+        })
+
+        let productMap: Record<string, { id: string; name: string }> = {}
+        if (productIds.size > 0) {
+          const { data: productsData } = await supabase
+            .from('products')
+            .select('id, name')
+            .in('id', Array.from(productIds))
+
+          if (productsData) {
+            (productsData as Array<{ id: string; name: string }>).forEach(product => {
+              productMap[product.id] = product
+            })
+          }
+        }
+
+        // Build leads map
+        const leadsMap: Record<string, any> = {}
+        leads.forEach(lead => {
+          leadsMap[lead.id] = {
+            ...lead,
+            assignee: lead.assigned_to ? (assigneeMap[lead.assigned_to] || null) : null
+          }
+        })
+
+        // Map activities with leads and products
+        const followUpsWithAssignee = activities.map(activity => ({
+          ...activity,
+          product: activity.product_id ? (productMap[activity.product_id] || null) : null,
+          leads: leadsMap[activity.lead_id] || null
         }))
 
         setFollowUps(followUpsWithAssignee as FollowUp[])
@@ -288,12 +379,12 @@ export default function FollowUpsPage() {
     return followUps.filter(f => {
       // Show only upcoming filter
       if (showUpcomingOnly && !isUpcoming(f.next_followup)) return false
-      
+
       // Sales rep filter (admin only)
       if (isAdmin && selectedSalesRep !== 'all') {
         if (f.leads?.assigned_to !== selectedSalesRep) return false
       }
-      
+
       // Product filter
       if (selectedProduct !== 'all') {
         if (selectedProduct === 'none') {
@@ -302,7 +393,7 @@ export default function FollowUpsPage() {
           if (f.product_id !== selectedProduct) return false
         }
       }
-      
+
       // Date range filter
       if (dateFrom) {
         const followUpDate = new Date(f.next_followup)
@@ -316,20 +407,20 @@ export default function FollowUpsPage() {
         toDate.setHours(23, 59, 59, 999)
         if (followUpDate > toDate) return false
       }
-      
+
       // Phone search filter
       if (phoneSearch) {
         const searchTerm = phoneSearch.replace(/[^\d]/g, '')
         const leadPhone = (f.leads?.phone || '').replace(/[^\d]/g, '')
         if (!leadPhone.includes(searchTerm)) return false
       }
-      
+
       return true
     })
   }, [followUps, isAdmin, selectedSalesRep, selectedProduct, dateFrom, dateTo, showUpcomingOnly, phoneSearch])
 
   // Check if any filter is active
-  const hasActiveFilters = selectedSalesRep !== 'all' || selectedProduct !== 'all' || 
+  const hasActiveFilters = selectedSalesRep !== 'all' || selectedProduct !== 'all' ||
     dateFrom || dateTo || !showUpcomingOnly || phoneSearch
 
   // Clear all filters
@@ -351,11 +442,11 @@ export default function FollowUpsPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header 
-        title="Follow-ups" 
+      <Header
+        title="Follow-ups"
         description="Track leads that need follow-up"
       />
-      
+
       <div className="flex-1 p-4 lg:p-6">
         <Card>
           <CardHeader className="flex flex-col gap-4">
@@ -376,7 +467,7 @@ export default function FollowUpsPage() {
                         <SelectContent>
                           <SelectItem value="all">All Reps</SelectItem>
                           {salesTeam.map((rep) => (
-                            <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                            <SelectItem key={rep.id} value={rep.id}>{rep.name} ({rep.email})</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -413,8 +504,8 @@ export default function FollowUpsPage() {
                   />
                 </div>
 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => setShowFilters(!showFilters)}
                   className={showFilters ? 'bg-primary/10' : ''}
@@ -424,8 +515,8 @@ export default function FollowUpsPage() {
                 </Button>
 
                 {hasActiveFilters && (
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="sm"
                     onClick={clearAllFilters}
                   >
@@ -440,9 +531,9 @@ export default function FollowUpsPage() {
               <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
                 {/* Show Upcoming Only */}
                 <div className="flex items-center gap-2">
-                  <Checkbox 
+                  <Checkbox
                     id="upcoming-only"
-                    checked={showUpcomingOnly} 
+                    checked={showUpcomingOnly}
                     onCheckedChange={(checked) => setShowUpcomingOnly(checked === true)}
                   />
                   <Label htmlFor="upcoming-only" className="text-sm cursor-pointer">
@@ -480,12 +571,11 @@ export default function FollowUpsPage() {
             ) : filteredFollowUps.length > 0 ? (
               <div className="space-y-3">
                 {filteredFollowUps.map((followUp, index) => (
-                  <div 
-                    key={followUp.id} 
-                    className={`p-4 rounded-lg border bg-card ${
-                      isOverdue(followUp.next_followup) ? 'border-red-500/50 bg-red-500/5' : 
+                  <div
+                    key={followUp.id}
+                    className={`p-4 rounded-lg border bg-card ${isOverdue(followUp.next_followup) ? 'border-red-500/50 bg-red-500/5' :
                       isTodayDate(followUp.next_followup) ? 'border-yellow-500/50 bg-yellow-500/5' : ''
-                    }`}
+                      }`}
                   >
                     {/* Top row: Serial + Phone (primary) + Time Badge */}
                     <div className="flex items-start justify-between gap-2 mb-3">
@@ -499,17 +589,17 @@ export default function FollowUpsPage() {
                             <Phone className="h-4 w-4 text-primary shrink-0" />
                             <p className="font-semibold truncate text-lg">{followUp.leads?.phone}</p>
                           </div>
-                        {followUp.leads?.name && followUp.leads.name !== followUp.leads.phone && (
-                          <p className="text-sm text-muted-foreground truncate mt-0.5">
-                            {followUp.leads.name}
-                          </p>
-                        )}
-                        {followUp.leads?.custom_fields?.company && (
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Building2 className="h-3 w-3" />
-                            <span className="truncate">{followUp.leads.custom_fields.company}</span>
-                          </div>
-                        )}
+                          {followUp.leads?.name && followUp.leads.name !== followUp.leads.phone && (
+                            <p className="text-sm text-muted-foreground truncate mt-0.5">
+                              {followUp.leads.name}
+                            </p>
+                          )}
+                          {followUp.leads?.custom_fields?.company && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Building2 className="h-3 w-3" />
+                              <span className="truncate">{followUp.leads.custom_fields.company}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2 shrink-0 items-center">
@@ -543,13 +633,13 @@ export default function FollowUpsPage() {
                     {isAdmin && followUp.leads?.assignee && (
                       <div className="flex items-center gap-1 text-sm text-primary mb-3">
                         <UserCircle className="h-3 w-3" />
-                        <span>Assigned to: {followUp.leads.assignee.name}</span>
+                        <span>Assigned to: {followUp.leads.assignee.name} ({followUp.leads.assignee.email})</span>
                       </div>
                     )}
 
                     {/* Contact Actions */}
                     <div className="mb-3">
-                      <ContactActions 
+                      <ContactActions
                         phone={followUp.leads?.phone || null}
                         email={followUp.leads?.email || null}
                         name={followUp.leads?.name || ''}
@@ -584,7 +674,7 @@ export default function FollowUpsPage() {
                         </Badge>
                       )}
                     </div>
-                    
+
                     {/* Date/Time */}
                     <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
                       <Clock className="h-4 w-4 shrink-0" />

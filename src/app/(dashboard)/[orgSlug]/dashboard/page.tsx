@@ -5,10 +5,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { formatInTimeZone } from 'date-fns-tz'
-import { 
-  Target, 
-  Users, 
-  CalendarDays, 
+import {
+  Target,
+  Users,
+  CalendarDays,
   CreditCard,
   ArrowUpRight,
   ArrowRight,
@@ -61,18 +61,21 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   // Fetch stats based on user role
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
   const isAccountant = profile?.role === 'accountant'
-  
+
   // Calculate current time in IST for filtering
   const nowForStats = new Date()
   const nowISO = nowForStats.toISOString()
-  
+
   // Build leads query based on role (skip for accountant)
+  // RLS policies will automatically include reportees' leads for managers
   let leadsQuery = supabase
     .from('leads')
     .select('id, status, subscription_type', { count: 'exact' })
     .eq('org_id', org.id)
 
   if (!isAdmin && !isAccountant && profile?.id) {
+    // For sales users (including managers), RLS will handle reportees' leads automatically
+    // But we still need to filter by assigned_to or created_by for the base query
     leadsQuery = supabase
       .from('leads')
       .select('id, status, subscription_type', { count: 'exact' })
@@ -89,18 +92,74 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     .gte('scheduled_at', nowISO)
 
   // Build follow-ups query - only future follow-ups
-  const followupsQuery = supabase
+  // First get activities with next_followup
+  const { data: activitiesData } = await supabase
     .from('lead_activities')
-    .select('id, leads!inner(org_id, assigned_to, created_by)')
-    .eq('leads.org_id', org.id)
+    .select('id, lead_id, next_followup')
     .not('next_followup', 'is', null)
     .gte('next_followup', nowISO)
 
-  // Fetch subscriptions
-  const subscriptionsQuery = supabase
+  // Then get leads separately
+  let followupsResult: any = { data: [], count: 0 }
+  if (activitiesData && activitiesData.length > 0) {
+    const leadIds = activitiesData.map(a => a.lead_id)
+    const { data: leadsData } = await supabase
+      .from('leads')
+      .select('id, org_id, assigned_to, created_by')
+      .in('id', leadIds)
+      .eq('org_id', org.id)
+
+    // Filter by role if needed
+    if (!isAdmin && profile?.id) {
+      const filteredLeads = leadsData?.filter(lead =>
+        lead.assigned_to === profile.id || lead.created_by === profile.id
+      ) || []
+      followupsResult = { data: filteredLeads, count: filteredLeads.length }
+    } else {
+      followupsResult = { data: leadsData || [], count: leadsData?.length || 0 }
+    }
+  }
+
+  // Fetch subscriptions separately (without foreign key relationship)
+  const { data: subscriptionsDataRaw } = await supabase
     .from('customer_subscriptions')
-    .select('id, status, deal_value, amount_credited, amount_pending, validity_days, leads(assigned_to, created_by)')
+    .select('id, status, deal_value, amount_credited, amount_pending, validity_days, lead_id')
     .eq('org_id', org.id)
+
+  // Fetch leads for subscriptions separately
+  let subscriptionsResult: any = { data: [] }
+  if (subscriptionsDataRaw && subscriptionsDataRaw.length > 0) {
+    const subscriptionLeadIds = subscriptionsDataRaw.map(s => s.lead_id).filter(Boolean) as string[]
+    if (subscriptionLeadIds.length > 0) {
+      const { data: subscriptionLeads } = await supabase
+        .from('leads')
+        .select('id, assigned_to, created_by')
+        .in('id', subscriptionLeadIds)
+
+      // Map subscriptions with their leads
+      const subscriptionsWithLeads = subscriptionsDataRaw.map(sub => {
+        const lead = subscriptionLeads?.find(l => l.id === sub.lead_id)
+        return {
+          ...sub,
+          leads: lead || null
+        }
+      })
+
+      // Filter by role if needed
+      if (!isAdmin && profile?.id) {
+        const filtered = subscriptionsWithLeads.filter(sub =>
+          sub.leads?.assigned_to === profile.id || sub.leads?.created_by === profile.id
+        )
+        subscriptionsResult = { data: filtered }
+      } else {
+        subscriptionsResult = { data: subscriptionsWithLeads }
+      }
+    } else {
+      subscriptionsResult = { data: subscriptionsDataRaw }
+    }
+  } else {
+    subscriptionsResult = { data: [] }
+  }
 
   // Fetch pending approvals for accountant
   const pendingApprovalsQuery = supabase
@@ -110,22 +169,20 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     .eq('status', 'pending')
 
   const queries: Promise<any>[] = []
-  
-  // Only fetch leads/demos/followups if not accountant
+
+  // Only fetch leads/demos if not accountant (followups and subscriptions already fetched above)
   if (!isAccountant) {
-    queries.push(leadsQuery, demosQuery, followupsQuery, subscriptionsQuery)
+    queries.push(leadsQuery, demosQuery)
   } else {
     queries.push(
       Promise.resolve({ data: [], count: 0 }),
-      Promise.resolve({ data: [] }),
-      Promise.resolve({ data: [] }),
-      subscriptionsQuery
+      Promise.resolve({ data: [] })
     )
   }
-  
+
   queries.push(pendingApprovalsQuery)
-  
-  const [leadsResult, demosResult, followupsResult, subscriptionsResult, approvalsResult] = await Promise.all(queries)
+
+  const [leadsResult, demosResult, approvalsResult] = await Promise.all(queries)
 
   type LeadData = { id: string; status: string; subscription_type?: string | null }
   type DemoData = { id: string; status: string; scheduled_at: string; leads: { org_id: string; assigned_to: string | null; created_by: string | null } }
@@ -134,40 +191,40 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   const leadsData = (leadsResult.data || []) as LeadData[]
   const demosData = (demosResult.data || []) as DemoData[]
-  const followupsData = (followupsResult.data || []) as FollowupCountData[]
+  const followupsData = (followupsResult.data || []) as Array<{ id: string; org_id: string; assigned_to: string | null; created_by: string | null }>
   const subscriptionsData = (subscriptionsResult.data || []) as SubscriptionData[]
 
   const totalLeads = leadsResult.count || 0
   const newLeads = leadsData.filter(l => l.status === 'new').length
   const trialLeads = leadsData.filter(l => l.subscription_type === 'trial').length
   const paidLeads = leadsData.filter(l => l.subscription_type === 'paid').length
-  
+
   // Filter demos for sales users (only their assigned/created leads)
   let filteredDemos = demosData
   if (!isAdmin && profile?.id) {
-    filteredDemos = demosData.filter(d => 
+    filteredDemos = demosData.filter(d =>
       d.leads?.assigned_to === profile.id || d.leads?.created_by === profile.id
     )
   }
   const upcomingDemos = filteredDemos.length
-  
+
   // Filter follow-ups for sales users (only their assigned/created leads)
   let filteredFollowups = followupsData
   if (!isAdmin && profile?.id) {
-    filteredFollowups = followupsData.filter(f => 
+    filteredFollowups = followupsData.filter(f =>
       f.leads?.assigned_to === profile.id || f.leads?.created_by === profile.id
     )
   }
   const upcomingFollowups = filteredFollowups.length
-  
+
   // Filter subscriptions for sales users (only their assigned/created leads)
   let filteredSubscriptions = subscriptionsData
   if (!isAdmin && profile?.id) {
-    filteredSubscriptions = subscriptionsData.filter(s => 
+    filteredSubscriptions = subscriptionsData.filter(s =>
       s.leads?.assigned_to === profile.id || s.leads?.created_by === profile.id
     )
   }
-  
+
   const activeSubscriptions = filteredSubscriptions.filter(s => s.status === 'active').length
   const totalRevenue = filteredSubscriptions.reduce((sum, s) => sum + (s.deal_value || 0), 0)
 
@@ -244,11 +301,11 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
     end_date: string
     status: string
   }
-  
+
   let orgSubscription: OrgSubscription | null = null
   let salesCount = 0
   let accountantCount = 0
-  
+
   if (isAdmin) {
     const { data: subData } = await supabase
       .from('org_subscriptions')
@@ -257,11 +314,11 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       .order('created_at', { ascending: false })
       .limit(1)
       .single()
-    
+
     if (subData) {
       orgSubscription = subData as OrgSubscription
     }
-    
+
     // Count current team members
     const { count: salesCountResult } = await supabase
       .from('users')
@@ -269,14 +326,14 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
       .eq('org_id', org.id)
       .eq('role', 'sales')
       .eq('is_active', true)
-    
+
     const { count: accountantCountResult } = await supabase
       .from('users')
       .select('id', { count: 'exact', head: true })
       .eq('org_id', org.id)
       .eq('role', 'accountant')
       .eq('is_active', true)
-    
+
     salesCount = salesCountResult || 0
     accountantCount = accountantCountResult || 0
   }
@@ -301,7 +358,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   }
 
   // Skip recent leads query for accountants
-  const recentLeadsResult = isAccountant 
+  const recentLeadsResult = isAccountant
     ? Promise.resolve({ data: [] })
     : recentLeadsQuery
 
@@ -314,16 +371,16 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   // Only show follow-ups that haven't passed yet
   const now = new Date()
   const currentTimeISO = now.toISOString()
-  
+
   // Get today's end date in IST for limiting the scope
   const istOffset = 5.5 * 60 * 60 * 1000 // 5.5 hours in milliseconds
   const istNow = new Date(now.getTime() + istOffset)
   const istDateStr = istNow.toISOString().split('T')[0]
   const todayEndIST = new Date(`${istDateStr}T23:59:59+05:30`)
   const todayEndISO = todayEndIST.toISOString()
-  
+
   type FollowupDataRaw = { id: string; next_followup: string | null; leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } }
-  
+
   // Fetch upcoming follow-ups (from current time to end of today) - skip for accountants
   const followupsQueryForToday = isAccountant
     ? Promise.resolve({ data: [] })
@@ -339,13 +396,13 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
         .lte('next_followup', todayEndISO)
         .order('next_followup', { ascending: true })
         .limit(20)
-  
+
   const { data: allTodayFollowups } = await followupsQueryForToday
   let todayFollowupsData = (allTodayFollowups || []) as FollowupDataRaw[]
-  
+
   // Filter for sales users - only their assigned/created leads
   if (!isAccountant && profile?.role === 'sales' && profile?.id) {
-    todayFollowupsData = todayFollowupsData.filter(f => 
+    todayFollowupsData = todayFollowupsData.filter(f =>
       f.leads?.assigned_to === profile.id || f.leads?.created_by === profile.id
     )
   }
@@ -354,11 +411,11 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const todayFollowups = todayFollowupsData.slice(0, 10) as FollowupData[]
 
   // Get upcoming demos/meetings (filtered for sales users, skip for accountants)
-  type TodayDemoData = { 
-    id: string; 
-    scheduled_at: string; 
+  type TodayDemoData = {
+    id: string;
+    scheduled_at: string;
     google_meet_link: string | null;
-    leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null } 
+    leads: { id: string; name: string; phone: string | null; assigned_to: string | null; created_by: string | null }
   }
 
   // Fetch upcoming demos (from current time to end of today) - only ones that haven't passed - skip for accountants
@@ -381,10 +438,10 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   const { data: allTodayDemos } = await demosQueryForToday
   let todayDemosData = (allTodayDemos || []) as TodayDemoData[]
-  
+
   // Filter for sales users - only their assigned/created leads
   if (!isAccountant && profile?.role === 'sales' && profile?.id) {
-    todayDemosData = todayDemosData.filter(d => 
+    todayDemosData = todayDemosData.filter(d =>
       d.leads?.assigned_to === profile.id || d.leads?.created_by === profile.id
     )
   }
@@ -422,11 +479,11 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header 
+      <Header
         title={`Welcome back, ${profile?.name?.split(' ')[0] || 'User'}!`}
         description={`Here's what's happening at ${org.name}`}
       />
-      
+
       <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         {/* Upcoming Reminders */}
         {hasReminders && (
@@ -450,9 +507,9 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                       // Format with timezone (same as meetings page)
                       const dateStr = formatInTimeZone(new Date(demo.scheduled_at), DEFAULT_TIMEZONE, 'MMM d, yyyy')
                       const timeStr = formatInTimeZone(new Date(demo.scheduled_at), DEFAULT_TIMEZONE, 'h:mm a')
-                      
+
                       return (
-                        <div 
+                        <div
                           key={demo.id}
                           className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
                         >
@@ -466,9 +523,9 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                             </p>
                           </div>
                           {demo.google_meet_link && (
-                            <a 
-                              href={demo.google_meet_link} 
-                              target="_blank" 
+                            <a
+                              href={demo.google_meet_link}
+                              target="_blank"
                               rel="noopener noreferrer"
                               className="text-xs bg-orange-500 text-white px-2 py-1 rounded hover:bg-orange-600 transition-colors"
                             >
@@ -491,11 +548,11 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                   </p>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {todayFollowups.slice(0, 4).map((followup) => {
-                      const timeStr = followup.next_followup 
+                      const timeStr = followup.next_followup
                         ? formatInTimeZone(new Date(followup.next_followup), DEFAULT_TIMEZONE, 'h:mm a')
                         : 'Today'
                       return (
-                        <div 
+                        <div
                           key={followup.id}
                           className="flex items-center gap-3 p-2 bg-white rounded-lg border border-orange-200"
                         >
@@ -698,8 +755,8 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
               {recentLeads && recentLeads.length > 0 ? (
                 <div className="space-y-3">
                   {recentLeads.map((lead) => (
-                    <Link 
-                      key={lead.id} 
+                    <Link
+                      key={lead.id}
                       href={`/${orgSlug}/leads/${lead.id}`}
                       className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors"
                     >
@@ -742,9 +799,9 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                       acc[lead.status] = (acc[lead.status] || 0) + 1
                       return acc
                     }, {} as Record<string, number>)
-                    
+
                     const statusOrder = ['new', 'call_not_picked', 'follow_up_again', 'demo_booked', 'demo_completed', 'deal_won', 'deal_lost', 'not_interested']
-                    
+
                     return statusOrder
                       .filter(status => statusCounts[status])
                       .map(status => {
@@ -757,7 +814,7 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
                               <span className="text-muted-foreground">{count} ({percentage}%)</span>
                             </div>
                             <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div 
+                              <div
                                 className={`h-full ${getStatusColor(status)} transition-all`}
                                 style={{ width: `${percentage}%` }}
                               />

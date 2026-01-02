@@ -58,9 +58,8 @@ export async function GET(
 
     const integrationData = integration as Integration;
 
-    // Instagram uses the same OAuth as Facebook (both are Meta platforms)
-    if (integrationData.platform !== 'facebook' && integrationData.platform !== 'instagram') {
-      return NextResponse.json({ error: 'OAuth only available for Facebook and Instagram' }, { status: 400 });
+    if (integrationData.platform !== 'facebook') {
+      return NextResponse.json({ error: 'OAuth only available for Facebook' }, { status: 400 });
     }
 
     // Get Facebook App ID and App Secret from integration config

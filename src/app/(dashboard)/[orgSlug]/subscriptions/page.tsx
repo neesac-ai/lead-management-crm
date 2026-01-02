@@ -14,10 +14,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { 
-  CreditCard, 
-  Loader2, 
-  Calendar, 
+import {
+  CreditCard,
+  Loader2,
+  Calendar,
   Clock,
   Pause,
   Play,
@@ -41,6 +41,7 @@ import { differenceInDays, format, parseISO } from 'date-fns'
 type SalesUser = {
   id: string
   name: string
+  email: string
 }
 
 type Product = {
@@ -71,7 +72,7 @@ type Subscription = {
     custom_fields: { company?: string } | null
     assigned_to: string | null
     created_by: string | null
-    assignee?: { name: string } | null
+    assignee?: { name: string; email: string } | null
   } | null
 }
 
@@ -104,7 +105,10 @@ export default function SubscriptionsPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [phoneSearch, setPhoneSearch] = useState<string>('')
   const [approvalFilter, setApprovalFilter] = useState<'approved' | 'all' | 'pending'>('approved') // Default to approved only
-  
+  const [isManager, setIsManager] = useState(false)
+  const [canViewTeam, setCanViewTeam] = useState(false)
+  const [accessibleUserIds, setAccessibleUserIds] = useState<string[]>([])
+
   // Hydration fix - only render Radix UI components after mount
   const [mounted, setMounted] = useState(false)
 
@@ -130,6 +134,9 @@ export default function SubscriptionsPage() {
       if (!profile) return
       setUserProfile(profile)
 
+      // Calculate isAdmin from profile data (not from state which might be stale)
+      const currentIsAdmin = profile.role === 'admin' || profile.role === 'super_admin'
+
       // Get organization
       const { data: orgData } = await supabase
         .from('organizations')
@@ -139,15 +146,45 @@ export default function SubscriptionsPage() {
 
       if (!orgData) return
 
-      // Fetch sales team for admin filter
-      if ((profile.role === 'admin' || profile.role === 'super_admin') && profile.org_id) {
-        const { data: teamData } = await supabase
+      // Check if user is a manager (sales with reportees)
+      let managerStatus = false
+      let userIds: string[] = [profile.id]
+
+      if (profile.role === 'sales') {
+        try {
+          const { data: reportees } = await supabase
+            .rpc('get_all_reportees', { manager_user_id: profile.id })
+
+          const reporteeIds = reportees?.map((r: { reportee_id: string }) => r.reportee_id) || []
+          if (reporteeIds.length > 0) {
+            managerStatus = true
+            userIds = [profile.id, ...reporteeIds]
+          }
+        } catch (error) {
+          console.error('Error fetching reportees:', error)
+        }
+      }
+
+      setIsManager(managerStatus)
+      setCanViewTeam(currentIsAdmin || managerStatus)
+      setAccessibleUserIds(userIds)
+
+      // Fetch sales team for admin/manager filter
+      if ((currentIsAdmin || managerStatus) && profile.org_id) {
+        let teamQuery = supabase
           .from('users')
-          .select('id, name')
+          .select('id, name, email')
           .eq('org_id', profile.org_id)
           .eq('role', 'sales')
           .eq('is_approved', true)
           .eq('is_active', true)
+
+        // Managers see only their reportees + self
+        if (managerStatus && !currentIsAdmin) {
+          teamQuery = teamQuery.in('id', userIds)
+        }
+
+        const { data: teamData } = await teamQuery
         setSalesTeam(teamData || [])
       }
 
@@ -174,7 +211,7 @@ export default function SubscriptionsPage() {
             custom_fields,
             assigned_to,
             created_by,
-            assignee:users!leads_assigned_to_fkey(name)
+            assignee:users!leads_assigned_to_fkey(name, email)
           )
         `)
         .eq('org_id', orgData.id)
@@ -223,10 +260,10 @@ export default function SubscriptionsPage() {
                 custom_fields,
                 assigned_to,
                 created_by,
-                assignee:users!leads_assigned_to_fkey(name)
+                assignee:users!leads_assigned_to_fkey(name, email)
               `)
               .in('id', pendingLeadIds)
-            
+
             if (pendingLeadsData) {
               pendingLeadsData.forEach(lead => {
                 pendingLeadsMap[lead.id] = lead
@@ -240,7 +277,7 @@ export default function SubscriptionsPage() {
           ...(subsData || []).map(s => s.leads?.id || s.lead_id).filter(Boolean),
           ...pendingApprovalsData.map(a => a.lead_id).filter(Boolean)
         ] as string[]
-        
+
         // Fetch the most recent product_id for each lead from lead_activities
         let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
         if (allLeadIds.length > 0) {
@@ -250,7 +287,7 @@ export default function SubscriptionsPage() {
             .in('lead_id', allLeadIds)
             .not('product_id', 'is', null)
             .order('created_at', { ascending: false })
-          
+
           // Build map of lead_id -> most recent product
           if (activitiesWithProducts) {
             for (const activity of activitiesWithProducts) {
@@ -278,7 +315,7 @@ export default function SubscriptionsPage() {
             product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
             leads: sub.leads ? {
               ...sub.leads,
-              assignee: (sub.leads as unknown as { assignee: { name: string } | null }).assignee
+              assignee: (sub.leads as unknown as { assignee: { name: string; email: string } | null }).assignee
             } : null
           }
         }) as Subscription[]
@@ -307,7 +344,7 @@ export default function SubscriptionsPage() {
               product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
               leads: leadData ? {
                 ...leadData,
-                assignee: (leadData as unknown as { assignee: { name: string } | null }).assignee
+                assignee: (leadData as unknown as { assignee: { name: string; email: string } | null }).assignee
               } : null
             }
           }) as Subscription[]
@@ -315,12 +352,26 @@ export default function SubscriptionsPage() {
 
         // Combine approved and pending
         let allSubs = [...approvedSubs, ...pendingSubs]
-        
-        // Filter client-side for sales reps (only their assigned/created leads)
+
+        // Filter client-side for sales reps
+        // Non-manager sales: only their assigned/created leads
+        // Managers: their assigned/created leads + reportees' leads
         if (profile.role === 'sales') {
-          allSubs = allSubs.filter(sub => 
-            sub.leads?.assigned_to === profile.id || sub.leads?.created_by === profile.id
-          )
+          if (managerStatus) {
+            // Manager: show subscriptions for self + reportees
+            allSubs = allSubs.filter(sub => {
+              const leadAssignedTo = sub.leads?.assigned_to
+              const leadCreatedBy = sub.leads?.created_by
+              return userIds.includes(leadAssignedTo || '') ||
+                     leadCreatedBy === profile.id ||
+                     leadAssignedTo === profile.id
+            })
+          } else {
+            // Non-manager: only their assigned/created leads
+            allSubs = allSubs.filter(sub =>
+              sub.leads?.assigned_to === profile.id || sub.leads?.created_by === profile.id
+            )
+          }
         }
         setSubscriptions(allSubs)
       }
@@ -337,21 +388,21 @@ export default function SubscriptionsPage() {
     if (sub.approval_status === 'pending') {
       return { status: 'pending_approval', color: 'bg-yellow-500', label: 'Pending Approval' }
     }
-    
+
     if (sub.status === 'paused') {
       return { status: 'paused', color: 'bg-yellow-500', label: 'Paused' }
     }
-    
+
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const endDate = parseISO(sub.end_date)
     endDate.setHours(0, 0, 0, 0)
-    
+
     // Check if non-recurring (validity_days >= 36500)
     if (sub.validity_days >= 36500) {
       return { status: 'non_recurring', color: 'bg-gray-500', label: 'Non Recurring' }
     }
-    
+
     if (endDate >= today) {
       return { status: 'active', color: 'bg-green-500', label: 'Active' }
     } else {
@@ -365,14 +416,14 @@ export default function SubscriptionsPage() {
     if (sub.validity_days >= 36500) {
       return { days: -1, color: 'text-gray-600' } // -1 means non-recurring
     }
-    
+
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const endDate = parseISO(sub.end_date)
     endDate.setHours(0, 0, 0, 0)
-    
+
     const days = differenceInDays(endDate, today)
-    
+
     if (days < 0) return { days: 0, color: 'text-red-600' }
     if (days === 0) return { days: 0, color: 'text-red-600' }
     if (days <= 7) return { days, color: 'text-orange-600' }
@@ -382,7 +433,7 @@ export default function SubscriptionsPage() {
   // Toggle pause/resume subscription
   async function togglePause(subId: string, currentStatus: string) {
     const newStatus = currentStatus === 'paused' ? 'active' : 'paused'
-    
+
     const { error } = await supabase
       .from('customer_subscriptions')
       .update({ status: newStatus, updated_at: new Date().toISOString() })
@@ -413,17 +464,17 @@ export default function SubscriptionsPage() {
         }
       }
       // If approvalFilter === 'all', show all subscriptions (no filtering)
-      
+
       // Status filter
       if (filter !== 'all') {
         const status = getSubscriptionStatus(sub)
         if (status.status !== filter) return false
       }
-      // Sales rep filter (admin only)
-      if (isAdmin && selectedSalesRep !== 'all') {
+      // Sales rep filter (admin and managers)
+      if (canViewTeam && selectedSalesRep !== 'all') {
         if (sub.leads?.assigned_to !== selectedSalesRep) return false
       }
-      
+
       // Product filter
       if (selectedProduct !== 'all') {
         if (selectedProduct === 'none') {
@@ -432,7 +483,7 @@ export default function SubscriptionsPage() {
           if (sub.product_id !== selectedProduct) return false
         }
       }
-      
+
       // Deal value filter
       if (dealValueOperator !== 'all' && dealValueAmount) {
         const targetAmount = parseFloat(dealValueAmount)
@@ -444,18 +495,18 @@ export default function SubscriptionsPage() {
           }
         }
       }
-      
+
       // Payment filter (paid/pending)
       if (paymentFilter !== 'all') {
         if (paymentFilter === 'fully_paid' && sub.amount_pending > 0) return false
         if (paymentFilter === 'pending' && sub.amount_pending <= 0) return false
       }
-      
+
       // Days left filter
       if (daysLeftOperator !== 'all' && daysLeftValue) {
         const daysInfo = getDaysRemaining(sub)
         if (daysInfo.days === -1) return false // Skip non-recurring
-        
+
         const targetDays = parseInt(daysLeftValue)
         if (!isNaN(targetDays)) {
           switch (daysLeftOperator) {
@@ -465,7 +516,7 @@ export default function SubscriptionsPage() {
           }
         }
       }
-      
+
       // Date range filter (by start_date)
       if (dateFrom) {
         const subDate = new Date(sub.start_date)
@@ -479,21 +530,21 @@ export default function SubscriptionsPage() {
         toDate.setHours(23, 59, 59, 999)
         if (subDate > toDate) return false
       }
-      
+
       // Phone search filter
       if (phoneSearch) {
         const searchTerm = phoneSearch.replace(/[^\d]/g, '')
         const leadPhone = (sub.leads?.phone || '').replace(/[^\d]/g, '')
         if (!leadPhone.includes(searchTerm)) return false
       }
-      
+
       return true
     })
-  }, [subscriptions, filter, isAdmin, selectedSalesRep, selectedProduct, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo, phoneSearch, approvalFilter])
+  }, [subscriptions, filter, isAdmin, canViewTeam, selectedSalesRep, selectedProduct, dealValueOperator, dealValueAmount, paymentFilter, daysLeftOperator, daysLeftValue, dateFrom, dateTo, phoneSearch, approvalFilter])
 
   // Check if any filter is active
-  const hasActiveFilters = filter !== 'all' || selectedSalesRep !== 'all' || 
-    selectedProduct !== 'all' || dealValueOperator !== 'all' || 
+  const hasActiveFilters = filter !== 'all' || selectedSalesRep !== 'all' ||
+    selectedProduct !== 'all' || dealValueOperator !== 'all' ||
     paymentFilter !== 'all' || daysLeftOperator !== 'all' || dateFrom || dateTo || phoneSearch
 
   // Clear all filters
@@ -514,17 +565,17 @@ export default function SubscriptionsPage() {
   // Calculate stats from filtered subscriptions
   const stats = useMemo(() => {
     const data = filteredSubscriptions
-    
+
     const totalCount = data.length
     const totalCredited = data.reduce((sum, sub) => sum + (sub.amount_credited || 0), 0)
     const totalPending = data.reduce((sum, sub) => sum + (sub.amount_pending || 0), 0)
     const totalDealValue = data.reduce((sum, sub) => sum + (sub.deal_value || 0), 0)
-    
+
     let activeCount = 0
     let inactiveCount = 0
     let pausedCount = 0
     let nonRecurringCount = 0
-    
+
     data.forEach(sub => {
       const status = getSubscriptionStatus(sub)
       switch (status.status) {
@@ -534,7 +585,7 @@ export default function SubscriptionsPage() {
         case 'non_recurring': nonRecurringCount++; break
       }
     })
-    
+
     return {
       totalCount,
       totalCredited,
@@ -572,13 +623,13 @@ export default function SubscriptionsPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header 
-        title="Subscriptions" 
+      <Header
+        title="Subscriptions"
         description="Manage customer subscriptions"
         onRefresh={handleRefresh}
         isRefreshing={isLoading}
       />
-      
+
       <div className="flex-1 p-4 lg:p-6 space-y-4">
         {/* Toggle for Approval Status Filter */}
         <div className="flex items-center justify-between">
@@ -661,8 +712,8 @@ export default function SubscriptionsPage() {
               <div className="flex flex-wrap items-center gap-2">
                 {mounted && (
                   <>
-                    {/* Sales Rep Filter - Admin Only */}
-                    {isAdmin && salesTeam.length > 0 && (
+                    {/* Sales Rep Filter - Admin and Managers */}
+                    {canViewTeam && salesTeam.length > 0 && (
                       <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
                         <SelectTrigger className="w-[140px]">
                           <SelectValue placeholder="Sales Rep" />
@@ -670,7 +721,7 @@ export default function SubscriptionsPage() {
                         <SelectContent>
                           <SelectItem value="all">All Reps</SelectItem>
                           {salesTeam.map((rep) => (
-                            <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                            <SelectItem key={rep.id} value={rep.id}>{rep.name} ({rep.email})</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -722,8 +773,8 @@ export default function SubscriptionsPage() {
                   </Select>
                 )}
 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => setShowFilters(!showFilters)}
                   className={showFilters ? 'bg-primary/10' : ''}
@@ -733,8 +784,8 @@ export default function SubscriptionsPage() {
                 </Button>
 
                 {hasActiveFilters && (
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="sm"
                     onClick={clearAllFilters}
                   >
@@ -875,7 +926,7 @@ export default function SubscriptionsPage() {
                       {filteredSubscriptions.map((sub, index) => {
                         const statusInfo = getSubscriptionStatus(sub)
                         const daysInfo = getDaysRemaining(sub)
-                        
+
                         return (
                           <tr key={sub.id} className="border-b last:border-0 hover:bg-muted/50">
                             <td className="py-3 px-2">
@@ -909,7 +960,7 @@ export default function SubscriptionsPage() {
                                   {isAdmin && sub.leads?.assignee && (
                                     <span className="flex items-center gap-1 text-xs text-primary mt-1">
                                       <UserCircle className="h-3 w-3" />
-                                      {sub.leads.assignee.name}
+                                      {sub.leads.assignee.name} ({sub.leads.assignee.email})
                                     </span>
                                   )}
                                 </div>
@@ -997,7 +1048,7 @@ export default function SubscriptionsPage() {
                   {filteredSubscriptions.map((sub, index) => {
                     const statusInfo = getSubscriptionStatus(sub)
                     const daysInfo = getDaysRemaining(sub)
-                    
+
                     return (
                       <div key={sub.id} className="border rounded-lg p-4 space-y-3">
                         {/* Header: Serial + Phone (primary) + Status */}
@@ -1057,12 +1108,12 @@ export default function SubscriptionsPage() {
                         {isAdmin && sub.leads?.assignee && (
                           <div className="flex items-center gap-1 text-sm text-primary">
                             <UserCircle className="h-3 w-3" />
-                            <span>Assigned to: {sub.leads.assignee.name}</span>
+                            <span>Assigned to: {sub.leads.assignee.name} ({sub.leads.assignee.email})</span>
                           </div>
                         )}
 
                         {/* Contact Actions */}
-                        <ContactActions 
+                        <ContactActions
                           phone={sub.leads?.phone || null}
                           email={sub.leads?.email || null}
                           name={sub.leads?.name || ''}

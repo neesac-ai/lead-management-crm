@@ -22,7 +22,6 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { FaFacebook, FaWhatsapp, FaLinkedin, FaInstagram } from 'react-icons/fa'
-import { SiGoogleads } from 'react-icons/si'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CampaignAssignmentTable } from '@/components/integrations/campaign-assignment-table'
@@ -32,7 +31,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 type Integration = {
   id: string
   name: string
-  platform: 'facebook' | 'whatsapp' | 'linkedin' | 'instagram' | 'google'
+  platform: 'facebook' | 'whatsapp' | 'linkedin' | 'instagram'
   is_active: boolean
   sync_status: 'idle' | 'syncing' | 'error'
   last_sync_at: string | null
@@ -61,14 +60,12 @@ export default function IntegrationDetailPage() {
     switch (integration?.platform) {
       case 'facebook':
         return <FaFacebook className="w-8 h-8 text-blue-600" />
-      case 'instagram':
-        return <FaInstagram className="w-8 h-8 text-pink-600" />
-      case 'linkedin':
-        return <FaLinkedin className="w-8 h-8 text-blue-700" />
       case 'whatsapp':
         return <FaWhatsapp className="w-8 h-8 text-green-500" />
-      case 'google':
-        return <SiGoogleads className="w-8 h-8 text-blue-500" />
+      case 'linkedin':
+        return <FaLinkedin className="w-8 h-8 text-blue-700" />
+      case 'instagram':
+        return <FaInstagram className="w-8 h-8 text-pink-600" />
       default:
         return null
     }
@@ -207,12 +204,11 @@ export default function IntegrationDetailPage() {
   const isCredentialsConfigured = () => {
     if (!integration) return false
     
-    // Instagram uses the same Meta API as Facebook, so same credential check
-    if (integration.platform === 'facebook' || integration.platform === 'instagram') {
+    if (integration.platform === 'facebook') {
       const config = integration.config || {}
       const credentials = integration.credentials || {}
       
-      // For Facebook/Instagram, need App ID, App Secret, and Access Token
+      // For Facebook, need App ID, App Secret, and Access Token
       const hasAppCredentials = !!(config.facebook_app_id && config.facebook_app_secret)
       const hasAccessToken = !!(credentials.access_token)
       
@@ -313,11 +309,7 @@ export default function IntegrationDetailPage() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">
-                        {integration.platform === 'facebook' ? 'Facebook Connected' : 
-                         integration.platform === 'instagram' ? 'Instagram Connected' : 
-                         'Platform Connected'}
-                      </span>
+                      <span className="text-sm text-muted-foreground">Facebook Connected</span>
                       {credentialsConfigured && integration.credentials?.access_token ? (
                         <div className="flex items-center gap-2">
                           <CheckCircle2 className="w-5 h-5 text-green-500" />

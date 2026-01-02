@@ -54,8 +54,8 @@ type Lead = {
   created_at: string
   created_by: string | null
   assigned_to: string | null
-  creator: { name: string } | null
-  assignee: { name: string } | null
+  creator: { name: string; email: string } | null
+  assignee: { name: string; email: string } | null
   product?: { id: string; name: string } | null
   approval_status?: 'pending' | 'approved' | 'rejected' | null
   subscription?: {
@@ -111,6 +111,7 @@ type Tag = {
 type SalesUser = {
   id: string
   name: string
+  email: string
 }
 
 type Product = {
@@ -150,7 +151,7 @@ const getStatusLabel = (status: string): string => {
 export default function LeadsPage() {
   const params = useParams()
   const orgSlug = params.orgSlug as string
-  
+
   const [leads, setLeads] = useState<Lead[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -159,7 +160,7 @@ export default function LeadsPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-  
+
   const [formData, setFormData] = useState({
     name: '',
     company: '',
@@ -168,15 +169,17 @@ export default function LeadsPage() {
     source: 'manual',
     status: 'new',
   })
-  
+
   // Filter state
   const [statusFilter, setStatusFilter] = useState('all')
   const [subscriptionTypeFilter, setSubscriptionTypeFilter] = useState('all')
   const [approvalStatusFilter, setApprovalStatusFilter] = useState('all')
+  const [reporteesFilter, setReporteesFilter] = useState<'all' | 'my_reportees' | 'my_leads'>('all')
+  const [reportees, setReportees] = useState<string[]>([]) // List of reportee IDs for current user
   const [tags, setTags] = useState<Tag[]>([])
   const [selectedTagFilter, setSelectedTagFilter] = useState<string>('all')
   const [leadTags, setLeadTags] = useState<Record<string, string[]>>({}) // leadId -> tagIds
-  
+
   // New filter state
   const [salesTeam, setSalesTeam] = useState<SalesUser[]>([])
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
@@ -188,25 +191,25 @@ export default function LeadsPage() {
   const [dateTo, setDateTo] = useState<string>('')
   const [showFilters, setShowFilters] = useState(false)
   const [phoneSearch, setPhoneSearch] = useState<string>('')
-  
+
   // Delete confirmation state
   const [deleteConfirmText, setDeleteConfirmText] = useState<string>('')
   const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null)
   const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false)
   const [isDeletingSingle, setIsDeletingSingle] = useState(false)
-  
+
   // Bulk delete state
   const [selectedLeadsForDelete, setSelectedLeadsForDelete] = useState<Set<string>>(new Set())
   const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false)
   const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState<string>('')
   const [isDeletingBulk, setIsDeletingBulk] = useState(false)
-  
+
   // Duplicate detection state
   const [duplicateLead, setDuplicateLead] = useState<DuplicateLead | null>(null)
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
-  
-  
+
+
   // Import dialog state
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
@@ -215,10 +218,10 @@ export default function LeadsPage() {
   const [importResult, setImportResult] = useState<{ success: number; failed: number; skipped: number } | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  
+
   // Hydration fix - only render Radix UI components after mount
   const [mounted, setMounted] = useState(false)
-  
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -229,7 +232,7 @@ export default function LeadsPage() {
 
   const fetchUserAndLeads = async () => {
     const supabase = createClient()
-    
+
     // Get current user profile
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -250,51 +253,223 @@ export default function LeadsPage() {
 
   const fetchLeads = async (profile: UserProfile) => {
     const supabase = createClient()
-    
-    // Use a single query with JOIN for users - much faster than N+1 queries
-    // Using foreign key relationships defined in Supabase
-    // Note: product_id and product relation will only work after running migration 020
+    console.log('[LEADS PAGE] Starting fetchLeads for profile:', profile.id, profile.role)
+
+    // Fetch leads first
+    console.log('[LEADS PAGE] Querying leads table...')
     let query = supabase
       .from('leads')
       .select(`
-        id, name, email, phone, source, status, subscription_type, custom_fields, created_at, created_by, assigned_to,
-        creator:users!leads_created_by_fkey(name),
-        assignee:users!leads_assigned_to_fkey(name)
+        id, name, email, phone, source, status, subscription_type, custom_fields, created_at, created_by, assigned_to
       `)
       .eq('org_id', profile.org_id)
       .order('created_at', { ascending: false })
 
-    // Sales can only see leads assigned to them or created by them - single query with OR
+    // Fetch reportees for managers to enable client-side filtering and explicit query filtering
+    let reporteeIds: string[] = []
     if (profile.role === 'sales') {
-      query = query.or(`assigned_to.eq.${profile.id},created_by.eq.${profile.id}`)
+      try {
+        console.log('[LEADS PAGE] Calling RPC get_all_reportees...')
+        const { data: reporteesData, error: rpcError } = await supabase
+          .rpc('get_all_reportees', { manager_user_id: profile.id })
+
+        if (rpcError) {
+          console.error('[LEADS PAGE] RPC Error fetching reportees:', rpcError)
+          console.error('[LEADS PAGE] RPC Error details:', JSON.stringify(rpcError, null, 2))
+        } else {
+          console.log('[LEADS PAGE] RPC get_all_reportees success:', reporteesData?.length || 0, 'reportees')
+        }
+
+        reporteeIds = reporteesData?.map((r: { reportee_id: string }) => r.reportee_id) || []
+        setReportees(reporteeIds)
+      } catch (error) {
+        console.error('[LEADS PAGE] Exception fetching reportees:', error)
+        setReportees([])
+      }
     }
 
+    // Note: RLS policy doesn't include unassigned leads created by managers
+    // So we fetch all leads that pass RLS, then filter in JavaScript to include unassigned leads created by managers
+    // We don't add query filters here because RLS might block them - we'll filter client-side instead
+
+    console.log('[LEADS PAGE] Executing leads query...')
     const { data: leadsData, error } = await query
-    
+
     if (error) {
-      console.error('Error fetching leads:', error)
+      console.error('[LEADS PAGE] ❌ ERROR fetching leads:', error)
+      console.error('[LEADS PAGE] Error code:', error.code)
+      console.error('[LEADS PAGE] Error message:', error.message)
+      console.error('[LEADS PAGE] Error details:', JSON.stringify(error, null, 2))
+      console.error('[LEADS PAGE] Error hint:', error.hint)
       setLeads([])
       return
     }
 
+    // For managers: RLS policy doesn't include unassigned leads created by them
+    // So we need to fetch unassigned leads created by managers separately and merge them
+    let unassignedLeadsCreatedByManager: any[] = []
+    if (profile.role === 'sales') {
+      try {
+        // Fetch unassigned leads created by manager/reportees via API endpoint
+        const response = await fetch('/api/leads/unassigned-by-manager')
+        if (response.ok) {
+          const data = await response.json()
+          unassignedLeadsCreatedByManager = data.leads || []
+          console.log('[LEADS PAGE] Fetched', unassignedLeadsCreatedByManager.length, 'unassigned leads created by manager/reportees')
+        } else {
+          console.error('[LEADS PAGE] Error fetching unassigned leads:', response.statusText)
+        }
+      } catch (apiError) {
+        console.error('[LEADS PAGE] Error fetching unassigned leads via API:', apiError)
+      }
+    }
+
+    // Merge leads: combine RLS-filtered leads with unassigned leads created by manager
+    // Remove duplicates based on lead ID
+    const leadsMap = new Map<string, any>()
+
+    // Add leads from RLS query
+    if (leadsData) {
+      leadsData.forEach((lead: any) => {
+        leadsMap.set(lead.id, lead)
+      })
+    }
+
+    // Add unassigned leads created by manager (will overwrite if duplicate, but shouldn't be)
+    unassignedLeadsCreatedByManager.forEach((lead: any) => {
+      leadsMap.set(lead.id, lead)
+    })
+
+    // Convert to array and sort by created_at descending (newest first)
+    let filteredLeadsData = Array.from(leadsMap.values()).sort((a: any, b: any) => {
+      const dateA = new Date(a.created_at).getTime()
+      const dateB = new Date(b.created_at).getTime()
+      return dateB - dateA // Descending order (newest first)
+    })
+
+    // For managers: filter to only show their team's leads
+    if (profile.role === 'sales' && reporteeIds.length > 0) {
+      const accessibleUserIds = [profile.id, ...reporteeIds]
+      filteredLeadsData = filteredLeadsData.filter((lead: any) => {
+        // Include if assigned to manager or reportee
+        if (lead.assigned_to && accessibleUserIds.includes(lead.assigned_to)) {
+          return true
+        }
+        // Include if unassigned and created by manager or reportee
+        if (!lead.assigned_to && lead.created_by && accessibleUserIds.includes(lead.created_by)) {
+          return true
+        }
+        // Exclude all other leads
+        return false
+      })
+      console.log('[LEADS PAGE] Manager filter applied: kept', filteredLeadsData.length, 'leads')
+    } else if (profile.role === 'sales' && reporteeIds.length === 0) {
+      // Regular sales rep (not a manager): only see assigned leads or unassigned leads they created
+      filteredLeadsData = filteredLeadsData.filter((lead: any) => {
+        // Include if assigned to self
+        if (lead.assigned_to === profile.id) {
+          return true
+        }
+        // Include if unassigned and created by self
+        if (!lead.assigned_to && lead.created_by === profile.id) {
+          return true
+        }
+        // Exclude all other leads
+        return false
+      })
+      console.log('[LEADS PAGE] Regular sales rep filter applied: kept', filteredLeadsData.length, 'leads')
+    }
+
+    console.log('[LEADS PAGE] ✅ Leads fetched successfully:', filteredLeadsData?.length || 0, 'leads')
+
+    // Fetch user data separately to avoid foreign key relationship issues
+    console.log('[LEADS PAGE] Fetching user data separately...')
+    const userIds = new Set<string>()
+    filteredLeadsData?.forEach((lead: any) => {
+      if (lead.created_by) userIds.add(lead.created_by)
+      if (lead.assigned_to) userIds.add(lead.assigned_to)
+    })
+
+    let userMap: Record<string, { name: string }> = {}
+    if (userIds.size > 0) {
+      console.log('[LEADS PAGE] Querying users table for', userIds.size, 'user IDs')
+      const { data: usersData, error: usersError } = await supabase
+        .from('users')
+        .select('id, name, email')
+        .in('id', Array.from(userIds))
+
+      if (usersError) {
+        console.error('[LEADS PAGE] ❌ ERROR fetching users:', usersError)
+      } else {
+        console.log('[LEADS PAGE] ✅ Users fetched:', usersData?.length || 0)
+      }
+
+      if (usersData) {
+        usersData.forEach(user => {
+          userMap[user.id] = { name: user.name, email: user.email }
+        })
+      }
+    }
+
     // Get lead IDs to fetch their products from lead_activities
-    const leadIds = (leadsData || []).map(l => l.id)
-    
+    const leadIds = (filteredLeadsData || []).map((l: any) => l.id)
+
     // Fetch the most recent product_id for each lead from lead_activities
+    console.log('[LEADS PAGE] Fetching products for', leadIds.length, 'leads...')
     let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
     if (leadIds.length > 0) {
-      const { data: activitiesWithProducts } = await supabase
+      // First fetch activities with product_id
+      console.log('[LEADS PAGE] Querying lead_activities table...')
+      const { data: activitiesData, error: activitiesError } = await supabase
         .from('lead_activities')
-        .select('lead_id, product_id, products(id, name)')
+        .select('lead_id, product_id')
         .in('lead_id', leadIds)
         .not('product_id', 'is', null)
         .order('created_at', { ascending: false })
-      
-      // Build map of lead_id -> most recent product
-      if (activitiesWithProducts) {
-        for (const activity of activitiesWithProducts) {
+
+      if (activitiesError) {
+        console.error('[LEADS PAGE] ❌ ERROR fetching activities:', activitiesError)
+      } else {
+        console.log('[LEADS PAGE] ✅ Activities fetched:', activitiesData?.length || 0)
+      }
+
+      // Get unique product IDs
+      const productIds = new Set<string>()
+      if (activitiesData) {
+        for (const activity of activitiesData) {
           if (activity.product_id && !leadProductMap[activity.lead_id]) {
-            const productData = activity.products as { id: string; name: string } | null
+            productIds.add(activity.product_id)
+          }
+        }
+      }
+
+      // Fetch products separately
+      let productsMap: Record<string, { id: string; name: string }> = {}
+      if (productIds.size > 0) {
+        console.log('[LEADS PAGE] Querying products table for', productIds.size, 'products...')
+        const { data: productsData, error: productsError } = await supabase
+          .from('products')
+          .select('id, name')
+          .in('id', Array.from(productIds))
+
+        if (productsError) {
+          console.error('[LEADS PAGE] ❌ ERROR fetching products:', productsError)
+        } else {
+          console.log('[LEADS PAGE] ✅ Products fetched:', productsData?.length || 0)
+        }
+
+        if (productsData) {
+          productsData.forEach(product => {
+            productsMap[product.id] = product
+          })
+        }
+      }
+
+      // Build map of lead_id -> most recent product
+      if (activitiesData) {
+        for (const activity of activitiesData) {
+          if (activity.product_id && !leadProductMap[activity.lead_id]) {
+            const productData = productsMap[activity.product_id]
             if (productData) {
               leadProductMap[activity.lead_id] = {
                 product_id: activity.product_id,
@@ -307,22 +482,30 @@ export default function LeadsPage() {
     }
 
     // Fetch subscription data for leads with deal_won status
-    const dealWonLeadIds = (leadsData || []).filter(l => l.status === 'deal_won').map(l => l.id)
+    const dealWonLeadIds = (filteredLeadsData || []).filter((l: any) => l.status === 'deal_won').map((l: any) => l.id)
+    console.log('[LEADS PAGE] Fetching subscriptions for', dealWonLeadIds.length, 'deal_won leads...')
     let subscriptionMap: Record<string, any> = {}
     let approvalMap: Record<string, any> = {}
-    
+
     if (dealWonLeadIds.length > 0) {
       // Fetch approved subscriptions
-      const { data: subscriptionsData } = await supabase
+      console.log('[LEADS PAGE] Querying customer_subscriptions table...')
+      const { data: subscriptionsData, error: subscriptionsError } = await supabase
         .from('customer_subscriptions')
         .select('id, lead_id, status, start_date, end_date')
         .in('lead_id', dealWonLeadIds)
-      
+
+      if (subscriptionsError) {
+        console.error('[LEADS PAGE] ❌ ERROR fetching subscriptions:', subscriptionsError)
+      } else {
+        console.log('[LEADS PAGE] ✅ Subscriptions fetched:', subscriptionsData?.length || 0)
+      }
+
       if (subscriptionsData) {
         subscriptionsData.forEach(sub => {
           // Calculate actual status based on dates (same logic as subscriptions page)
           let calculatedStatus = sub.status
-          
+
           // If status is 'paused', keep it as paused
           if (sub.status === 'paused') {
             calculatedStatus = 'paused'
@@ -332,14 +515,14 @@ export default function LeadsPage() {
             today.setHours(0, 0, 0, 0)
             const endDate = new Date(sub.end_date)
             endDate.setHours(0, 0, 0, 0)
-            
+
             if (endDate >= today) {
               calculatedStatus = 'active'
             } else {
               calculatedStatus = 'expired'
             }
           }
-          
+
           subscriptionMap[sub.lead_id] = {
             id: sub.id,
             status: calculatedStatus,
@@ -349,15 +532,22 @@ export default function LeadsPage() {
           }
         })
       }
-      
+
       // Fetch pending approvals
       try {
-        const { data: approvalsData } = await supabase
+        console.log('[LEADS PAGE] Querying subscription_approvals table...')
+        const { data: approvalsData, error: approvalsError } = await supabase
           .from('subscription_approvals')
           .select('lead_id, status')
           .in('lead_id', dealWonLeadIds)
           .eq('status', 'pending')
-        
+
+        if (approvalsError) {
+          console.error('[LEADS PAGE] ❌ ERROR fetching approvals:', approvalsError)
+        } else {
+          console.log('[LEADS PAGE] ✅ Approvals fetched:', approvalsData?.length || 0)
+        }
+
         if (approvalsData) {
           approvalsData.forEach(approval => {
             if (!subscriptionMap[approval.lead_id]) {
@@ -372,14 +562,14 @@ export default function LeadsPage() {
       }
     }
 
-    // Map leads - relationships already included
-    const leadsWithUsers = (leadsData || []).map(lead => {
+    // Map leads with user data
+    const leadsWithUsers = (filteredLeadsData || []).map((lead: any) => {
       const productInfo = leadProductMap[lead.id]
       const subscriptionInfo = subscriptionMap[lead.id] || approvalMap[lead.id] || null
       return {
         ...lead,
-        creator: lead.creator as { name: string } | null,
-        assignee: lead.assignee as { name: string } | null,
+        creator: lead.created_by ? (userMap[lead.created_by] || null) : null,
+        assignee: lead.assigned_to ? (userMap[lead.assigned_to] || null) : null,
         product_id: productInfo?.product_id || null,
         product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
         subscription: subscriptionInfo,
@@ -387,57 +577,55 @@ export default function LeadsPage() {
       }
     })
 
+    console.log('[LEADS PAGE] Setting leads state with', leadsWithUsers.length, 'leads')
     setLeads(leadsWithUsers as Lead[])
 
-    // Fetch tags for the organization
-    const { data: tagsData } = await supabase
-      .from('lead_tags')
-      .select('id, name, color')
-      .eq('org_id', profile.org_id)
-      .order('name')
-    
-    setTags((tagsData || []) as Tag[])
+    // Tags feature - disabled to avoid 404 errors
+    // TODO: Re-enable when migration 014 is confirmed to be applied
+    setTags([])
 
     // Fetch sales team for admin filter
     if (profile.role === 'admin') {
-      const { data: teamData } = await supabase
+      console.log('[LEADS PAGE] Querying sales team...')
+      const { data: teamData, error: teamError } = await supabase
         .from('users')
-        .select('id, name')
+        .select('id, name, email')
         .eq('org_id', profile.org_id)
         .eq('role', 'sales')
         .eq('is_approved', true)
         .eq('is_active', true)
+
+      if (teamError) {
+        console.error('[LEADS PAGE] ❌ ERROR fetching sales team:', teamError)
+      } else {
+        console.log('[LEADS PAGE] ✅ Sales team fetched:', teamData?.length || 0)
+      }
+
       setSalesTeam(teamData || [])
     }
 
     // Fetch products for the organization
-    const { data: productsData } = await supabase
+    console.log('[LEADS PAGE] Querying products for organization...')
+    const { data: productsData, error: productsOrgError } = await supabase
       .from('products')
       .select('id, name')
       .eq('org_id', profile.org_id)
       .eq('is_active', true)
       .order('name')
-    
+
+    if (productsOrgError) {
+      console.error('[LEADS PAGE] ❌ ERROR fetching org products:', productsOrgError)
+    } else {
+      console.log('[LEADS PAGE] ✅ Org products fetched:', productsData?.length || 0)
+    }
+
     setProducts((productsData || []) as Product[])
 
-    // Fetch tag assignments for all leads
-    if (leadsData && leadsData.length > 0) {
-      const leadIds = leadsData.map(l => l.id)
-      const { data: assignments } = await supabase
-        .from('lead_tag_assignments')
-        .select('lead_id, tag_id')
-        .in('lead_id', leadIds)
-      
-      // Group by lead_id
-      const tagsByLead: Record<string, string[]> = {}
-      assignments?.forEach(a => {
-        if (!tagsByLead[a.lead_id]) {
-          tagsByLead[a.lead_id] = []
-        }
-        tagsByLead[a.lead_id].push(a.tag_id)
-      })
-      setLeadTags(tagsByLead)
-    }
+    // Tag assignments feature - disabled to avoid 404 errors
+    // TODO: Re-enable when migration 014 is confirmed to be applied
+    setLeadTags({})
+
+    console.log('[LEADS PAGE] ✅ fetchLeads completed successfully')
   }
 
   // Normalize phone number for comparison
@@ -458,36 +646,43 @@ export default function LeadsPage() {
   // Check for duplicate phone number - optimized with single query
   const checkDuplicate = async (phone: string): Promise<DuplicateLead | null> => {
     if (!phone || !orgId) return null
-    
+
     const supabase = createClient()
     const normalizedPhone = normalizePhone(phone)
-    
+
     // Search for leads with matching phone using ILIKE for flexibility
-    // Also join with users to get assignee name in single query
     const { data: matches } = await supabase
       .from('leads')
-      .select(`
-        id, name, phone, assigned_to,
-        assignee:users!leads_assigned_to_fkey(name)
-      `)
+      .select('id, name, phone, assigned_to')
       .eq('org_id', orgId)
       .or(`phone.ilike.%${phone.replace(/[^\d]/g, '').slice(-10)}%`)
       .limit(5)
-    
+
     // Find exact match with normalized phone
     const match = matches?.find(lead => {
       if (!lead.phone) return false
       return normalizePhone(lead.phone) === normalizedPhone
     })
-    
+
     if (!match) return null
-    
+
+    // Fetch assignee name separately if needed
+    let assigneeName = null
+    if (match.assigned_to) {
+      const { data: assigneeData } = await supabase
+        .from('users')
+        .select('name, email')
+        .eq('id', match.assigned_to)
+        .single()
+      assigneeName = assigneeData ? `${assigneeData.name} (${assigneeData.email})` : null
+    }
+
     return {
       id: match.id,
       name: match.name,
       phone: match.phone,
       assigned_to: match.assigned_to,
-      assignee_name: (match.assignee as { name: string } | null)?.name || null,
+      assignee_name: assigneeName,
     }
   }
 
@@ -499,10 +694,10 @@ export default function LeadsPage() {
     setIsCheckingDuplicate(true)
     const duplicate = await checkDuplicate(formData.phone)
     setIsCheckingDuplicate(false)
-    
+
     if (duplicate) {
       setDuplicateLead(duplicate)
-      
+
       // For sales rep - just show message and skip
       if (userProfile.role === 'sales') {
         if (duplicate.assigned_to) {
@@ -512,24 +707,43 @@ export default function LeadsPage() {
         }
         return
       }
-      
+
       // For admin - show dialog with options
       setShowDuplicateDialog(true)
       return
     }
-    
+
     // No duplicate - proceed with adding
     await addLead()
   }
-  
+
   const addLead = async (forceAdd = false) => {
     if (!orgId || !userProfile) return
 
     setIsSaving(true)
     const supabase = createClient()
 
-    // For sales, auto-assign to themselves
-    const assignTo = userProfile.role === 'sales' ? userProfile.id : null
+    // Only non-manager sales reps auto-assign to themselves
+    // Admins and managers (sales with reportees) leave leads unassigned
+    let assignTo: string | null = null
+    if (userProfile.role === 'sales') {
+      // Check if this sales rep is a manager (has reportees)
+      try {
+        const { data: reportees } = await supabase
+          .rpc('get_all_reportees', { manager_user_id: userProfile.id } as any)
+
+        const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
+
+        // Only auto-assign if NOT a manager (no reportees)
+        if (reporteeIds.length === 0) {
+          assignTo = userProfile.id
+        }
+      } catch (error) {
+        console.error('Error checking if manager:', error)
+        // On error, assume not a manager and auto-assign
+        assignTo = userProfile.id
+      }
+    }
 
     const { error } = await supabase
       .from('leads')
@@ -558,7 +772,7 @@ export default function LeadsPage() {
     }
     setIsSaving(false)
   }
-  
+
   const handleDuplicateAction = async (action: 'ignore' | 'add_anyway' | 'view_existing') => {
     if (action === 'ignore') {
       setShowDuplicateDialog(false)
@@ -591,7 +805,7 @@ export default function LeadsPage() {
   const filteredLeads = leads.filter(lead => {
     // Status filter
     if (statusFilter !== 'all' && lead.status !== statusFilter) return false
-    
+
     // Subscription type filter
     if (subscriptionTypeFilter !== 'all') {
       if (subscriptionTypeFilter === 'not_set') {
@@ -600,7 +814,7 @@ export default function LeadsPage() {
         if (lead.subscription_type !== subscriptionTypeFilter) return false
       }
     }
-    
+
     // Approval status filter (only for deal_won leads with subscription)
     if (approvalStatusFilter !== 'all') {
       if (lead.status === 'deal_won' && lead.subscription) {
@@ -611,7 +825,18 @@ export default function LeadsPage() {
         return false
       }
     }
-    
+
+    // Reportees filter (for managers only)
+    if (reporteesFilter !== 'all' && reportees.length > 0) {
+      if (reporteesFilter === 'my_reportees') {
+        // Only show leads assigned to reportees
+        if (!lead.assigned_to || !reportees.includes(lead.assigned_to)) return false
+      } else if (reporteesFilter === 'my_leads') {
+        // Only show leads assigned to me or created by me
+        if (lead.assigned_to !== userProfile?.id && lead.created_by !== userProfile?.id) return false
+      }
+    }
+
     // Product filter
     if (selectedProduct !== 'all') {
       if (selectedProduct === 'none') {
@@ -620,13 +845,13 @@ export default function LeadsPage() {
         if (lead.product_id !== selectedProduct) return false
       }
     }
-    
+
     // Tag filter
     if (selectedTagFilter !== 'all') {
       const leadTagIds = leadTags[lead.id] || []
       if (!leadTagIds.includes(selectedTagFilter)) return false
     }
-    
+
     // Sales rep filter (admin only)
     if (isAdmin && selectedSalesRep !== 'all') {
       if (selectedSalesRep === 'unassigned') {
@@ -635,20 +860,20 @@ export default function LeadsPage() {
         if (lead.assigned_to !== selectedSalesRep) return false
       }
     }
-    
+
     // Lead age filter
     if (leadAgeOperator !== 'all' && leadAgeDays) {
       const age = getLeadAge(lead.created_at)
       const targetDays = parseInt(leadAgeDays)
       if (isNaN(targetDays)) return true
-      
+
       switch (leadAgeOperator) {
         case 'lt': if (!(age < targetDays)) return false; break
         case 'eq': if (!(age === targetDays)) return false; break
         case 'gt': if (!(age > targetDays)) return false; break
       }
     }
-    
+
     // Date range filter
     if (dateFrom) {
       const leadDate = new Date(lead.created_at)
@@ -662,22 +887,22 @@ export default function LeadsPage() {
       toDate.setHours(23, 59, 59, 999)
       if (leadDate > toDate) return false
     }
-    
+
     // Phone search filter
     if (phoneSearch) {
       const searchTerm = phoneSearch.replace(/[^\d]/g, '') // Remove non-digits
       const leadPhone = (lead.phone || '').replace(/[^\d]/g, '')
       if (!leadPhone.includes(searchTerm)) return false
     }
-    
+
     return true
   })
 
   // Check if any filter is active
-  const hasActiveFilters = statusFilter !== 'all' || subscriptionTypeFilter !== 'all' || 
-    approvalStatusFilter !== 'all' ||
-    selectedProduct !== 'all' || selectedTagFilter !== 'all' || 
-    selectedSalesRep !== 'all' || 
+  const hasActiveFilters = statusFilter !== 'all' || subscriptionTypeFilter !== 'all' ||
+    approvalStatusFilter !== 'all' || reporteesFilter !== 'all' ||
+    selectedProduct !== 'all' || selectedTagFilter !== 'all' ||
+    selectedSalesRep !== 'all' ||
     (leadAgeOperator !== 'all' && leadAgeDays) || dateFrom || dateTo || phoneSearch
 
   // Clear all filters
@@ -685,6 +910,7 @@ export default function LeadsPage() {
     setStatusFilter('all')
     setSubscriptionTypeFilter('all')
     setApprovalStatusFilter('all')
+    setReporteesFilter('all')
     setSelectedProduct('all')
     setSelectedTagFilter('all')
     setSelectedSalesRep('all')
@@ -702,13 +928,13 @@ export default function LeadsPage() {
       toast.error('Please type "delete" to confirm')
       return
     }
-    
+
     setIsDeletingSingle(true)
     try {
       const response = await fetch(`/api/leads/${leadToDelete.id}`, {
         method: 'DELETE',
       })
-      
+
       if (response.ok) {
         toast.success('Lead deleted successfully')
         if (userProfile) fetchLeads(userProfile)
@@ -719,7 +945,7 @@ export default function LeadsPage() {
       console.error('Error deleting lead:', error)
       toast.error('Failed to delete lead')
     }
-    
+
     setIsDeletingSingle(false)
     setShowDeleteConfirmDialog(false)
     setLeadToDelete(null)
@@ -839,7 +1065,7 @@ export default function LeadsPage() {
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''))
       const name = values[nameIndex]
-      
+
       if (name) {
         parsedLeads.push({
           name,
@@ -881,13 +1107,13 @@ export default function LeadsPage() {
       }
 
       const supabase = createClient()
-      
+
       // Fetch existing leads to check for duplicates
       const { data: existingLeads } = await supabase
         .from('leads')
         .select('id, name, phone, assigned_to')
         .eq('org_id', orgId)
-      
+
       // Get user names for assigned leads
       const assignedUserIds = new Set(existingLeads?.filter(l => l.assigned_to).map(l => l.assigned_to) || [])
       let userNames: Record<string, string> = {}
@@ -961,8 +1187,27 @@ export default function LeadsPage() {
     let success = 0
     let failed = 0
 
-    // For sales, auto-assign to themselves
-    const assignTo = userProfile.role === 'sales' ? userProfile.id : null
+    // Only non-manager sales reps auto-assign to themselves
+    // Admins and managers (sales with reportees) leave leads unassigned
+    let assignTo: string | null = null
+    if (userProfile.role === 'sales') {
+      // Check if this sales rep is a manager (has reportees)
+      try {
+        const { data: reportees } = await supabase
+          .rpc('get_all_reportees', { manager_user_id: userProfile.id } as any)
+
+        const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
+
+        // Only auto-assign if NOT a manager (no reportees)
+        if (reporteeIds.length === 0) {
+          assignTo = userProfile.id
+        }
+      } catch (error) {
+        console.error('Error checking if manager:', error)
+        // On error, assume not a manager and auto-assign
+        assignTo = userProfile.id
+      }
+    }
 
     for (const lead of leadsToImport) {
       const { error } = await supabase
@@ -990,7 +1235,7 @@ export default function LeadsPage() {
     setImportResult({ success, failed, skipped: skippedCount })
     setImportPreview(null)
     setSelectedDuplicates(new Set())
-    
+
     if (success > 0) {
       toast.success(`Imported ${success} leads successfully`)
       fetchLeads(userProfile)
@@ -1010,7 +1255,7 @@ export default function LeadsPage() {
 
   const handleImportWithDuplicates = async () => {
     if (!importPreview) return
-    
+
     // Get selected duplicates to add anyway
     const leadsToImport = [
       ...importPreview.newLeads,
@@ -1018,7 +1263,7 @@ export default function LeadsPage() {
         .filter(d => selectedDuplicates.has(d.existingId))
         .map(d => d.lead)
     ]
-    
+
     const skipped = importPreview.duplicates.length - selectedDuplicates.size
     await importLeadsFromFile(leadsToImport, skipped)
   }
@@ -1055,13 +1300,13 @@ export default function LeadsPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header 
-        title="Leads" 
+      <Header
+        title="Leads"
         description={isAdmin ? "View all leads and assign to sales team" : "Manage your assigned leads"}
         onRefresh={handleRefresh}
         isRefreshing={isLoading}
       />
-      
+
       <div className="flex-1 p-4 lg:p-6">
         <Card>
           <CardHeader className="flex flex-col gap-4">
@@ -1094,7 +1339,7 @@ export default function LeadsPage() {
                 </div>
               </div>
             </div>
-            
+
             {/* Filters */}
             <div className="space-y-3">
               {/* Primary filters row */}
@@ -1148,6 +1393,21 @@ export default function LeadsPage() {
                       </Select>
                     )}
 
+                    {/* Reportees Filter - Sales Managers Only */}
+                    {isSales && reportees.length > 0 && (
+                      <Select value={reporteesFilter} onValueChange={(v: 'all' | 'my_reportees' | 'my_leads') => setReporteesFilter(v)}>
+                        <SelectTrigger className="w-[180px]">
+                          <Users className="h-4 w-4 mr-2" />
+                          <SelectValue placeholder="Lead Source" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Leads</SelectItem>
+                          <SelectItem value="my_leads">My Leads</SelectItem>
+                          <SelectItem value="my_reportees">My Reportees' Leads</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+
                     {/* Sales Rep Filter - Admin Only */}
                     {isAdmin && salesTeam.length > 0 && (
                       <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
@@ -1158,7 +1418,7 @@ export default function LeadsPage() {
                           <SelectItem value="all">All Reps</SelectItem>
                           <SelectItem value="unassigned">Unassigned</SelectItem>
                           {salesTeam.map((rep) => (
-                            <SelectItem key={rep.id} value={rep.id}>{rep.name}</SelectItem>
+                            <SelectItem key={rep.id} value={rep.id}>{rep.name} ({rep.email})</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1195,8 +1455,8 @@ export default function LeadsPage() {
                   />
                 </div>
 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="sm"
                   onClick={() => setShowFilters(!showFilters)}
                   className={showFilters ? 'bg-primary/10' : ''}
@@ -1206,8 +1466,8 @@ export default function LeadsPage() {
                 </Button>
 
                 {hasActiveFilters && (
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="sm"
                     onClick={clearAllFilters}
                   >
@@ -1319,10 +1579,10 @@ export default function LeadsPage() {
                     </Button>
                   </div>
                 )}
-                
+
                 {filteredLeads.map((lead, index) => (
-                  <div 
-                    key={lead.id} 
+                  <div
+                    key={lead.id}
                     className="p-4 rounded-lg border bg-card transition-colors hover:bg-muted/50 cursor-pointer"
                     onClick={() => {
                       setSelectedLead(lead)
@@ -1351,7 +1611,7 @@ export default function LeadsPage() {
                           <div className="flex items-center gap-2">
                             <Phone className="h-4 w-4 text-primary shrink-0" />
                             <p className="font-semibold text-base truncate">{lead.phone}</p>
-                            </div>
+                          </div>
                           {lead.name && lead.name !== lead.phone && (
                             <p className="text-sm text-muted-foreground truncate mt-0.5">
                               {lead.name}
@@ -1385,9 +1645,9 @@ export default function LeadsPage() {
                             {lead.subscription.status && (
                               <Badge variant="outline" className={
                                 lead.subscription.status === 'active' ? 'border-green-500 text-green-600' :
-                                lead.subscription.status === 'paused' ? 'border-yellow-500 text-yellow-600' :
-                                lead.subscription.status === 'expired' ? 'border-red-500 text-red-600' :
-                                'border-gray-500 text-gray-600'
+                                  lead.subscription.status === 'paused' ? 'border-yellow-500 text-yellow-600' :
+                                    lead.subscription.status === 'expired' ? 'border-red-500 text-red-600' :
+                                      'border-gray-500 text-gray-600'
                               }>
                                 {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
                               </Badge>
@@ -1407,7 +1667,7 @@ export default function LeadsPage() {
                         )}
                       </div>
                     </div>
-                    
+
                     {/* Tags */}
                     {leadTags[lead.id] && leadTags[lead.id].length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-2">
@@ -1415,9 +1675,9 @@ export default function LeadsPage() {
                           const tag = tags.find(t => t.id === tagId)
                           if (!tag) return null
                           return (
-                            <Badge 
-                              key={tagId} 
-                              variant="outline" 
+                            <Badge
+                              key={tagId}
+                              variant="outline"
                               className="text-xs"
                               style={{ borderColor: tag.color, color: tag.color }}
                             >
@@ -1427,7 +1687,7 @@ export default function LeadsPage() {
                         })}
                       </div>
                     )}
-                    
+
                     {/* Subscription Details for Deal Won */}
                     {lead.status === 'deal_won' && lead.subscription && (
                       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground mb-2 p-2 bg-muted/50 rounded-md">
@@ -1436,12 +1696,12 @@ export default function LeadsPage() {
                             <span className="font-medium">Approval:</span>
                             <span className={
                               lead.subscription.approval_status === 'pending' ? 'text-yellow-600' :
-                              lead.subscription.approval_status === 'approved' ? 'text-green-600' :
-                              'text-red-600'
+                                lead.subscription.approval_status === 'approved' ? 'text-green-600' :
+                                  'text-red-600'
                             }>
                               {lead.subscription.approval_status === 'pending' ? 'Pending' :
-                               lead.subscription.approval_status === 'approved' ? 'Approved' :
-                               'Rejected'}
+                                lead.subscription.approval_status === 'approved' ? 'Approved' :
+                                  'Rejected'}
                             </span>
                           </span>
                         )}
@@ -1450,9 +1710,9 @@ export default function LeadsPage() {
                             <span className="font-medium">Status:</span>
                             <span className={
                               lead.subscription.status === 'active' ? 'text-green-600' :
-                              lead.subscription.status === 'paused' ? 'text-yellow-600' :
-                              lead.subscription.status === 'expired' ? 'text-red-600' :
-                              'text-gray-600'
+                                lead.subscription.status === 'paused' ? 'text-yellow-600' :
+                                  lead.subscription.status === 'expired' ? 'text-red-600' :
+                                    'text-gray-600'
                             }>
                               {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
                             </span>
@@ -1466,7 +1726,7 @@ export default function LeadsPage() {
                         )}
                       </div>
                     )}
-                    
+
                     {/* Email */}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-2">
                       {lead.email && (
@@ -1476,7 +1736,7 @@ export default function LeadsPage() {
                         </span>
                       )}
                     </div>
-                    
+
                     {/* Bottom row: Source + Age + Assignment */}
                     <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
                       <div className="flex items-center gap-2">
@@ -1487,12 +1747,28 @@ export default function LeadsPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <div className="text-right">
+                        <div className="text-right text-xs">
                           {lead.assignee ? (
-                            <span className="text-primary">→ {lead.assignee.name}</span>
-                          ) : isAdmin ? (
-                            <span className="text-yellow-600">Unassigned</span>
-                          ) : null}
+                            <div>
+                              <span className="text-primary">→ Assigned to: {lead.assignee.name} ({lead.assignee.email})</span>
+                              {lead.creator && (
+                                <div className="text-muted-foreground mt-0.5">
+                                  Created by: {lead.creator.name} ({lead.creator.email})
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              {isAdmin || (userProfile?.role === 'sales' && reportees.length > 0) ? (
+                                <span className="text-yellow-600">Unassigned</span>
+                              ) : null}
+                              {lead.creator && (
+                                <div className="text-muted-foreground mt-0.5">
+                                  Created by: {lead.creator.name} ({lead.creator.email})
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                         {/* Delete button - Admin only */}
                         {(userProfile?.role === 'admin' || userProfile?.role === 'super_admin') && (
@@ -1520,9 +1796,9 @@ export default function LeadsPage() {
                   {leads.length > 0 ? 'No leads match filters' : 'No leads yet'}
                 </p>
                 <p className="text-sm">
-                  {leads.length > 0 
+                  {leads.length > 0
                     ? 'Try adjusting your filters'
-                    : isAdmin 
+                    : isAdmin
                       ? 'Import leads or add them manually to get started'
                       : 'No leads assigned to you yet. Check with your admin.'
                   }
@@ -1560,454 +1836,452 @@ export default function LeadsPage() {
       {/* Dialogs - only render after mount to prevent hydration issues */}
       {mounted && (
         <>
-      {/* Duplicate Lead Dialog (Admin Only) */}
-      <AlertDialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-              Duplicate Lead Found
-            </AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-3">
-                <p>A lead with this phone number already exists:</p>
-                <div className="p-3 bg-muted rounded-lg">
-                  <p className="font-medium">{duplicateLead?.name}</p>
-                  <p className="text-sm text-muted-foreground">{duplicateLead?.phone}</p>
-                  {duplicateLead?.assigned_to ? (
-                    <p className="text-sm text-primary mt-1">
-                      Assigned to: {duplicateLead.assignee_name}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-amber-600 mt-1">Unassigned</p>
-                  )}
-                </div>
-                <p className="text-sm">What would you like to do?</p>
-              </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
-            <AlertDialogCancel onClick={() => handleDuplicateAction('ignore')}>
-              Skip / Ignore
-            </AlertDialogCancel>
-            <Button
-              variant="outline"
-              onClick={() => handleDuplicateAction('view_existing')}
-            >
-              View Existing Lead
-            </Button>
-            <AlertDialogAction onClick={() => handleDuplicateAction('add_anyway')}>
-              Add Anyway
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Add Lead Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle>Add New Lead</DialogTitle>
-              <DialogDescription>
-                Enter the lead details below
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone *</Label>
-                  <Input
-                    id="phone"
-                    placeholder="+91 98765 43210"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="name">Name</Label>
-                  <Input
-                    id="name"
-                    placeholder="John Doe"
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="company">Company</Label>
-                  <Input
-                    id="company"
-                    placeholder="Acme Inc."
-                    value={formData.company}
-                    onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="john@example.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Source</Label>
-                  <Select
-                    value={formData.source}
-                    onValueChange={(value) => setFormData({ ...formData, source: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="manual">Manual</SelectItem>
-                      <SelectItem value="website">Website</SelectItem>
-                      <SelectItem value="facebook">Facebook</SelectItem>
-                      <SelectItem value="instagram">Instagram</SelectItem>
-                      <SelectItem value="linkedin">LinkedIn</SelectItem>
-                      <SelectItem value="whatsapp">WhatsApp</SelectItem>
-                      <SelectItem value="referral">Referral</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSaving}>
-                {isSaving ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Saving...
-                  </>
-                ) : (
-                  'Add Lead'
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Import Leads Dialog */}
-      <Dialog open={isImportDialogOpen} onOpenChange={(open) => { if (!open) resetImportDialog(); setIsImportDialogOpen(open) }}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Import Leads</DialogTitle>
-            <DialogDescription>
-              Import leads from CSV or Excel files
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div 
-            className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
-              isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
-            }`}
-            onDrop={handleDrop}
-            onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
-            onDragLeave={() => setIsDragging(false)}
-          >
-            {isImporting ? (
-              <>
-                <Loader2 className="h-10 w-10 mx-auto mb-4 text-primary animate-spin" />
-                <p className="font-medium mb-2">Processing file...</p>
-                <p className="text-sm text-muted-foreground">
-                  Please wait while we import your leads
-                </p>
-              </>
-            ) : importPreview ? (
-              <div className="text-left">
-                <div className="flex items-center gap-2 mb-4">
+          {/* Duplicate Lead Dialog (Admin Only) */}
+          <AlertDialog open={showDuplicateDialog} onOpenChange={setShowDuplicateDialog}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
                   <AlertTriangle className="h-5 w-5 text-amber-500" />
-                  <h3 className="font-medium">Import Preview</h3>
-                </div>
-                
-                {/* Summary */}
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div className="p-3 bg-green-50 rounded-lg border border-green-200">
-                    <div className="flex items-center gap-2 text-green-700">
-                      <CheckCircle className="h-4 w-4" />
-                      <span className="font-medium">{importPreview.newLeads.length} New</span>
+                  Duplicate Lead Found
+                </AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-3">
+                    <p>A lead with this phone number already exists:</p>
+                    <div className="p-3 bg-muted rounded-lg">
+                      <p className="font-medium">{duplicateLead?.name}</p>
+                      <p className="text-sm text-muted-foreground">{duplicateLead?.phone}</p>
+                      {duplicateLead?.assigned_to ? (
+                        <p className="text-sm text-primary mt-1">
+                          Assigned to: {duplicateLead.assignee_name}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-amber-600 mt-1">Unassigned</p>
+                      )}
                     </div>
-                    <p className="text-xs text-green-600 mt-1">Ready to import</p>
+                    <p className="text-sm">What would you like to do?</p>
                   </div>
-                  <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                    <div className="flex items-center gap-2 text-amber-700">
-                      <AlertTriangle className="h-4 w-4" />
-                      <span className="font-medium">{importPreview.duplicates.length} Duplicates</span>
-                    </div>
-                    <p className="text-xs text-amber-600 mt-1">Phone exists</p>
-                  </div>
-                </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+                <AlertDialogCancel onClick={() => handleDuplicateAction('ignore')}>
+                  Skip / Ignore
+                </AlertDialogCancel>
+                <Button
+                  variant="outline"
+                  onClick={() => handleDuplicateAction('view_existing')}
+                >
+                  View Existing Lead
+                </Button>
+                <AlertDialogAction onClick={() => handleDuplicateAction('add_anyway')}>
+                  Add Anyway
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
 
-                {/* Duplicates List */}
-                {importPreview.duplicates.length > 0 && (
-                  <div className="mb-4">
-                    <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
-                      <Users className="h-4 w-4" />
-                      Select duplicates to add anyway
-                    </h4>
-                    <div className="max-h-[150px] overflow-y-auto space-y-2 border rounded-lg p-2">
-                      {importPreview.duplicates.map((dup, idx) => (
-                        <div 
-                          key={idx}
-                          className={`p-2 rounded-lg border ${
-                            selectedDuplicates.has(dup.existingId) 
-                              ? 'bg-primary/5 border-primary' 
-                              : 'bg-muted/50'
-                          }`}
-                        >
-                          <div className="flex items-start gap-2">
-                            <Checkbox
-                              checked={selectedDuplicates.has(dup.existingId)}
-                              onCheckedChange={() => toggleDuplicateSelection(dup.existingId)}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-sm font-medium truncate">{dup.lead.name}</span>
-                                <Badge variant="outline" className="text-xs shrink-0">
-                                  {dup.lead.phone}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-muted-foreground">
-                                Existing: {dup.existingName}
-                                {dup.assignedTo && (
-                                  <span className="ml-2">
-                                    → <UserCheck className="inline h-3 w-3" /> {dup.assigneeName}
-                                  </span>
-                                )}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+          {/* Add Lead Dialog */}
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogContent>
+              <form onSubmit={handleSubmit}>
+                <DialogHeader>
+                  <DialogTitle>Add New Lead</DialogTitle>
+                  <DialogDescription>
+                    Enter the lead details below
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Phone *</Label>
+                      <Input
+                        id="phone"
+                        placeholder="+91 98765 43210"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        required
+                      />
                     </div>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      {selectedDuplicates.size} selected, {importPreview.duplicates.length - selectedDuplicates.size} will be skipped
-                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Name</Label>
+                      <Input
+                        id="name"
+                        placeholder="John Doe"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      />
+                    </div>
                   </div>
-                )}
-
-                {/* Action Buttons */}
-                <div className="flex gap-2 justify-end">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={resetImportDialog}
-                  >
-                    <X className="h-4 w-4 mr-1" />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="company">Company</Label>
+                      <Input
+                        id="company"
+                        placeholder="Acme Inc."
+                        value={formData.company}
+                        onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="john@example.com"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Source</Label>
+                      <Select
+                        value={formData.source}
+                        onValueChange={(value) => setFormData({ ...formData, source: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="manual">Manual</SelectItem>
+                          <SelectItem value="website">Website</SelectItem>
+                          <SelectItem value="facebook">Facebook</SelectItem>
+                          <SelectItem value="instagram">Instagram</SelectItem>
+                          <SelectItem value="linkedin">LinkedIn</SelectItem>
+                          <SelectItem value="whatsapp">WhatsApp</SelectItem>
+                          <SelectItem value="referral">Referral</SelectItem>
+                          <SelectItem value="other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button size="sm" onClick={handleImportWithDuplicates}>
-                    <CheckCircle className="h-4 w-4 mr-1" />
-                    Import {importPreview.newLeads.length + selectedDuplicates.size}
+                  <Button type="submit" disabled={isSaving}>
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      'Add Lead'
+                    )}
                   </Button>
-                </div>
-              </div>
-            ) : importResult ? (
-              <>
-                <CheckCircle className="h-10 w-10 mx-auto mb-4 text-green-500" />
-                <p className="font-medium mb-2">Import Complete</p>
-                <div className="text-sm text-muted-foreground mb-4 space-y-1">
-                  <p className="text-green-600">{importResult.success} leads imported</p>
-                  {importResult.skipped > 0 && (
-                    <p className="text-amber-600">{importResult.skipped} duplicates skipped</p>
-                  )}
-                  {importResult.failed > 0 && (
-                    <p className="text-red-600">{importResult.failed} failed</p>
-                  )}
-                </div>
-                <Button size="sm" onClick={resetImportDialog}>
-                  Import More
-                </Button>
-              </>
-            ) : (
-              <>
-                <FileSpreadsheet className="h-10 w-10 mx-auto mb-4 text-muted-foreground" />
-                <p className="font-medium mb-2">Drop your file here</p>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Supports CSV and XLSX files
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                <Button size="sm" onClick={() => fileInputRef.current?.click()}>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Choose File
-                </Button>
-              </>
-            )}
-          </div>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
 
-          <div className="p-3 bg-muted/50 rounded-lg">
-            <h4 className="text-sm font-medium flex items-center gap-2 mb-1">
-              <AlertCircle className="h-4 w-4" />
-              CSV Format
-            </h4>
-            <p className="text-xs text-muted-foreground">
-              Columns: name (required), company, email, phone, source
-            </p>
-          </div>
-        </DialogContent>
-      </Dialog>
+          {/* Import Leads Dialog */}
+          <Dialog open={isImportDialogOpen} onOpenChange={(open) => { if (!open) resetImportDialog(); setIsImportDialogOpen(open) }}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Import Leads</DialogTitle>
+                <DialogDescription>
+                  Import leads from CSV or Excel files
+                </DialogDescription>
+              </DialogHeader>
 
-      {/* Single Lead Delete Confirmation Dialog - Type 'delete' to confirm */}
-      <Dialog open={showDeleteConfirmDialog} onOpenChange={(open) => {
-        setShowDeleteConfirmDialog(open)
-        if (!open) {
-          setLeadToDelete(null)
-          setDeleteConfirmText('')
-        }
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-600">
-              <AlertTriangle className="h-5 w-5" />
-              Delete Lead Permanently
-            </DialogTitle>
-            <DialogDescription asChild>
-              <div>
-                {leadToDelete && (
-                  <div className="my-3 p-3 bg-muted rounded-lg">
-                    <p className="font-medium">{leadToDelete.name}</p>
-                    <p className="text-sm text-muted-foreground">{leadToDelete.phone}</p>
-                    {leadToDelete.email && <p className="text-sm text-muted-foreground">{leadToDelete.email}</p>}
+              <div
+                className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
+                  }`}
+                onDrop={handleDrop}
+                onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+                onDragLeave={() => setIsDragging(false)}
+              >
+                {isImporting ? (
+                  <>
+                    <Loader2 className="h-10 w-10 mx-auto mb-4 text-primary animate-spin" />
+                    <p className="font-medium mb-2">Processing file...</p>
+                    <p className="text-sm text-muted-foreground">
+                      Please wait while we import your leads
+                    </p>
+                  </>
+                ) : importPreview ? (
+                  <div className="text-left">
+                    <div className="flex items-center gap-2 mb-4">
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                      <h3 className="font-medium">Import Preview</h3>
+                    </div>
+
+                    {/* Summary */}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div className="p-3 bg-green-50 rounded-lg border border-green-200">
+                        <div className="flex items-center gap-2 text-green-700">
+                          <CheckCircle className="h-4 w-4" />
+                          <span className="font-medium">{importPreview.newLeads.length} New</span>
+                        </div>
+                        <p className="text-xs text-green-600 mt-1">Ready to import</p>
+                      </div>
+                      <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                        <div className="flex items-center gap-2 text-amber-700">
+                          <AlertTriangle className="h-4 w-4" />
+                          <span className="font-medium">{importPreview.duplicates.length} Duplicates</span>
+                        </div>
+                        <p className="text-xs text-amber-600 mt-1">Phone exists</p>
+                      </div>
+                    </div>
+
+                    {/* Duplicates List */}
+                    {importPreview.duplicates.length > 0 && (
+                      <div className="mb-4">
+                        <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                          <Users className="h-4 w-4" />
+                          Select duplicates to add anyway
+                        </h4>
+                        <div className="max-h-[150px] overflow-y-auto space-y-2 border rounded-lg p-2">
+                          {importPreview.duplicates.map((dup, idx) => (
+                            <div
+                              key={idx}
+                              className={`p-2 rounded-lg border ${selectedDuplicates.has(dup.existingId)
+                                ? 'bg-primary/5 border-primary'
+                                : 'bg-muted/50'
+                                }`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <Checkbox
+                                  checked={selectedDuplicates.has(dup.existingId)}
+                                  onCheckedChange={() => toggleDuplicateSelection(dup.existingId)}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-sm font-medium truncate">{dup.lead.name}</span>
+                                    <Badge variant="outline" className="text-xs shrink-0">
+                                      {dup.lead.phone}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">
+                                    Existing: {dup.existingName}
+                                    {dup.assignedTo && (
+                                      <span className="ml-2">
+                                        → <UserCheck className="inline h-3 w-3" /> {dup.assigneeName}
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {selectedDuplicates.size} selected, {importPreview.duplicates.length - selectedDuplicates.size} will be skipped
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-2 justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={resetImportDialog}
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={handleImportWithDuplicates}>
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Import {importPreview.newLeads.length + selectedDuplicates.size}
+                      </Button>
+                    </div>
                   </div>
+                ) : importResult ? (
+                  <>
+                    <CheckCircle className="h-10 w-10 mx-auto mb-4 text-green-500" />
+                    <p className="font-medium mb-2">Import Complete</p>
+                    <div className="text-sm text-muted-foreground mb-4 space-y-1">
+                      <p className="text-green-600">{importResult.success} leads imported</p>
+                      {importResult.skipped > 0 && (
+                        <p className="text-amber-600">{importResult.skipped} duplicates skipped</p>
+                      )}
+                      {importResult.failed > 0 && (
+                        <p className="text-red-600">{importResult.failed} failed</p>
+                      )}
+                    </div>
+                    <Button size="sm" onClick={resetImportDialog}>
+                      Import More
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <FileSpreadsheet className="h-10 w-10 mx-auto mb-4 text-muted-foreground" />
+                    <p className="font-medium mb-2">Drop your file here</p>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Supports CSV and XLSX files
+                    </p>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv,.xlsx,.xls"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                    />
+                    <Button size="sm" onClick={() => fileInputRef.current?.click()}>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Choose File
+                    </Button>
+                  </>
                 )}
-                <p className="text-sm">This will permanently delete this lead and all associated data including:</p>
-                <ul className="list-disc list-inside mt-2 text-sm text-muted-foreground">
-                  <li>All activities and notes</li>
-                  <li>Scheduled demos/meetings</li>
-                  <li>Call recordings</li>
-                  <li>Subscriptions</li>
-                </ul>
-                <p className="mt-3 font-medium text-red-600">This action cannot be undone!</p>
               </div>
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="delete-confirm" className="text-sm font-medium">
-                Type <span className="font-bold text-red-600">delete</span> to confirm:
-              </Label>
-              <Input
-                id="delete-confirm"
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder="Type 'delete' here"
-                className="border-red-200 focus-visible:ring-red-500"
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowDeleteConfirmDialog(false)
-                setLeadToDelete(null)
-                setDeleteConfirmText('')
-              }}
-              disabled={isDeletingSingle}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleSingleLeadDelete}
-              disabled={isDeletingSingle || deleteConfirmText.toLowerCase() !== 'delete'}
-            >
-              {isDeletingSingle ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete Lead
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Bulk Delete Confirmation Dialog */}
-      <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete {selectedLeadsForDelete.size} Lead(s) Permanently</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div>
-                <div className="text-sm mb-4">This will permanently delete {selectedLeadsForDelete.size} lead(s) and all associated data including:</div>
-                <ul className="list-disc list-inside text-sm space-y-1 mb-4">
-                  <li>All activities and notes</li>
-                  <li>All meetings/demos</li>
-                  <li>All call recordings</li>
-                  <li>All subscriptions</li>
-                </ul>
-                <div className="text-sm font-medium text-red-600 dark:text-red-400 mb-4">
-                  This action cannot be undone.
-                </div>
-                <div className="mt-4">
-                  <Label htmlFor="bulk-delete-confirm" className="text-sm">
-                    Type <strong>"delete"</strong> to confirm:
+              <div className="p-3 bg-muted/50 rounded-lg">
+                <h4 className="text-sm font-medium flex items-center gap-2 mb-1">
+                  <AlertCircle className="h-4 w-4" />
+                  CSV Format
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  Columns: name (required), company, email, phone, source
+                </p>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Single Lead Delete Confirmation Dialog - Type 'delete' to confirm */}
+          <Dialog open={showDeleteConfirmDialog} onOpenChange={(open) => {
+            setShowDeleteConfirmDialog(open)
+            if (!open) {
+              setLeadToDelete(null)
+              setDeleteConfirmText('')
+            }
+          }}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="h-5 w-5" />
+                  Delete Lead Permanently
+                </DialogTitle>
+                <DialogDescription asChild>
+                  <div>
+                    {leadToDelete && (
+                      <div className="my-3 p-3 bg-muted rounded-lg">
+                        <p className="font-medium">{leadToDelete.name}</p>
+                        <p className="text-sm text-muted-foreground">{leadToDelete.phone}</p>
+                        {leadToDelete.email && <p className="text-sm text-muted-foreground">{leadToDelete.email}</p>}
+                      </div>
+                    )}
+                    <p className="text-sm">This will permanently delete this lead and all associated data including:</p>
+                    <ul className="list-disc list-inside mt-2 text-sm text-muted-foreground">
+                      <li>All activities and notes</li>
+                      <li>Scheduled demos/meetings</li>
+                      <li>Call recordings</li>
+                      <li>Subscriptions</li>
+                    </ul>
+                    <p className="mt-3 font-medium text-red-600">This action cannot be undone!</p>
+                  </div>
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label htmlFor="delete-confirm" className="text-sm font-medium">
+                    Type <span className="font-bold text-red-600">delete</span> to confirm:
                   </Label>
                   <Input
-                    id="bulk-delete-confirm"
-                    value={bulkDeleteConfirmText}
-                    onChange={(e) => setBulkDeleteConfirmText(e.target.value)}
-                    placeholder="delete"
-                    className="mt-2"
-                    autoFocus
+                    id="delete-confirm"
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder="Type 'delete' here"
+                    className="border-red-200 focus-visible:ring-red-500"
                   />
                 </div>
               </div>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              onClick={() => {
-                setBulkDeleteConfirmText('')
-                setShowBulkDeleteDialog(false)
-              }}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleBulkDelete}
-              disabled={isDeletingBulk || bulkDeleteConfirmText.toLowerCase() !== 'delete'}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              {isDeletingBulk ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  Delete {selectedLeadsForDelete.size} Lead(s)
-                </>
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeleteConfirmDialog(false)
+                    setLeadToDelete(null)
+                    setDeleteConfirmText('')
+                  }}
+                  disabled={isDeletingSingle}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleSingleLeadDelete}
+                  disabled={isDeletingSingle || deleteConfirmText.toLowerCase() !== 'delete'}
+                >
+                  {isDeletingSingle ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Lead
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Bulk Delete Confirmation Dialog */}
+          <AlertDialog open={showBulkDeleteDialog} onOpenChange={setShowBulkDeleteDialog}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {selectedLeadsForDelete.size} Lead(s) Permanently</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div>
+                    <div className="text-sm mb-4">This will permanently delete {selectedLeadsForDelete.size} lead(s) and all associated data including:</div>
+                    <ul className="list-disc list-inside text-sm space-y-1 mb-4">
+                      <li>All activities and notes</li>
+                      <li>All meetings/demos</li>
+                      <li>All call recordings</li>
+                      <li>All subscriptions</li>
+                    </ul>
+                    <div className="text-sm font-medium text-red-600 dark:text-red-400 mb-4">
+                      This action cannot be undone.
+                    </div>
+                    <div className="mt-4">
+                      <Label htmlFor="bulk-delete-confirm" className="text-sm">
+                        Type <strong>"delete"</strong> to confirm:
+                      </Label>
+                      <Input
+                        id="bulk-delete-confirm"
+                        value={bulkDeleteConfirmText}
+                        onChange={(e) => setBulkDeleteConfirmText(e.target.value)}
+                        placeholder="delete"
+                        className="mt-2"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel
+                  onClick={() => {
+                    setBulkDeleteConfirmText('')
+                    setShowBulkDeleteDialog(false)
+                  }}
+                >
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleBulkDelete}
+                  disabled={isDeletingBulk || bulkDeleteConfirmText.toLowerCase() !== 'delete'}
+                  className="bg-red-600 hover:bg-red-700"
+                >
+                  {isDeletingBulk ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete {selectedLeadsForDelete.size} Lead(s)
+                    </>
+                  )}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       )}
     </div>

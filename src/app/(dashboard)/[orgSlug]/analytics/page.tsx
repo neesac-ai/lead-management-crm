@@ -26,13 +26,13 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
-import { 
-  Target, 
+import {
+  Target,
   TrendingUp,
   TrendingDown,
   Minus,
-  CheckCircle2, 
-  XCircle, 
+  CheckCircle2,
+  XCircle,
   Calendar,
   Users,
   BarChart3,
@@ -110,6 +110,8 @@ export default function AnalyticsPage() {
   const [orgId, setOrgId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
+  const [isManager, setIsManager] = useState(false)
+  const [canViewTeam, setCanViewTeam] = useState(false)
 
   // Lead analytics state
   const [leads, setLeads] = useState<Lead[]>([])
@@ -201,29 +203,112 @@ export default function AnalyticsPage() {
       const currentOrgId = (orgData as { id: string }).id
       setOrgId(currentOrgId)
 
+      // Calculate isAdmin from userData (not from state which might be stale)
+      const currentIsAdmin = userData.role === 'admin' || userData.role === 'super_admin'
+
+      // Check if user is a manager (sales with reportees)
+      let isManager = false
+      let accessibleUserIds: string[] = [userData.id]
+
+      if (userData.role === 'sales') {
+        try {
+          const { data: reportees } = await supabase
+            .rpc('get_all_reportees', { manager_user_id: userData.id } as any)
+
+          const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
+          if (reporteeIds.length > 0) {
+            isManager = true
+            accessibleUserIds = [userData.id, ...reporteeIds]
+          }
+        } catch (error) {
+          console.error('Error fetching reportees:', error)
+        }
+      }
+
+      const canViewTeamValue = currentIsAdmin || isManager
+      setCanViewTeam(canViewTeamValue)
+      setIsManager(isManager)
+
       // Fetch leads - only columns needed for analytics
       let leadsQuery = supabase
         .from('leads')
-        .select('id, status, subscription_type, assigned_to, created_at')
+        .select('id, status, subscription_type, assigned_to, created_by, created_at')
         .eq('org_id', currentOrgId)
 
-      if (userData.role === 'sales') {
+      // Sales reps (non-managers) only see their assigned leads
+      // Managers and admins see their team's leads
+      // For admins: fetch all org leads (no filter)
+      // For managers: filter by accessible user IDs (assigned to them or created by them if unassigned)
+      // For regular sales: filter by assigned_to
+      if (!canViewTeamValue) {
+        // Regular sales rep: only their assigned leads
         leadsQuery = leadsQuery.eq('assigned_to', userData.id)
+        console.log('[ANALYTICS] Filtering leads for regular sales rep:', userData.id)
+      } else if (isManager && !currentIsAdmin) {
+        // Manager (sales with reportees): RLS will filter assigned leads, but we need to fetch all org leads
+        // and filter in JavaScript to include unassigned leads created by manager/reportees
+        // We don't add query filters here - let RLS handle assigned leads, then filter client-side
+        console.log('[ANALYTICS] Manager - will filter leads in JavaScript for user IDs:', accessibleUserIds)
+      } else if (currentIsAdmin) {
+        // Admin: fetch all org leads (no additional filter)
+        console.log('[ANALYTICS] Admin user - fetching all org leads (no filter)')
       }
 
-      const { data: leadsData } = await leadsQuery
-      setLeads((leadsData || []) as Lead[])
+      const { data: leadsData, error: leadsError } = await leadsQuery
 
-      // Fetch sales team (admin only) - only columns needed
-      if (userData.role === 'admin' || userData.role === 'super_admin') {
-        const { data: teamData } = await supabase
+      // For managers, also filter in JavaScript to ensure we only include their team's leads
+      // This handles cases where the PostgREST filter might not work as expected
+      let finalLeadsData = leadsData
+      if (isManager && !currentIsAdmin && leadsData) {
+        finalLeadsData = leadsData.filter((lead: any) => {
+          // Include if assigned to manager or reportee
+          if (lead.assigned_to && accessibleUserIds.includes(lead.assigned_to)) {
+            return true
+          }
+          // Include if unassigned and created by manager or reportee
+          if (!lead.assigned_to && lead.created_by && accessibleUserIds.includes(lead.created_by)) {
+            return true
+          }
+          return false
+        })
+      }
+
+      if (leadsError) {
+        console.error('[ANALYTICS] ❌ Error fetching leads:', leadsError)
+        setLeads([])
+      } else {
+        const leadsToSet = (finalLeadsData || leadsData || []) as Lead[]
+        console.log('[ANALYTICS] ✅ Leads fetched:', leadsToSet.length, 'leads for org:', currentOrgId)
+        setLeads(leadsToSet)
+      }
+
+      // Fetch team members (admin and managers) - includes sales, admins, and managers
+      if (canViewTeamValue) {
+        let teamQuery = supabase
           .from('users')
-          .select('id, name, role, org_id')
+          .select('id, name, email, role, org_id')
           .eq('org_id', currentOrgId)
-          .eq('role', 'sales')
+          .in('role', ['sales', 'admin', 'super_admin']) // Include admins and managers
           .eq('is_approved', true)
+          .eq('is_active', true)
 
-        setSalesTeam((teamData || []) as User[])
+        // Managers see only their reportees + self (not all admins)
+        if (isManager && !currentIsAdmin) {
+          // For managers: include only their reportees and themselves
+          teamQuery = teamQuery.in('id', accessibleUserIds)
+        }
+
+        const { data: teamData, error: teamError } = await teamQuery
+
+        if (teamError) {
+          console.error('[ANALYTICS] Error fetching team:', teamError)
+          setSalesTeam([])
+        } else {
+          console.log('[ANALYTICS] ✅ Team fetched:', teamData?.length || 0)
+          setSalesTeam((teamData || []) as User[])
+        }
+      } else {
+        setSalesTeam([])
       }
 
       // Check AI config
@@ -263,33 +348,77 @@ export default function AnalyticsPage() {
     const userToUse = currentUser || user
     if (!orgIdToUse || !userToUse) return
 
-    // Select needed columns + join with users for sales rep name
+    // Fetch recordings without foreign key relationship
     let query = supabase
       .from('call_recordings')
       .select(`
-        id, phone_number, duration_seconds, recording_date, 
+        id, phone_number, duration_seconds, recording_date,
         summary, sentiment, sentiment_reasoning, processing_status, processing_error,
         transcript, key_points, action_items, call_quality,
         drive_file_id, drive_file_name, drive_file_url,
-        user_id, lead_id,
-        users:user_id(id, name)
+        user_id, lead_id
       `)
       .eq('org_id', orgIdToUse)
       .order('recording_date', { ascending: false })
 
     // Sales can only see their own recordings
+    // Managers can see their team's recordings
     if (userToUse.role === 'sales') {
-      query = query.eq('user_id', userToUse.id)
+      // Check if manager
+      try {
+        const { data: reportees } = await supabase
+          .rpc('get_all_reportees', { manager_user_id: userToUse.id } as any)
+
+        const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
+        if (reporteeIds.length > 0) {
+          // Manager: see recordings from self + reportees
+          query = query.in('user_id', [userToUse.id, ...reporteeIds])
+        } else {
+          // Non-manager: only own recordings
+          query = query.eq('user_id', userToUse.id)
+        }
+      } catch (error) {
+        // Fallback: only own recordings
+        query = query.eq('user_id', userToUse.id)
+      }
     }
 
     const { data: recordingsData, error } = await query
 
     if (error) {
       console.error('Error fetching recordings:', error)
-    } else {
-      setRecordings((recordingsData || []) as CallRecording[])
-      calculateCallStats((recordingsData || []) as CallRecording[])
+      setRecordings([])
+      return
     }
+
+    // Fetch user names separately
+    const userIds = new Set<string>()
+    recordingsData?.forEach((rec: { user_id: string | null }) => {
+      if (rec.user_id) userIds.add(rec.user_id)
+    })
+
+    let userMap: Record<string, { id: string; name: string; email: string }> = {}
+    if (userIds.size > 0) {
+      const { data: usersData } = await supabase
+        .from('users')
+        .select('id, name, email')
+        .in('id', Array.from(userIds))
+
+      if (usersData) {
+        usersData.forEach(user => {
+          userMap[user.id] = { id: user.id, name: user.name, email: user.email }
+        })
+      }
+    }
+
+    // Map recordings with user data
+    const recordingsWithUsers = (recordingsData || []).map((rec: any) => ({
+      ...rec,
+      users: rec.user_id ? (userMap[rec.user_id] || null) : null
+    }))
+
+    setRecordings(recordingsWithUsers as CallRecording[])
+    calculateCallStats(recordingsWithUsers as CallRecording[])
   }
 
   function calculateCallStats(recs: CallRecording[]) {
@@ -315,7 +444,7 @@ export default function AnalyticsPage() {
       else if (r.processing_status === 'failed') stats.failed++
     })
 
-    stats.avgDuration = stats.totalCalls > 0 
+    stats.avgDuration = stats.totalCalls > 0
       ? Math.round(stats.totalDuration / stats.totalCalls)
       : 0
 
@@ -331,7 +460,7 @@ export default function AnalyticsPage() {
       if (result.success && result.files_imported > 0) {
         toast.success(`${result.files_imported} new recording(s) synced`)
       }
-      
+
       // Always refresh recordings list to pick up deletions and updates
       if (result.success) {
         setLastSyncTime(new Date().toISOString())
@@ -428,35 +557,51 @@ export default function AnalyticsPage() {
   async function fetchRepActivities(userId: string) {
     if (!orgId) return
     setLoadingActivities(true)
-    
+
     try {
+      // Fetch activities without foreign key relationship
       const { data: activities, error } = await supabase
         .from('lead_activities')
-        .select(`
-          id,
-          lead_id,
-          action_type,
-          comments,
-          action_date,
-          leads:lead_id(name, status)
-        `)
+        .select('id, lead_id, action_type, comments, action_date')
         .eq('user_id', userId)
         .order('action_date', { ascending: false })
         .limit(100)
 
       if (error) {
         console.error('Error fetching activities:', error)
+        setRepActivities([])
         return
       }
 
-      const formattedActivities = (activities || []).map((a) => ({
+      // Fetch leads separately
+      const leadIds = new Set<string>()
+      activities?.forEach((a: { lead_id: string }) => {
+        if (a.lead_id) leadIds.add(a.lead_id)
+      })
+
+      let leadsMap: Record<string, { name: string; status: string }> = {}
+      if (leadIds.size > 0) {
+        const { data: leadsData } = await supabase
+          .from('leads')
+          .select('id, name, status')
+          .in('id', Array.from(leadIds))
+
+        if (leadsData) {
+          leadsData.forEach(lead => {
+            leadsMap[lead.id] = { name: lead.name, status: lead.status }
+          })
+        }
+      }
+
+      // Map activities with lead data
+      const formattedActivities = (activities || []).map((a: any) => ({
         id: a.id,
         lead_id: a.lead_id,
         action_type: a.action_type,
         comments: a.comments,
         action_date: a.action_date,
-        lead_name: (a.leads as { name: string } | null)?.name,
-        lead_status: (a.leads as { status: string } | null)?.status,
+        lead_name: a.lead_id ? (leadsMap[a.lead_id]?.name || null) : null,
+        lead_status: a.lead_id ? (leadsMap[a.lead_id]?.status || null) : null,
       }))
 
       setRepActivities(formattedActivities)
@@ -523,23 +668,33 @@ export default function AnalyticsPage() {
 
   function getSalesPerformance(): SalesPerformance[] {
     const filteredLeads = getFilteredLeads()
-    
+
     return salesTeam.map(member => {
-      const memberLeads = filteredLeads.filter(lead => lead.assigned_to === member.id)
+      // Count leads assigned to the member, OR unassigned leads created by them
+      // This prevents double-counting: if a lead is assigned, count it for the assignee only
+      // If unassigned, count it for the creator
+      const memberLeads = filteredLeads.filter(lead => {
+        // If lead is assigned, count it only for the assignee
+        if (lead.assigned_to) {
+          return lead.assigned_to === member.id
+        }
+        // If lead is unassigned, count it for the creator (if they're admin/super_admin/sales)
+        return (member.role === 'admin' || member.role === 'super_admin' || member.role === 'sales') && lead.created_by === member.id
+      })
       const statusBreakdown = getStatusBreakdown(memberLeads)
       const wonDeals = statusBreakdown.deal_won
       const actionedLeads = memberLeads.length - statusBreakdown.new
-      
+
       return {
         user: member,
         totalLeads: memberLeads.length,
         actionedLeads,
         statusBreakdown,
-        actionRate: memberLeads.length > 0 
-          ? Math.round((actionedLeads / memberLeads.length) * 100) 
+        actionRate: memberLeads.length > 0
+          ? Math.round((actionedLeads / memberLeads.length) * 100)
           : 0,
-        conversionRate: actionedLeads > 0 
-          ? Math.round((wonDeals / actionedLeads) * 100) 
+        conversionRate: actionedLeads > 0
+          ? Math.round((wonDeals / actionedLeads) * 100)
           : 0
       }
     }).sort((a, b) => b.totalLeads - a.totalLeads)
@@ -571,13 +726,13 @@ export default function AnalyticsPage() {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'completed': 
+      case 'completed':
         return <Badge className="bg-green-100 text-green-700"><CheckCircle2 className="w-3 h-3 mr-1" />Analyzed</Badge>
-      case 'processing': 
+      case 'processing':
         return <Badge className="bg-blue-100 text-blue-700"><Loader2 className="w-3 h-3 mr-1 animate-spin" />Processing</Badge>
-      case 'failed': 
+      case 'failed':
         return <Badge className="bg-red-100 text-red-700"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>
-      default: 
+      default:
         return <Badge className="bg-gray-100 text-gray-700"><AlertCircle className="w-3 h-3 mr-1" />Pending</Badge>
     }
   }
@@ -592,22 +747,22 @@ export default function AnalyticsPage() {
           r.summary?.toLowerCase().includes(query)
         if (!matchesSearch) return false
       }
-      
+
       // Sales rep filter (admin only)
       if (isAdmin && selectedSalesRep !== 'all') {
         if (r.user_id !== selectedSalesRep) return false
       }
-      
+
       return true
     })
   }, [recordings, searchQuery, isAdmin, selectedSalesRep])
 
   // Calculate call stats for selected rep - memoized
   const repCallStats = useMemo(() => {
-    const recs = selectedSalesRep === 'all' 
-      ? recordings 
+    const recs = selectedSalesRep === 'all'
+      ? recordings
       : recordings.filter(r => r.user_id === selectedSalesRep)
-    
+
     const stats = {
       totalCalls: recs.length,
       totalDuration: 0,
@@ -615,7 +770,7 @@ export default function AnalyticsPage() {
       neutral: 0,
       negative: 0,
     }
-    
+
     recs.forEach(r => {
       if (r.duration_seconds) stats.totalDuration += r.duration_seconds
       if (r.sentiment === 'positive') stats.positive++
@@ -629,7 +784,7 @@ export default function AnalyticsPage() {
   // Memoize expensive lead analytics calculations
   const filteredLeads = useMemo(() => getFilteredLeads(), [leads, dateFilter, customDateFrom, customDateTo])
   const statusBreakdown = useMemo(() => getStatusBreakdown(filteredLeads), [filteredLeads])
-  const salesPerformance = useMemo(() => isAdmin ? getSalesPerformance() : [], [isAdmin, leads, salesTeam])
+  const salesPerformance = useMemo(() => canViewTeam ? getSalesPerformance() : [], [canViewTeam, leads, salesTeam])
 
   // Lead metrics
   const totalLeads = filteredLeads.length
@@ -637,7 +792,7 @@ export default function AnalyticsPage() {
   const actionedLeadsCount = totalLeads - statusBreakdown.new
   const actionRate = totalLeads > 0 ? Math.round((actionedLeadsCount / totalLeads) * 100) : 0
   const conversionRate = actionedLeadsCount > 0 ? Math.round((wonDeals / actionedLeadsCount) * 100) : 0
-  
+
   // Subscription type breakdown
   const trialLeads = filteredLeads.filter(l => l.subscription_type === 'trial').length
   const paidLeads = filteredLeads.filter(l => l.subscription_type === 'paid').length
@@ -653,11 +808,11 @@ export default function AnalyticsPage() {
 
   return (
     <>
-      <Header 
-        title="Analytics" 
-        description={isAdmin ? "Team performance and insights" : "Your performance metrics"}
+      <Header
+        title="Analytics"
+        description={canViewTeam ? "Team performance and insights" : "Your performance metrics"}
       />
-      
+
       <div className="flex-1 p-4 lg:p-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full max-w-md grid-cols-2">
@@ -852,9 +1007,9 @@ export default function AnalyticsPage() {
                     {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((status) => {
                       const count = statusBreakdown[status]
                       const percentage = totalLeads > 0 ? (count / totalLeads) * 100 : 0
-                      
+
                       if (count === 0) return null
-                      
+
                       return (
                         <div key={status} className="space-y-1">
                           <div className="flex items-center justify-between text-sm">
@@ -864,7 +1019,7 @@ export default function AnalyticsPage() {
                             </span>
                           </div>
                           <div className="h-2 bg-muted rounded-full overflow-hidden">
-                            <div 
+                            <div
                               className={`h-full ${STATUS_COLORS[status]} transition-all duration-500`}
                               style={{ width: `${percentage}%` }}
                             />
@@ -877,14 +1032,14 @@ export default function AnalyticsPage() {
               </CardContent>
             </Card>
 
-            {/* Sales Team Performance (Admin Only) */}
-            {isAdmin && salesTeam.length > 0 && (
+            {/* Team Performance (Admin and Managers) */}
+            {canViewTeam && salesTeam.length > 0 && (
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
                       <Users className="h-5 w-5" />
-                      Sales Team Performance
+                      Team Performance
                     </CardTitle>
                     <p className="text-xs text-muted-foreground">Click on a row to see details</p>
                   </div>
@@ -894,7 +1049,8 @@ export default function AnalyticsPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left py-3 px-2 font-medium">Sales Rep</th>
+                          <th className="text-left py-3 px-2 font-medium">Team Member</th>
+                          <th className="text-center py-3 px-2 font-medium">Role</th>
                           <th className="text-center py-3 px-2 font-medium">Total</th>
                           <th className="text-center py-3 px-2 font-medium">Actioned</th>
                           <th className="text-center py-3 px-2 font-medium">Action %</th>
@@ -905,8 +1061,8 @@ export default function AnalyticsPage() {
                       </thead>
                       <tbody>
                         {salesPerformance.map((perf) => (
-                          <tr 
-                            key={perf.user.id} 
+                          <tr
+                            key={perf.user.id}
                             className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
                             onClick={() => handleRepClick(perf)}
                           >
@@ -915,8 +1071,16 @@ export default function AnalyticsPage() {
                                 <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
                                   {perf.user.name.charAt(0).toUpperCase()}
                                 </div>
-                                <span className="font-medium">{perf.user.name}</span>
+                                <div className="flex flex-col">
+                                  <span className="font-medium">{perf.user.name}</span>
+                                  <span className="text-xs text-muted-foreground">{perf.user.email}</span>
+                                </div>
                               </div>
+                            </td>
+                            <td className="text-center py-3 px-2">
+                              <Badge variant="outline" className="capitalize">
+                                {perf.user.role === 'super_admin' ? 'Super Admin' : perf.user.role}
+                              </Badge>
                             </td>
                             <td className="text-center py-3 px-2">
                               <Badge variant="secondary">{perf.totalLeads}</Badge>
@@ -949,8 +1113,8 @@ export default function AnalyticsPage() {
                   {/* Mobile Cards */}
                   <div className="md:hidden space-y-4">
                     {salesPerformance.map((perf) => (
-                      <div 
-                        key={perf.user.id} 
+                      <div
+                        key={perf.user.id}
                         className="border rounded-lg p-4 space-y-3 hover:bg-muted/50 cursor-pointer transition-colors"
                         onClick={() => handleRepClick(perf)}
                       >
@@ -959,11 +1123,14 @@ export default function AnalyticsPage() {
                             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
                               {perf.user.name.charAt(0).toUpperCase()}
                             </div>
-                            <span className="font-medium">{perf.user.name}</span>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{perf.user.name}</span>
+                              <span className="text-xs text-muted-foreground">{perf.user.email}</span>
+                            </div>
                           </div>
                           <Badge variant="secondary">{perf.totalLeads} leads</Badge>
                         </div>
-                        
+
                         <div className="grid grid-cols-4 gap-2 text-center text-sm">
                           <div className="bg-slate-50 rounded p-2">
                             <p className="text-muted-foreground text-xs">Total</p>
@@ -989,8 +1156,8 @@ export default function AnalyticsPage() {
               </Card>
             )}
 
-            {/* Activity Summary for Sales */}
-            {!isAdmin && (
+            {/* Activity Summary for Sales (non-managers) */}
+            {!canViewTeam && (
               <Card>
                 <CardHeader>
                   <CardTitle>Your Activity Summary</CardTitle>
@@ -1042,25 +1209,25 @@ export default function AnalyticsPage() {
                   )}
                 </p>
               </div>
-              
+
               <div className="flex items-center gap-2">
-                {/* Sales Rep Filter (Admin) */}
-                {isAdmin && salesTeam.length > 0 && (
+                {/* Team Member Filter (Admin and Managers) */}
+                {canViewTeam && salesTeam.length > 0 && (
                   <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
                     <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Filter by rep" />
+                      <SelectValue placeholder="Filter by member" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Sales Reps</SelectItem>
+                      <SelectItem value="all">All Team Members</SelectItem>
                       {salesTeam.map((rep) => (
                         <SelectItem key={rep.id} value={rep.id}>
-                          {rep.name}
+                          {rep.name} ({rep.email}) - {rep.role === 'super_admin' ? 'Super Admin' : rep.role}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 )}
-                
+
                 {folderConfigured && isGoogleConnected && (
                   <Button variant="outline" onClick={handleManualSync} disabled={syncing}>
                     <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
@@ -1210,7 +1377,7 @@ export default function AnalyticsPage() {
                         <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                           <Phone className="w-5 h-5 text-primary" />
                         </div>
-                        
+
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="font-medium">{recording.phone_number}</span>
@@ -1225,7 +1392,9 @@ export default function AnalyticsPage() {
                             {isAdmin && recording.users && (
                               <>
                                 <UserIcon className="w-3 h-3 ml-2" />
-                                <span className="text-primary">{(recording.users as { name: string }).name}</span>
+                                <span className="text-primary">
+                                  {(recording.users as { name: string; email: string }).name} ({(recording.users as { email: string }).email})
+                                </span>
                               </>
                             )}
                           </div>
@@ -1295,7 +1464,7 @@ export default function AnalyticsPage() {
                   </Avatar>
                   <div>
                     <DialogTitle className="text-xl">{selectedRepForDetail.user.name}</DialogTitle>
-                    <DialogDescription>Sales Representative Activity</DialogDescription>
+                    <DialogDescription>{selectedRepForDetail.user.email}</DialogDescription>
                   </div>
                 </div>
               </DialogHeader>
@@ -1354,13 +1523,13 @@ export default function AnalyticsPage() {
                   <ScrollArea className="h-[280px] pr-4">
                     <div className="space-y-3">
                       {repActivities.map((activity) => {
-                        const actionInfo = ACTION_TYPE_LABELS[activity.action_type] || { 
-                          label: activity.action_type.replace(/_/g, ' '), 
-                          color: 'bg-gray-100 text-gray-700' 
+                        const actionInfo = ACTION_TYPE_LABELS[activity.action_type] || {
+                          label: activity.action_type.replace(/_/g, ' '),
+                          color: 'bg-gray-100 text-gray-700'
                         }
                         return (
-                          <div 
-                            key={activity.id} 
+                          <div
+                            key={activity.id}
                             className="flex items-start gap-3 p-3 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
                           >
                             <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
@@ -1593,7 +1762,7 @@ export default function AnalyticsPage() {
                         <p className="text-sm text-muted-foreground mt-2">
                           Click the button below to analyze this recording with AI
                         </p>
-                        <Button 
+                        <Button
                           className="mt-4"
                           onClick={() => handleProcess(selectedRecording.id)}
                           disabled={processing === selectedRecording.id || !hasAIConfig}
@@ -1618,7 +1787,7 @@ export default function AnalyticsPage() {
                         <p className="text-sm text-muted-foreground mt-2">
                           {selectedRecording.processing_error || 'Unknown error occurred'}
                         </p>
-                        <Button 
+                        <Button
                           className="mt-4"
                           onClick={() => handleProcess(selectedRecording.id)}
                           disabled={processing === selectedRecording.id}
@@ -1647,9 +1816,9 @@ export default function AnalyticsPage() {
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>{selectedRecording.drive_file_name}</span>
                       <Button variant="ghost" size="sm" asChild>
-                        <a 
-                          href={selectedRecording.drive_file_url || `https://drive.google.com/file/d/${selectedRecording.drive_file_id}/view`} 
-                          target="_blank" 
+                        <a
+                          href={selectedRecording.drive_file_url || `https://drive.google.com/file/d/${selectedRecording.drive_file_id}/view`}
+                          target="_blank"
                           rel="noopener noreferrer"
                         >
                           <ExternalLink className="w-3 h-3 mr-1" />
@@ -1663,7 +1832,7 @@ export default function AnalyticsPage() {
                 {/* Delete Button - Admin Only */}
                 {isAdmin && (
                   <div className="pt-4 border-t">
-                    <Button 
+                    <Button
                       variant="destructive"
                       className="w-full"
                       onClick={() => handleDelete(selectedRecording.id)}

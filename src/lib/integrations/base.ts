@@ -3,7 +3,7 @@
  * All platform integrations must implement this interface
  */
 
-export type Platform = 'facebook' | 'whatsapp' | 'linkedin' | 'instagram' | 'google';
+export type Platform = 'facebook' | 'whatsapp' | 'linkedin' | 'instagram';
 
 export type SyncType = 'webhook' | 'manual' | 'scheduled';
 

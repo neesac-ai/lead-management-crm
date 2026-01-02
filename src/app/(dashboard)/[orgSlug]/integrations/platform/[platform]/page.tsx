@@ -8,14 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ArrowLeft, Plus, Loader2, RefreshCw, Settings, Trash2, AlertCircle } from 'lucide-react'
 import { FaFacebook, FaWhatsapp, FaLinkedin, FaInstagram } from 'react-icons/fa'
-import { SiGoogleads } from 'react-icons/si'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
 type Integration = {
   id: string
   name: string
-  platform: 'facebook' | 'whatsapp' | 'linkedin' | 'instagram' | 'google'
+  platform: 'facebook' | 'whatsapp' | 'linkedin' | 'instagram'
   is_active: boolean
   sync_status: 'idle' | 'syncing' | 'error'
   last_sync_at: string | null
@@ -47,12 +46,6 @@ const PLATFORM_INFO: Record<string, { label: string; icon: React.ComponentType<{
     icon: FaInstagram,
     iconColor: 'text-pink-600',
     description: 'Manage your Instagram Lead Ads integrations',
-  },
-  google: {
-    label: 'Google Ads Lead Forms',
-    icon: SiGoogleads,
-    iconColor: 'text-blue-500',
-    description: 'Manage your Google Ads Lead Form integrations',
   },
 }
 
@@ -156,7 +149,7 @@ export default function PlatformIntegrationsPage() {
     description: `Manage your ${platform} integrations`,
   }
 
-  if (!['facebook', 'whatsapp', 'linkedin', 'instagram', 'google'].includes(platform)) {
+  if (!['facebook', 'whatsapp', 'linkedin', 'instagram'].includes(platform)) {
     return (
       <div className="flex h-screen flex-col">
         <Header />

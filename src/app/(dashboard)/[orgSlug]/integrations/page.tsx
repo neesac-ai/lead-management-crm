@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Plug, Loader2, AlertCircle, ChevronRight } from 'lucide-react'
 import { FaFacebook, FaWhatsapp, FaLinkedin, FaInstagram } from 'react-icons/fa'
-import { SiGoogleads } from 'react-icons/si'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
@@ -30,12 +29,12 @@ const PLATFORMS = [
     color: 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
   },
   { 
-    value: 'instagram', 
-    label: 'Instagram Lead Ads', 
-    icon: FaInstagram,
-    iconColor: 'text-pink-600',
-    description: 'Connect Instagram Lead Ads to capture leads from visual campaigns',
-    color: 'bg-pink-50 dark:bg-pink-950 border-pink-200 dark:border-pink-800'
+    value: 'whatsapp', 
+    label: 'WhatsApp Business API', 
+    icon: FaWhatsapp,
+    iconColor: 'text-green-500',
+    description: 'Connect WhatsApp Business API to capture leads from conversations',
+    color: 'bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800'
   },
   { 
     value: 'linkedin', 
@@ -46,20 +45,12 @@ const PLATFORMS = [
     color: 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
   },
   { 
-    value: 'whatsapp', 
-    label: 'WhatsApp Business API', 
-    icon: FaWhatsapp,
-    iconColor: 'text-green-500',
-    description: 'Connect WhatsApp Business API to capture leads from conversations',
-    color: 'bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800'
-  },
-  { 
-    value: 'google', 
-    label: 'Google Ads Lead Forms', 
-    icon: SiGoogleads,
-    iconColor: 'text-blue-500',
-    description: 'Connect Google Ads Lead Form Extensions to capture leads from search campaigns',
-    color: 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
+    value: 'instagram', 
+    label: 'Instagram Lead Ads', 
+    icon: FaInstagram,
+    iconColor: 'text-pink-600',
+    description: 'Connect Instagram Lead Ads to capture leads from visual campaigns',
+    color: 'bg-pink-50 dark:bg-pink-950 border-pink-200 dark:border-pink-800'
   },
 ] as const
 

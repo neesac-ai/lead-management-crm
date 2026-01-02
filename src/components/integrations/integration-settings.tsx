@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -12,8 +11,7 @@ import {
   XCircle, 
   Facebook,
   RefreshCw,
-  ExternalLink,
-  Copy
+  ExternalLink
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -52,93 +50,6 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
   const [facebookAppId, setFacebookAppId] = useState<string>('')
   const [facebookAppSecret, setFacebookAppSecret] = useState<string>('')
   const [isSavingCredentials, setIsSavingCredentials] = useState(false)
-  const [hasFacebookIntegration, setHasFacebookIntegration] = useState(false)
-  const [isLoadingFacebookCreds, setIsLoadingFacebookCreds] = useState(false)
-
-  const checkForFacebookIntegration = async () => {
-    try {
-      // Use API to fetch Facebook integrations
-      const response = await fetch('/api/integrations?platform=facebook')
-      if (!response.ok) {
-        console.log('Failed to fetch Facebook integrations:', response.status)
-        return // Silently fail
-      }
-
-      const data = await response.json()
-      const integrations = data.integrations || []
-      console.log('Found integrations:', integrations.length)
-      
-      // Check if there's a Facebook integration with credentials
-      const fbIntegration = integrations.find((i: { platform: string; config?: Record<string, unknown> }) => {
-        const hasCredentials = i.platform === 'facebook' && 
-          i.config?.facebook_app_id && 
-          i.config?.facebook_app_secret
-        console.log('Checking integration:', i.platform, 'has credentials:', !!hasCredentials)
-        return hasCredentials
-      })
-
-      if (fbIntegration) {
-        console.log('Facebook integration found with credentials, showing copy button')
-        setHasFacebookIntegration(true)
-      } else {
-        console.log('No Facebook integration with credentials found')
-      }
-    } catch (error) {
-      // Silently fail - not critical
-      console.error('Error checking for Facebook integration:', error)
-    }
-  }
-
-  const copyFromFacebookIntegration = async () => {
-    setIsLoadingFacebookCreds(true)
-    try {
-      // Fetch all integrations to find Facebook one
-      const response = await fetch('/api/integrations?platform=facebook')
-      if (!response.ok) {
-        throw new Error('Failed to fetch integrations')
-      }
-
-      const data = await response.json()
-      const integrations = data.integrations || []
-      
-      // Find Facebook integration with credentials
-      const fbIntegration = integrations.find((i: { 
-        platform: string
-        config?: Record<string, unknown>
-        credentials?: Record<string, unknown>
-      }) => 
-        i.platform === 'facebook' && 
-        i.config?.facebook_app_id && 
-        i.config?.facebook_app_secret
-      )
-
-      if (!fbIntegration) {
-        toast.error('No Facebook integration with credentials found. Make sure you have a Facebook integration configured first.')
-        return
-      }
-
-      const fbConfig = fbIntegration.config as Record<string, unknown>
-      const appId = fbConfig.facebook_app_id as string
-      const appSecret = fbConfig.facebook_app_secret as string
-
-      if (!appId || !appSecret) {
-        toast.error('Facebook integration does not have App credentials configured')
-        return
-      }
-
-      // Copy App ID and Secret
-      setFacebookAppId(appId)
-      setFacebookAppSecret(appSecret)
-      setHasFacebookIntegration(false) // Hide the button after copying
-      
-      toast.success('App ID and Secret copied! Click "Save App Credentials" to save them, then "Connect Instagram Account" to authorize.')
-    } catch (error) {
-      console.error('Error copying from Facebook integration:', error)
-      toast.error('Failed to copy credentials. Please check console for details.')
-    } finally {
-      setIsLoadingFacebookCreds(false)
-    }
-  }
 
   useEffect(() => {
     // Load saved ad accounts and campaigns from config
@@ -161,11 +72,6 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
     }
     if (config.facebook_app_secret) {
       setFacebookAppSecret(config.facebook_app_secret as string)
-    }
-
-    // For Instagram, check if there's a Facebook integration to copy from
-    if (integration.platform === 'instagram' && !config.facebook_app_id) {
-      checkForFacebookIntegration()
     }
   }, [integration])
 
@@ -193,7 +99,7 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
         throw new Error('Failed to save credentials')
       }
 
-      toast.success(`${integration.platform === 'instagram' ? 'Instagram' : 'Facebook'} App credentials saved`)
+      toast.success('Facebook App credentials saved')
       onUpdate()
     } catch (error) {
       console.error('Error saving credentials:', error)
@@ -226,7 +132,7 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
   }
 
   const handleDisconnect = async () => {
-    if (!confirm(`Are you sure you want to disconnect ${integration.platform === 'instagram' ? 'Instagram' : 'Facebook'}? This will remove all credentials.`)) {
+    if (!confirm('Are you sure you want to disconnect Facebook? This will remove all credentials.')) {
       return
     }
 
@@ -249,7 +155,7 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
         throw new Error('Failed to disconnect')
       }
 
-      toast.success(`${integration.platform === 'instagram' ? 'Instagram' : 'Facebook'} disconnected successfully`)
+      toast.success('Facebook disconnected successfully')
       onUpdate()
     } catch (error) {
       console.error('Error disconnecting:', error)
@@ -336,9 +242,8 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
     facebookAppId !== '' &&
     facebookAppSecret !== ''
 
-  // Only show Facebook/Instagram OAuth UI for Facebook and Instagram platforms
-  // Instagram uses the same Meta API as Facebook
-  if (integration.platform !== 'facebook' && integration.platform !== 'instagram') {
+  // Only show Facebook OAuth UI for Facebook platform
+  if (integration.platform !== 'facebook') {
     return (
       <Card>
         <CardHeader>
@@ -378,33 +283,9 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
               onChange={(e) => setFacebookAppId(e.target.value)}
               placeholder="Enter your Facebook App ID"
             />
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                Found in Facebook App Dashboard → Settings → Basic → App ID
-              </p>
-              {integration.platform === 'instagram' && hasFacebookIntegration && !facebookAppId && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={copyFromFacebookIntegration}
-                  disabled={isLoadingFacebookCreds}
-                  className="h-7 text-xs"
-                >
-                  {isLoadingFacebookCreds ? (
-                    <>
-                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                      Loading...
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3 h-3 mr-1" />
-                      Copy from Facebook
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Found in Facebook App Dashboard → Settings → Basic → App ID
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -453,11 +334,9 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
       {/* Connection Status */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            {integration.platform === 'instagram' ? 'Instagram' : 'Facebook'} Connection
-          </CardTitle>
+          <CardTitle>Facebook Connection</CardTitle>
           <CardDescription>
-            Connect your {integration.platform === 'instagram' ? 'Instagram' : 'Facebook'} account to automatically sync leads
+            Connect your Facebook account to automatically sync leads
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -468,9 +347,9 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
                 <AlertTitle>Not Connected</AlertTitle>
                 <AlertDescription>
                   {facebookAppId && facebookAppSecret ? (
-                    <>Click the button below to connect your {integration.platform === 'instagram' ? 'Instagram' : 'Facebook'} account. You'll be redirected to {integration.platform === 'instagram' ? 'Meta' : 'Facebook'} to authorize access.</>
+                    <>Click the button below to connect your Facebook account. You'll be redirected to Facebook to authorize access.</>
                   ) : (
-                    <>Please configure {integration.platform === 'instagram' ? 'Instagram' : 'Facebook'} App ID and App Secret above before connecting.</>
+                    <>Please configure Facebook App ID and App Secret above before connecting.</>
                   )}
                 </AlertDescription>
               </Alert>
@@ -488,7 +367,7 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
                 ) : (
                   <>
                     <Facebook className="w-4 h-4 mr-2" />
-                    Connect {integration.platform === 'instagram' ? 'Instagram' : 'Facebook'} Account
+                    Connect Facebook Account
                   </>
                 )}
               </Button>
@@ -499,7 +378,7 @@ export function IntegrationSettings({ integration, onUpdate }: IntegrationSettin
                 <div className="flex items-center gap-3">
                   <CheckCircle2 className="w-5 h-5 text-green-600" />
                   <div>
-                    <div className="font-medium">Connected to {integration.platform === 'instagram' ? 'Instagram' : 'Facebook'}</div>
+                    <div className="font-medium">Connected to Facebook</div>
                     {tokenExpiresAt && (
                       <div className="text-sm text-muted-foreground">
                         Token expires: {new Date(tokenExpiresAt).toLocaleDateString()}

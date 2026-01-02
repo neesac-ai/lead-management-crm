@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { exchangeCodeForToken, getLongLivedToken, getUserAdAccounts } from '@/lib/integrations/facebook-oauth';
-import { getIntegrationInstance } from '@/lib/integrations/factory';
+import { FacebookIntegration } from '@/lib/integrations/facebook';
 
 type Integration = {
   id: string;
@@ -105,8 +105,8 @@ export async function GET(
     // Fetch campaigns for the selected ad account
     let campaigns: Array<{ id: string; name: string }> = [];
     try {
-      const integrationInstance = getIntegrationInstance(integrationData.platform);
-      campaigns = await integrationInstance.fetchCampaigns(
+      const facebookIntegration = new FacebookIntegration();
+      campaigns = await facebookIntegration.fetchCampaigns(
         { access_token: longLivedToken.access_token },
         { ad_account_id: selectedAdAccount.id }
       );

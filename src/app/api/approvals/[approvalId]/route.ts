@@ -1,15 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { NextResponse } from 'next/server'
 
 export async function PATCH(
-  request: NextRequest,
+  request: Request,
   { params }: { params: Promise<{ approvalId: string }> }
 ) {
   try {
     const { approvalId } = await params
-    const { action, rejection_reason } = await request.json()
+    const body = await request.json()
+    const { action, rejection_reason } = body
 
-    if (!action || (action !== 'approve' && action !== 'reject')) {
+    if (!action || !['approve', 'reject'].includes(action)) {
       return NextResponse.json(
         { error: 'Invalid action. Must be "approve" or "reject"' },
         { status: 400 }
@@ -20,33 +21,31 @@ export async function PATCH(
     const adminSupabase = await createAdminClient()
 
     // Get current user
-    const { data: { user: authUser } } = await supabase.auth.getUser()
-    if (!authUser) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Get user profile
     const { data: profile } = await adminSupabase
       .from('users')
       .select('id, role, org_id')
-      .eq('auth_id', authUser.id)
+      .eq('auth_id', user.id)
       .single()
 
     if (!profile) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    // Only accountant can approve/reject
-    if (profile.role !== 'accountant' && profile.role !== 'admin' && profile.role !== 'super_admin') {
-      return NextResponse.json(
-        { error: 'Only accountants and admins can approve subscriptions' },
-        { status: 403 }
-      )
+    // Check if user is accountant, admin, or super_admin
+    if (!['accountant', 'admin', 'super_admin'].includes(profile.role)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // Get the approval record
     const { data: approval, error: approvalError } = await adminSupabase
       .from('subscription_approvals')
-      .select('*, leads(org_id)')
+      .select('*, org_id, lead_id')
       .eq('id', approvalId)
       .single()
 
@@ -58,18 +57,14 @@ export async function PATCH(
     }
 
     // Verify org access
-    const leadOrgId = (approval.leads as { org_id: string })?.org_id
-    if (leadOrgId !== profile.org_id && profile.role !== 'super_admin') {
-      return NextResponse.json(
-        { error: 'Access denied' },
-        { status: 403 }
-      )
+    if (approval.org_id !== profile.org_id && profile.role !== 'super_admin') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    // Verify approval is pending
+    // Check if already processed
     if (approval.status !== 'pending') {
       return NextResponse.json(
-        { error: `Approval is already ${approval.status}` },
+        { error: `Approval already ${approval.status}` },
         { status: 400 }
       )
     }
@@ -89,12 +84,12 @@ export async function PATCH(
       if (updateError) {
         console.error('Error updating approval:', updateError)
         return NextResponse.json(
-          { error: 'Failed to approve subscription' },
+          { error: 'Failed to update approval' },
           { status: 500 }
         )
       }
 
-      // Create subscription from approval using the database function
+      // Create subscription using the database function
       const { data: subscriptionId, error: createError } = await adminSupabase
         .rpc('create_subscription_from_approval', { approval_id: approvalId })
 
@@ -107,11 +102,12 @@ export async function PATCH(
             status: 'pending',
             approved_by: null,
             approved_at: null,
+            updated_at: new Date().toISOString(),
           })
           .eq('id', approvalId)
 
         return NextResponse.json(
-          { error: 'Failed to create subscription. Please try again.' },
+          { error: 'Failed to create subscription: ' + createError.message },
           { status: 500 }
         )
       }
@@ -123,21 +119,28 @@ export async function PATCH(
       })
     } else {
       // Reject approval
+      if (!rejection_reason || !rejection_reason.trim()) {
+        return NextResponse.json(
+          { error: 'Rejection reason is required' },
+          { status: 400 }
+        )
+      }
+
       const { error: updateError } = await adminSupabase
         .from('subscription_approvals')
         .update({
           status: 'rejected',
           approved_by: profile.id,
           approved_at: new Date().toISOString(),
-          rejection_reason: rejection_reason || null,
+          rejection_reason: rejection_reason.trim(),
           updated_at: new Date().toISOString(),
         })
         .eq('id', approvalId)
 
       if (updateError) {
-        console.error('Error rejecting approval:', updateError)
+        console.error('Error updating approval:', updateError)
         return NextResponse.json(
-          { error: 'Failed to reject subscription' },
+          { error: 'Failed to reject approval' },
           { status: 500 }
         )
       }
@@ -148,7 +151,7 @@ export async function PATCH(
       })
     }
   } catch (error) {
-    console.error('Approval error:', error)
+    console.error('Approval action error:', error)
     return NextResponse.json(
       { error: 'An unexpected error occurred' },
       { status: 500 }

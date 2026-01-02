@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getIntegrationInstance } from '@/lib/integrations/factory';
+import { FacebookIntegration } from '@/lib/integrations/facebook';
 import { mapLeadData, validateMappedLead, getSourceFromPlatform } from '@/lib/integrations/mapper';
 import { assignLead } from '@/lib/integrations/assignment';
 
@@ -48,16 +48,19 @@ export async function POST(request: NextRequest) {
       try {
         // Get integration instance
         let integrationInstance;
-        try {
-          integrationInstance = getIntegrationInstance(integration.platform);
-        } catch (error) {
-          results.push({
-            integration_id: integration.id,
-            integration_name: integration.name,
-            status: 'skipped',
-            message: `Unsupported platform: ${integration.platform}`,
-          });
-          continue;
+        switch (integration.platform) {
+          case 'facebook':
+            integrationInstance = new FacebookIntegration();
+            break;
+          // Add other platforms as they're implemented
+          default:
+            results.push({
+              integration_id: integration.id,
+              integration_name: integration.name,
+              status: 'skipped',
+              message: `Platform ${integration.platform} not yet implemented`,
+            });
+            continue;
         }
 
         // Update sync status

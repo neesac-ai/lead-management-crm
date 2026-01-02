@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getIntegrationInstance } from '@/lib/integrations/factory';
+import { FacebookIntegration } from '@/lib/integrations/facebook';
 
 export async function GET(
   request: NextRequest,
@@ -54,13 +54,16 @@ export async function GET(
 
     // Get integration instance based on platform
     let integrationInstance;
-    try {
-      integrationInstance = getIntegrationInstance(integration.platform);
-    } catch (error) {
-      return NextResponse.json(
-        { error: `Unsupported platform: ${integration.platform}` },
-        { status: 501 }
-      );
+    switch (integration.platform) {
+      case 'facebook':
+        integrationInstance = new FacebookIntegration();
+        break;
+      // Add other platforms as they're implemented
+      default:
+        return NextResponse.json(
+          { error: `Campaign fetching not yet implemented for ${integration.platform}` },
+          { status: 501 }
+        );
     }
 
     // Fetch campaigns from platform
