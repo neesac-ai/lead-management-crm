@@ -976,8 +976,22 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                         })
 
                         if (!response.ok) {
-                          const data = await response.json()
-                          throw new Error(data.error || 'Failed to update lead')
+                          // Try to parse error response, but handle cases where response might not be JSON
+                          let errorMessage = 'Failed to update lead'
+                          try {
+                            const contentType = response.headers.get('content-type')
+                            if (contentType && contentType.includes('application/json')) {
+                              const data = await response.json()
+                              errorMessage = data.error || data.message || errorMessage
+                            } else {
+                              const text = await response.text()
+                              errorMessage = text || errorMessage
+                            }
+                          } catch (parseError) {
+                            // If parsing fails, use status text or default message
+                            errorMessage = response.statusText || errorMessage
+                          }
+                          throw new Error(errorMessage)
                         }
 
                         const data = await response.json()
