@@ -1676,10 +1676,28 @@ export default function LeadsPage() {
                 {filteredLeads.map((lead, index) => (
                   <div
                     key={lead.id}
+                    role="button"
+                    tabIndex={0}
                     className="p-4 rounded-lg border bg-card transition-colors hover:bg-muted/50 cursor-pointer"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
                       setSelectedLead(lead)
                       setIsDetailOpen(true)
+                    }}
+                    onMouseDown={(e) => {
+                      // Prevent browser from treating this as a link navigation
+                      if (e.button === 0) { // Left click only
+                        e.preventDefault()
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      // Support keyboard navigation
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setSelectedLead(lead)
+                        setIsDetailOpen(true)
+                      }
                     }}
                   >
                     {/* Top row: Checkbox (Admin) + Serial + Phone (primary) + Status + Delete */}
