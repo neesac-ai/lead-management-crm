@@ -1678,27 +1678,43 @@ export default function LeadsPage() {
                     key={lead.id}
                     role="button"
                     tabIndex={0}
+                    data-no-navigation="true"
                     className="p-4 rounded-lg border bg-card transition-colors hover:bg-muted/50 cursor-pointer"
                     onClick={(e) => {
+                      // Prevent all default behaviors and navigation
+                      // This is critical to prevent 404 errors in some browsers/locations
                       e.preventDefault()
                       e.stopPropagation()
+
+                      // Open dialog immediately
                       setSelectedLead(lead)
                       setIsDetailOpen(true)
+
+                      return false
                     }}
                     onMouseDown={(e) => {
                       // Prevent browser from treating this as a link navigation
+                      // This fires before onClick and prevents default link behavior
                       if (e.button === 0) { // Left click only
                         e.preventDefault()
+                        e.stopPropagation()
                       }
                     }}
                     onKeyDown={(e) => {
                       // Support keyboard navigation
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault()
+                        e.stopPropagation()
                         setSelectedLead(lead)
                         setIsDetailOpen(true)
                       }
                     }}
+                    onAuxClick={(e) => {
+                      // Prevent middle-click or right-click navigation
+                      e.preventDefault()
+                      e.stopPropagation()
+                    }}
+                    style={{ userSelect: 'none' }}
                   >
                     {/* Top row: Checkbox (Admin) + Serial + Phone (primary) + Status + Delete */}
                     <div className="flex items-start justify-between gap-2 mb-2">
