@@ -54,9 +54,14 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="BharatCRM" />
         <link rel="apple-touch-icon" href="/icons/ios/180.png" />
-        
+
         {/* Splash screens for iOS */}
         <link rel="apple-touch-startup-image" href="/icons/android/android-launchericon-512-512.png" />
+
+        {/* Cache control meta tags to prevent location-specific caching issues */}
+        <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+        <meta httpEquiv="Pragma" content="no-cache" />
+        <meta httpEquiv="Expires" content="0" />
       </head>
       <body className={`${outfit.variable} font-sans antialiased`}>
         {children}

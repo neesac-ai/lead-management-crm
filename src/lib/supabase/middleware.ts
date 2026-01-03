@@ -50,8 +50,8 @@ export async function updateSession(request: NextRequest) {
   const isApiRoute = pathname.startsWith('/api')
 
   // Static assets
-  const isStaticAsset = pathname.startsWith('/_next') || 
-                        pathname.startsWith('/favicon') || 
+  const isStaticAsset = pathname.startsWith('/_next') ||
+                        pathname.startsWith('/favicon') ||
                         pathname.includes('.')
 
   if (isStaticAsset || isApiRoute) {
@@ -98,7 +98,7 @@ export async function updateSession(request: NextRequest) {
       // If trying to access auth pages while logged in
       if (isPublicRoute) {
         const url = request.nextUrl.clone()
-        
+
         if (role === 'super_admin') {
           url.pathname = '/super-admin'
         } else if (org_id && is_approved) {
@@ -109,6 +109,23 @@ export async function updateSession(request: NextRequest) {
         return NextResponse.redirect(url)
       }
     }
+  }
+
+  // Add cache-control headers to prevent location-specific caching issues
+  // This ensures all regions (Bangalore, Ahmedabad, etc.) get fresh content
+  // NOTE: These are HTTP response headers only - they don't affect RLS policies or Supabase auth
+  const isHtmlPage = !isStaticAsset && !isApiRoute &&
+                     !pathname.includes('.') &&
+                     request.headers.get('accept')?.includes('text/html')
+
+  if (isHtmlPage) {
+    // Set cache-control headers to prevent CDN/edge/proxy caching
+    // This ensures Ahmedabad and Bangalore get the same fresh content
+    supabaseResponse.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0')
+    supabaseResponse.headers.set('Pragma', 'no-cache')
+    supabaseResponse.headers.set('Expires', '0')
+    // Add version header for debugging
+    supabaseResponse.headers.set('X-App-Version', '1.0.5')
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're

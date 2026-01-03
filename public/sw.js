@@ -1,5 +1,6 @@
 // Service Worker for Lead Management CRM
-const CACHE_NAME = 'lead-crm-v4';
+// Version bump to force cache refresh for location-specific issues (Ahmedabad vs Bangalore)
+const CACHE_NAME = 'lead-crm-v5';
 const OFFLINE_URL = '/offline.html';
 
 // Files to cache for offline use
@@ -43,11 +44,35 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
-  // Skip API calls and auth requests (always need fresh data)
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/') || 
+
+  // Skip API calls and auth requests (always need fresh data)
+  if (url.pathname.startsWith('/api/') ||
       url.pathname.includes('supabase') ||
       url.pathname.includes('auth')) {
+    return;
+  }
+
+  // For HTML pages (navigation), always fetch fresh to avoid location-specific cache issues
+  // This ensures Ahmedabad and Bangalore get the same fresh content
+  if (event.request.mode === 'navigate' ||
+      event.request.headers.get('accept')?.includes('text/html')) {
+    event.respondWith(
+      fetch(event.request, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      })
+        .then((response) => {
+          // Don't cache HTML pages - always fetch fresh
+          return response;
+        })
+        .catch(() => {
+          // Only fallback to offline page if network completely fails
+          return caches.match(OFFLINE_URL);
+        })
+    );
     return;
   }
 
@@ -56,14 +81,14 @@ self.addEventListener('fetch', (event) => {
       .then((response) => {
         // Clone the response before caching
         const responseClone = response.clone();
-        
+
         // Cache successful responses
         if (response.status === 200) {
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseClone);
           });
         }
-        
+
         return response;
       })
       .catch(() => {
@@ -72,12 +97,12 @@ self.addEventListener('fetch', (event) => {
           if (cachedResponse) {
             return cachedResponse;
           }
-          
+
           // If it's a navigation request, show offline page
           if (event.request.mode === 'navigate') {
             return caches.match(OFFLINE_URL);
           }
-          
+
           return new Response('Offline', { status: 503 });
         });
       })
@@ -97,7 +122,7 @@ self.addEventListener('push', (event) => {
         url: data.url || '/',
       },
     };
-    
+
     event.waitUntil(
       self.registration.showNotification(data.title, options)
     );
@@ -107,7 +132,7 @@ self.addEventListener('push', (event) => {
 // Handle notification clicks
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  
+
   event.waitUntil(
     clients.openWindow(event.notification.data.url)
   );
