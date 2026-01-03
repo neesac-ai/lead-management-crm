@@ -209,6 +209,12 @@ export default function LeadsPage() {
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false)
   const [isCheckingDuplicate, setIsCheckingDuplicate] = useState(false)
 
+  // Ref to prevent duplicate submissions (more reliable than state for race conditions)
+  const isSubmittingRef = useRef(false)
+  const lastSubmittedPhoneRef = useRef<string | null>(null)
+  const formSubmissionIdRef = useRef<string | null>(null)
+  const formSubmissionTimeRef = useRef<number>(0)
+
 
   // Import dialog state
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
@@ -688,38 +694,101 @@ export default function LeadsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    e.stopPropagation() // Prevent event bubbling (browser extensions might trigger multiple events)
+
     if (!orgId || !userProfile) return
 
-    // First check for duplicates
-    setIsCheckingDuplicate(true)
-    const duplicate = await checkDuplicate(formData.phone)
-    setIsCheckingDuplicate(false)
+    // Generate unique submission ID to prevent browser replay attacks
+    const submissionId = `${Date.now()}-${Math.random().toString(36).substring(7)}`
+    const currentTime = Date.now()
 
-    if (duplicate) {
-      setDuplicateLead(duplicate)
-
-      // For sales rep - just show message and skip
-      if (userProfile.role === 'sales') {
-        if (duplicate.assigned_to) {
-          toast.error(`Lead already assigned to ${duplicate.assignee_name || 'another rep'}. Skipped.`)
-        } else {
-          toast.error('Lead already exists in the system. Skipped.')
-        }
-        return
-      }
-
-      // For admin - show dialog with options
-      setShowDuplicateDialog(true)
+    // Prevent duplicate submissions - check both state and ref
+    if (isSaving || isCheckingDuplicate || isSubmittingRef.current) {
+      console.warn('[DUPLICATE PREVENTION] Submission already in progress, ignoring duplicate request')
       return
     }
 
-    // No duplicate - proceed with adding
-    await addLead()
+    // Prevent rapid re-submissions (within 1 second)
+    if (currentTime - formSubmissionTimeRef.current < 1000) {
+      console.warn('[DUPLICATE PREVENTION] Too soon after last submission, ignoring')
+      toast.warning('Please wait before submitting again')
+      return
+    }
+
+    // Prevent if same submission ID (browser might be replaying the event)
+    if (formSubmissionIdRef.current === submissionId) {
+      console.warn('[DUPLICATE PREVENTION] Duplicate submission ID detected, ignoring')
+      return
+    }
+
+    // Prevent submitting the same phone number twice in quick succession
+    const normalizedPhone = normalizePhone(formData.phone)
+    if (lastSubmittedPhoneRef.current === normalizedPhone && currentTime - formSubmissionTimeRef.current < 3000) {
+      console.warn('[DUPLICATE PREVENTION] Same phone number submitted recently, ignoring duplicate request')
+      toast.warning('Please wait, submission in progress...')
+      return
+    }
+
+    // Mark as submitting with unique ID
+    isSubmittingRef.current = true
+    lastSubmittedPhoneRef.current = normalizedPhone
+    formSubmissionIdRef.current = submissionId
+    formSubmissionTimeRef.current = currentTime
+
+    try {
+      // First check for duplicates
+      setIsCheckingDuplicate(true)
+      const duplicate = await checkDuplicate(formData.phone)
+      setIsCheckingDuplicate(false)
+
+      if (duplicate) {
+        setDuplicateLead(duplicate)
+
+        // For sales rep - just show message and skip
+        if (userProfile.role === 'sales') {
+          if (duplicate.assigned_to) {
+            toast.error(`Lead already assigned to ${duplicate.assignee_name || 'another rep'}. Skipped.`)
+          } else {
+            toast.error('Lead already exists in the system. Skipped.')
+          }
+          // Reset flags since we're not proceeding
+          isSubmittingRef.current = false
+          setIsCheckingDuplicate(false)
+          return
+        }
+
+        // For admin - show dialog with options
+        setShowDuplicateDialog(true)
+        // Keep isSubmittingRef true until user decides what to do
+        // Reset checking flag
+        setIsCheckingDuplicate(false)
+        return
+      }
+
+      // No duplicate - proceed with adding
+      await addLead()
+    } catch (error) {
+      // Reset flags immediately on error so user can retry
+      isSubmittingRef.current = false
+      setIsSaving(false)
+      setIsCheckingDuplicate(false)
+      console.error('Error submitting lead:', error)
+    } finally {
+      // Reset submission flag after a delay to prevent rapid re-submissions
+      // Only reset if not already reset in catch block
+      setTimeout(() => {
+        isSubmittingRef.current = false
+        lastSubmittedPhoneRef.current = null
+        formSubmissionIdRef.current = null
+      }, 2000) // 2 second cooldown
+    }
   }
 
   const addLead = async (forceAdd = false) => {
     if (!orgId || !userProfile) return
 
+    // Note: Duplicate prevention is handled in handleSubmit, so we don't check here
+    // This allows the function to proceed when called legitimately from handleSubmit
     setIsSaving(true)
     const supabase = createClient()
 
@@ -771,6 +840,12 @@ export default function LeadsPage() {
       fetchLeads(userProfile)
     }
     setIsSaving(false)
+    // Note: isSubmittingRef is reset in handleSubmit's finally block
+    // Reset phone ref and submission ID after successful submission
+    setTimeout(() => {
+      lastSubmittedPhoneRef.current = null
+      formSubmissionIdRef.current = null
+    }, 1000)
   }
 
   const handleDuplicateAction = async (action: 'ignore' | 'add_anyway' | 'view_existing') => {
@@ -778,7 +853,18 @@ export default function LeadsPage() {
       setShowDuplicateDialog(false)
       setDuplicateLead(null)
       toast.info('Lead skipped')
+      // Reset submission flags
+      isSubmittingRef.current = false
+      lastSubmittedPhoneRef.current = null
+      formSubmissionIdRef.current = null
+      formSubmissionTimeRef.current = 0
+      setIsSaving(false)
+      setIsCheckingDuplicate(false)
     } else if (action === 'add_anyway') {
+      // Reset the submission ref to allow addLead to proceed
+      // The duplicate check already happened, so we can proceed
+      isSubmittingRef.current = false
+      setIsCheckingDuplicate(false)
       await addLead(true)
     } else if (action === 'view_existing' && duplicateLead) {
       // Find and open the existing lead
@@ -789,6 +875,13 @@ export default function LeadsPage() {
       }
       setShowDuplicateDialog(false)
       setDuplicateLead(null)
+      // Reset submission flags
+      isSubmittingRef.current = false
+      lastSubmittedPhoneRef.current = null
+      formSubmissionIdRef.current = null
+      formSubmissionTimeRef.current = 0
+      setIsSaving(false)
+      setIsCheckingDuplicate(false)
     }
   }
 
@@ -1880,9 +1973,25 @@ export default function LeadsPage() {
           </AlertDialog>
 
           {/* Add Lead Dialog */}
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open)
+            // Reset submission flags when dialog closes
+            if (!open) {
+              isSubmittingRef.current = false
+              lastSubmittedPhoneRef.current = null
+              formSubmissionIdRef.current = null
+              formSubmissionTimeRef.current = 0
+              setIsSaving(false)
+              setIsCheckingDuplicate(false)
+            }
+          }}>
             <DialogContent>
-              <form onSubmit={handleSubmit}>
+              <form
+                onSubmit={handleSubmit}
+                autoComplete="off"
+                noValidate
+                id="add-lead-form"
+              >
                 <DialogHeader>
                   <DialogTitle>Add New Lead</DialogTitle>
                   <DialogDescription>
@@ -1895,9 +2004,12 @@ export default function LeadsPage() {
                       <Label htmlFor="phone">Phone *</Label>
                       <Input
                         id="phone"
+                        name="phone"
+                        type="tel"
                         placeholder="+91 98765 43210"
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        autoComplete="off"
                         required
                       />
                     </div>
@@ -1905,9 +2017,12 @@ export default function LeadsPage() {
                       <Label htmlFor="name">Name</Label>
                       <Input
                         id="name"
+                        name="name"
+                        type="text"
                         placeholder="John Doe"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        autoComplete="off"
                       />
                     </div>
                   </div>
@@ -1916,19 +2031,24 @@ export default function LeadsPage() {
                       <Label htmlFor="company">Company</Label>
                       <Input
                         id="company"
+                        name="company"
+                        type="text"
                         placeholder="Acme Inc."
                         value={formData.company}
                         onChange={(e) => setFormData({ ...formData, company: e.target.value })}
+                        autoComplete="off"
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
+                        name="email"
                         type="email"
                         placeholder="john@example.com"
                         value={formData.email}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        autoComplete="off"
                       />
                     </div>
                   </div>
@@ -1960,11 +2080,11 @@ export default function LeadsPage() {
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" disabled={isSaving}>
-                    {isSaving ? (
+                  <Button type="submit" disabled={isSaving || isCheckingDuplicate || isSubmittingRef.current}>
+                    {isSaving || isCheckingDuplicate || isSubmittingRef.current ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
+                        {isCheckingDuplicate ? 'Checking...' : 'Saving...'}
                       </>
                     ) : (
                       'Add Lead'
