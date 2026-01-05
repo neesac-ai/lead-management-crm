@@ -1,6 +1,6 @@
 // Service Worker for Lead Management CRM
 // Version bump to force cache refresh for location-specific issues (Ahmedabad vs Bangalore)
-const CACHE_NAME = 'lead-crm-v5';
+const CACHE_NAME = 'lead-crm-v6';
 const OFFLINE_URL = '/offline.html';
 
 // Files to cache for offline use

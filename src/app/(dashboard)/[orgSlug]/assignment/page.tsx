@@ -389,51 +389,53 @@ export default function AssignmentPage() {
         description="Assign leads to your sales team"
       />
 
-      <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
+      <div className="flex-1 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6 space-y-3 sm:space-y-4 lg:space-y-6">
         {/* Sales Team Allocation */}
         <Card>
-          <CardHeader className="px-4 lg:px-6">
-            <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
-              <Users className="h-5 w-5" />
+          <CardHeader className="p-3 sm:p-4 lg:p-6">
+            <CardTitle className="text-sm sm:text-base lg:text-lg flex items-center gap-1.5 sm:gap-2">
+              <Users className="h-4 w-4 sm:h-5 sm:w-5" />
               Sales Team Allocation
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-xs sm:text-sm">
               Set % allocation for auto-assignment
             </CardDescription>
           </CardHeader>
-          <CardContent className="px-4 lg:px-6">
+          <CardContent className="p-3 sm:p-4 lg:p-6 pt-0">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : salesTeam.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-2 sm:space-y-3">
                 {salesTeam.map((sales) => (
-                  <div key={sales.id} className="flex items-center gap-3 p-3 border rounded-lg">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <User className="w-4 h-4 text-primary" />
+                  <div key={sales.id} className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 p-2 sm:p-3 border rounded-lg">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+                      <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                        <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm sm:text-base truncate">{sales.name}</p>
+                        <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{sales.email}</p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{sales.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{sales.email}</p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0 self-start sm:self-auto">
                       <input
                         type="number"
                         min="0"
                         max="100"
                         value={sales.lead_allocation_percent || 0}
                         onChange={(e) => updateAllocation(sales.id, parseInt(e.target.value) || 0)}
-                        className="w-14 px-2 py-1 border rounded text-center text-sm"
+                        className="w-12 sm:w-14 px-1.5 sm:px-2 py-1 border rounded text-center text-xs sm:text-sm"
                       />
-                      <span className="text-sm text-muted-foreground">%</span>
+                      <span className="text-xs sm:text-sm text-muted-foreground">%</span>
                     </div>
                   </div>
                 ))}
                 <div className="flex items-center justify-between pt-2 border-t">
-                  <span className="text-sm font-medium">Total:</span>
-                  <span className={`text-sm font-bold ${salesTeam.reduce((sum, s) => sum + (s.lead_allocation_percent || 0), 0) === 100
-                      ? 'text-green-500' : 'text-red-500'
+                  <span className="text-xs sm:text-sm font-medium">Total:</span>
+                  <span className={`text-xs sm:text-sm font-bold ${salesTeam.reduce((sum, s) => sum + (s.lead_allocation_percent || 0), 0) === 100
+                    ? 'text-green-500' : 'text-red-500'
                     }`}>
                     {salesTeam.reduce((sum, s) => sum + (s.lead_allocation_percent || 0), 0)}%
                   </span>
@@ -442,8 +444,8 @@ export default function AssignmentPage() {
             ) : (
               <div className="text-center py-8 text-muted-foreground">
                 <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p>No approved sales team members</p>
-                <p className="text-sm">Approve sales registrations in the Team page first</p>
+                <p className="text-sm sm:text-base">No approved sales team members</p>
+                <p className="text-xs sm:text-sm">Approve sales registrations in the Team page first</p>
               </div>
             )}
           </CardContent>
@@ -451,13 +453,13 @@ export default function AssignmentPage() {
 
         {/* Unassigned Leads */}
         <Card>
-          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-4 lg:px-6">
+          <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 p-3 sm:p-4 lg:p-6">
             <div>
-              <CardTitle className="flex items-center gap-2 text-base lg:text-lg">
-                <Target className="h-5 w-5" />
+              <CardTitle className="text-sm sm:text-base lg:text-lg flex items-center gap-1.5 sm:gap-2">
+                <Target className="h-4 w-4 sm:h-5 sm:w-5" />
                 Unassigned ({unassignedLeads.length})
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-xs sm:text-sm">
                 Assign leads to sales team
               </CardDescription>
             </div>
@@ -466,13 +468,13 @@ export default function AssignmentPage() {
               size="sm"
               onClick={handleAutoAssign}
               disabled={isAssigning || unassignedLeads.length === 0 || salesTeam.length === 0}
-              className="w-full sm:w-auto"
+              className="w-full sm:w-auto h-8 sm:h-9 text-xs sm:text-sm"
             >
-              {isAssigning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {isAssigning ? <Loader2 className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" /> : null}
               Auto-Assign All
             </Button>
           </CardHeader>
-          <CardContent className="px-4 lg:px-6">
+          <CardContent className="p-3 sm:p-4 lg:p-6 pt-0">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -480,36 +482,37 @@ export default function AssignmentPage() {
             ) : unassignedLeads.length > 0 ? (
               <>
                 {/* Manual Assignment Controls */}
-                <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4 p-3 bg-muted/50 rounded-lg">
+                <div className="flex flex-col gap-2 sm:gap-3 mb-3 sm:mb-4 p-2 sm:p-3 bg-muted/50 rounded-lg">
                   <div className="flex items-center gap-2">
                     <Checkbox
                       checked={selectedLeads.length === unassignedLeads.length}
                       onCheckedChange={handleSelectAll}
                     />
-                    <span className="text-sm font-medium">
+                    <span className="text-xs sm:text-sm font-medium">
                       {selectedLeads.length} selected
                     </span>
                   </div>
-                  <div className="flex flex-1 items-center gap-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1">
                     <Select value={selectedSales} onValueChange={setSelectedSales}>
-                      <SelectTrigger className="flex-1 sm:w-[180px]">
+                      <SelectTrigger className="w-full sm:w-[180px] h-8 sm:h-9 text-xs sm:text-sm">
                         <SelectValue placeholder="Select person" />
                       </SelectTrigger>
                       <SelectContent>
-                            {salesTeam.map((sales) => (
-                              <SelectItem key={sales.id} value={sales.id}>
-                                {sales.name} ({sales.email})
-                              </SelectItem>
-                            ))}
+                        {salesTeam.map((sales) => (
+                          <SelectItem key={sales.id} value={sales.id}>
+                            {sales.name} ({sales.email})
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     <Button
                       size="sm"
                       onClick={handleAssign}
                       disabled={isAssigning || selectedLeads.length === 0 || !selectedSales}
+                      className="h-8 sm:h-9 text-xs sm:text-sm"
                     >
-                      {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-                      <span className="hidden sm:inline ml-2">Assign</span>
+                      {isAssigning ? <Loader2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" /> : <UserPlus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+                      <span className="hidden sm:inline ml-1.5 sm:ml-2">Assign</span>
                     </Button>
                   </div>
                 </div>
@@ -519,29 +522,29 @@ export default function AssignmentPage() {
                   {unassignedLeads.map((lead) => (
                     <div
                       key={lead.id}
-                      className={`p-3 border rounded-lg cursor-pointer transition-colors ${selectedLeads.includes(lead.id) ? 'bg-primary/10 border-primary' : ''
+                      className={`p-2 sm:p-3 border rounded-lg cursor-pointer transition-colors ${selectedLeads.includes(lead.id) ? 'bg-primary/10 border-primary' : ''
                         }`}
                       onClick={() => handleSelectLead(lead.id)}
                     >
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-2 sm:gap-3">
                         <Checkbox
                           checked={selectedLeads.includes(lead.id)}
                           onCheckedChange={() => handleSelectLead(lead.id)}
-                          className="mt-1"
+                          className="mt-0.5 sm:mt-1"
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-medium truncate">{lead.name}</p>
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-sm sm:text-base truncate">{lead.name}</p>
                               {lead.custom_fields?.company && (
-                                <p className="text-sm text-muted-foreground truncate">
+                                <p className="text-xs sm:text-sm text-muted-foreground truncate">
                                   {lead.custom_fields.company}
                                 </p>
                               )}
                             </div>
-                            <Badge variant="outline" className="shrink-0">{lead.status}</Badge>
+                            <Badge variant="outline" className="shrink-0 text-xs w-fit">{lead.status}</Badge>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-1 truncate">{lead.email || 'No email'}</p>
+                          <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 truncate">{lead.email || 'No email'}</p>
                         </div>
                       </div>
                     </div>
@@ -549,10 +552,10 @@ export default function AssignmentPage() {
                 </div>
               </>
             ) : (
-              <div className="text-center py-12 text-muted-foreground">
-                <UserPlus className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-medium">All leads are assigned</p>
-                <p className="text-sm">New unassigned leads will appear here</p>
+              <div className="text-center py-8 sm:py-12 text-muted-foreground">
+                <UserPlus className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-2 sm:mb-4 opacity-50" />
+                <p className="text-sm sm:text-lg font-medium">All leads are assigned</p>
+                <p className="text-xs sm:text-sm">New unassigned leads will appear here</p>
               </div>
             )}
           </CardContent>

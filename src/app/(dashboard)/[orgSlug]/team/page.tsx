@@ -138,42 +138,42 @@ export default async function TeamPage({
           description="Manage your team members and approval requests"
         />
 
-        <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
+        <div className="flex-1 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6 space-y-3 sm:space-y-4 lg:space-y-6">
           {/* Org Code Card */}
           <OrgCodeCard orgCode={org.org_code} />
 
           {/* Stats */}
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+          <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Total Team</CardTitle>
+              <CardHeader className="pb-2 p-3 sm:p-6">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Team</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{team.length}</div>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="text-xl sm:text-2xl font-bold">{team.length}</div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Active</CardTitle>
+              <CardHeader className="pb-2 p-3 sm:p-6">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Active</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-500">{activeMembers.length}</div>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="text-xl sm:text-2xl font-bold text-green-500">{activeMembers.length}</div>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Inactive</CardTitle>
+              <CardHeader className="pb-2 p-3 sm:p-6">
+                <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Inactive</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-gray-400">{inactiveMembers.length}</div>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="text-xl sm:text-2xl font-bold text-gray-400">{inactiveMembers.length}</div>
               </CardContent>
             </Card>
             <Card className="border-yellow-500/30 bg-yellow-500/5">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-yellow-600">Pending</CardTitle>
+              <CardHeader className="pb-2 p-3 sm:p-6">
+                <CardTitle className="text-xs sm:text-sm font-medium text-yellow-600">Pending</CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-yellow-600">{pendingMembers.length}</div>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="text-xl sm:text-2xl font-bold text-yellow-600">{pendingMembers.length}</div>
               </CardContent>
             </Card>
           </div>
@@ -184,39 +184,39 @@ export default async function TeamPage({
           {/* Pending Approvals */}
           {pendingMembers.length > 0 && (
             <Card className="border-yellow-500/30 bg-yellow-500/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-yellow-600">
-                  <Clock className="h-5 w-5" />
+              <CardHeader className="p-3 sm:p-6">
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2 text-yellow-600">
+                  <Clock className="h-4 w-4 sm:h-5 sm:w-5" />
                   Pending Approvals
                 </CardTitle>
-                <CardDescription>Review and approve team member requests</CardDescription>
+                <CardDescription className="text-xs sm:text-sm">Review and approve team member requests</CardDescription>
               </CardHeader>
-              <CardContent className="px-4 lg:px-6">
-                <div className="space-y-3">
+              <CardContent className="p-3 sm:p-4 lg:p-6 pt-0">
+                <div className="space-y-2 sm:space-y-3">
                   {pendingMembers.map((member) => (
                     <div
                       key={member.id}
-                      className="p-4 rounded-lg border border-yellow-500/30 bg-background"
+                      className="p-3 sm:p-4 rounded-lg border border-yellow-500/30 bg-background"
                     >
-                      <div className="flex items-start gap-3 mb-3">
-                        <Avatar className="h-10 w-10 shrink-0">
+                      <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-3">
+                        <Avatar className="h-8 w-8 sm:h-10 sm:w-10 shrink-0">
                           <AvatarImage src={member.avatar_url || undefined} />
-                          <AvatarFallback className="bg-yellow-500/20 text-yellow-600">
+                          <AvatarFallback className="bg-yellow-500/20 text-yellow-600 text-xs sm:text-sm">
                             {member.name?.charAt(0).toUpperCase() || 'U'}
                           </AvatarFallback>
                         </Avatar>
                         <div className="flex-1 min-w-0">
-                          <p className="font-semibold truncate">{member.name}</p>
-                          <p className="text-sm text-muted-foreground truncate">{member.email}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
+                          <p className="font-semibold text-sm sm:text-base truncate">{member.name}</p>
+                          <p className="text-xs sm:text-sm text-muted-foreground truncate">{member.email}</p>
+                          <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
                             Applied {formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                           {getRoleBadge(member.role)}
-                          <Badge variant="secondary" className="bg-yellow-500/20 text-yellow-600">
+                          <Badge variant="secondary" className="bg-yellow-500/20 text-yellow-600 text-xs">
                             Pending
                           </Badge>
                         </div>
@@ -237,45 +237,45 @@ export default async function TeamPage({
 
           {/* Active Team Members */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CheckCircle className="h-5 w-5 text-green-500" />
+            <CardHeader className="p-3 sm:p-6">
+              <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 text-green-500" />
                 Active Team Members
               </CardTitle>
-              <CardDescription>Team members who can access the system</CardDescription>
+              <CardDescription className="text-xs sm:text-sm">Team members who can access the system</CardDescription>
             </CardHeader>
-            <CardContent className="px-4 lg:px-6">
+            <CardContent className="p-3 sm:p-4 lg:p-6 pt-0">
               {activeMembers.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {activeMembers.map((member) => (
                     <div
                       key={member.id}
-                      className="p-4 rounded-lg border bg-card"
+                      className="p-3 sm:p-4 rounded-lg border bg-card"
                     >
-                      <div className="flex items-start gap-3 mb-3">
-                        <Avatar className="h-10 w-10 shrink-0">
+                      <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-3">
+                        <Avatar className="h-8 w-8 sm:h-10 sm:w-10 shrink-0">
                           <AvatarImage src={member.avatar_url || undefined} />
-                          <AvatarFallback className="bg-primary/10 text-primary">
+                          <AvatarFallback className="bg-primary/10 text-primary text-xs sm:text-sm">
                             {member.name?.charAt(0).toUpperCase() || 'U'}
                           </AvatarFallback>
                         </Avatar>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold truncate">{member.name}</p>
-                            <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                          <div className="flex items-center gap-1.5 sm:gap-2">
+                            <p className="font-semibold text-sm sm:text-base truncate">{member.name}</p>
+                            <CheckCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-green-500 shrink-0" />
                           </div>
-                          <p className="text-sm text-muted-foreground truncate">{member.email}</p>
+                          <p className="text-xs sm:text-sm text-muted-foreground truncate">{member.email}</p>
                           {member.manager && (
-                            <p className="text-xs text-muted-foreground mt-1">
+                            <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
                               Manager: {member.manager.name}
                             </p>
                           )}
-                          <p className="text-xs text-muted-foreground mt-1">
+                          <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
                             Joined {formatDistanceToNow(new Date(member.created_at), { addSuffix: true })}
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         {getRoleBadge(member.role)}
                         <TeamMemberActions
                           userId={member.id}
@@ -290,10 +290,10 @@ export default async function TeamPage({
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-12 text-muted-foreground">
-                  <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                  <p className="text-lg font-medium">No active team members</p>
-                  <p className="text-sm">Share your organization code to invite team members</p>
+                <div className="text-center py-8 sm:py-12 text-muted-foreground">
+                  <Users className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-2 sm:mb-4 opacity-50" />
+                  <p className="text-sm sm:text-lg font-medium">No active team members</p>
+                  <p className="text-xs sm:text-sm">Share your organization code to invite team members</p>
                 </div>
               )}
             </CardContent>
@@ -302,43 +302,43 @@ export default async function TeamPage({
           {/* Inactive Team Members */}
           {inactiveMembers.length > 0 && (
             <Card className="border-gray-300 bg-gray-50 dark:bg-gray-900/20">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-gray-500">
-                  <UserX className="h-5 w-5" />
+              <CardHeader className="p-3 sm:p-6">
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2 text-gray-500">
+                  <UserX className="h-4 w-4 sm:h-5 sm:w-5" />
                   Inactive Team Members
                 </CardTitle>
-                <CardDescription>Deactivated members - cannot access the system</CardDescription>
+                <CardDescription className="text-xs sm:text-sm">Deactivated members - cannot access the system</CardDescription>
               </CardHeader>
-              <CardContent className="px-4 lg:px-6">
-                <div className="space-y-3">
+              <CardContent className="p-3 sm:p-4 lg:p-6 pt-0">
+                <div className="space-y-2 sm:space-y-3">
                   {inactiveMembers.map((member) => (
                     <div
                       key={member.id}
-                      className="p-4 rounded-lg border border-gray-200 bg-white/50 dark:bg-gray-800/30 opacity-75"
+                      className="p-3 sm:p-4 rounded-lg border border-gray-200 bg-white/50 dark:bg-gray-800/30 opacity-75"
                     >
-                      <div className="flex items-start gap-3 mb-3">
-                        <Avatar className="h-10 w-10 shrink-0 grayscale">
+                      <div className="flex items-start gap-2 sm:gap-3 mb-2 sm:mb-3">
+                        <Avatar className="h-8 w-8 sm:h-10 sm:w-10 shrink-0 grayscale">
                           <AvatarImage src={member.avatar_url || undefined} />
-                          <AvatarFallback className="bg-gray-200 text-gray-500">
+                          <AvatarFallback className="bg-gray-200 text-gray-500 text-xs sm:text-sm">
                             {member.name?.charAt(0).toUpperCase() || 'U'}
                           </AvatarFallback>
                         </Avatar>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold truncate text-gray-500">{member.name}</p>
-                            <Badge variant="secondary" className="bg-gray-200 text-gray-600">
+                          <div className="flex items-center gap-1.5 sm:gap-2">
+                            <p className="font-semibold text-sm sm:text-base truncate text-gray-500">{member.name}</p>
+                            <Badge variant="secondary" className="bg-gray-200 text-gray-600 text-xs">
                               Inactive
                             </Badge>
                           </div>
-                          <p className="text-sm text-muted-foreground truncate">{member.email}</p>
+                          <p className="text-xs sm:text-sm text-muted-foreground truncate">{member.email}</p>
                           {member.manager && (
-                            <p className="text-xs text-muted-foreground mt-1">
+                            <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1">
                               Manager: {member.manager.name}
                             </p>
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         {getRoleBadge(member.role)}
                         <TeamMemberActions
                           userId={member.id}

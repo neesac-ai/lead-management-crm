@@ -239,7 +239,7 @@ export default function MeetingsPage() {
     if (canViewTeam && profileData.org_id) {
       let teamQuery = supabase
         .from('users')
-        .select('id, name')
+        .select('id, name, email')
         .eq('org_id', profileData.org_id)
         .eq('role', 'sales')
         .eq('is_approved', true)
@@ -432,21 +432,21 @@ export default function MeetingsPage() {
         description="Manage scheduled meetings"
       />
 
-      <div className="flex-1 p-4 lg:p-6">
+      <div className="flex-1 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6">
         <Card>
-          <CardHeader className="flex flex-col gap-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <CardHeader className="flex flex-col gap-3 sm:gap-4 p-3 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
-                <CardTitle>Scheduled Meetings</CardTitle>
-                <CardDescription>{filteredMeetings.length} meeting{filteredMeetings.length !== 1 ? 's' : ''}</CardDescription>
+                <CardTitle className="text-sm sm:text-base">Scheduled Meetings</CardTitle>
+                <CardDescription className="text-xs sm:text-sm">{filteredMeetings.length} meeting{filteredMeetings.length !== 1 ? 's' : ''}</CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
                 {mounted && (
                   <>
                     {/* Sales Rep Filter - Admin Only */}
                     {isAdmin && salesTeam.length > 0 && (
                       <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                        <SelectTrigger className="w-[150px]">
+                        <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
                           <SelectValue placeholder="Sales Rep" />
                         </SelectTrigger>
                         <SelectContent>
@@ -461,8 +461,8 @@ export default function MeetingsPage() {
                     {/* Product Filter */}
                     {products.length > 0 && (
                       <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                        <SelectTrigger className="w-[150px]">
-                          <Package className="h-4 w-4 mr-2" />
+                        <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                           <SelectValue placeholder="Product" />
                         </SelectTrigger>
                         <SelectContent>
@@ -478,42 +478,45 @@ export default function MeetingsPage() {
                 )}
 
                 {/* Phone Search */}
-                <div className="relative">
-                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <div className="relative w-full sm:w-[160px]">
+                  <Phone className="absolute left-2 top-2 sm:left-2.5 sm:top-2.5 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                   <Input
                     type="text"
                     placeholder="Search by phone..."
                     value={phoneSearch}
                     onChange={(e) => setPhoneSearch(e.target.value)}
-                    className="w-[160px] pl-8 h-9"
+                    className="w-full sm:w-[160px] pl-8 pr-2 h-8 sm:h-9 text-xs sm:text-sm"
                   />
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowFilters(!showFilters)}
-                  className={showFilters ? 'bg-primary/10' : ''}
-                >
-                  <Filter className="h-4 w-4 mr-1" />
-                  More
-                </Button>
-
-                {hasActiveFilters && (
+                <div className="flex items-center gap-2">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    onClick={clearAllFilters}
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={`h-8 sm:h-9 text-xs sm:text-sm ${showFilters ? 'bg-primary/10' : ''}`}
                   >
-                    Clear
+                    <Filter className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                    More
                   </Button>
-                )}
+
+                  {hasActiveFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearAllFilters}
+                      className="h-8 sm:h-9 text-xs sm:text-sm"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Extended Filters */}
             {showFilters && (
-              <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-4 p-2 sm:p-3 bg-muted/50 rounded-lg">
                 {/* Show Upcoming Only */}
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -521,80 +524,82 @@ export default function MeetingsPage() {
                     checked={showUpcomingOnly}
                     onCheckedChange={(checked) => setShowUpcomingOnly(checked === true)}
                   />
-                  <Label htmlFor="upcoming-only" className="text-sm cursor-pointer">
+                  <Label htmlFor="upcoming-only" className="text-xs sm:text-sm cursor-pointer">
                     Upcoming only
                   </Label>
                 </div>
 
                 {/* Date Range Filter */}
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="w-[140px] h-9"
-                    placeholder="From"
-                  />
-                  <span className="text-muted-foreground">to</span>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                    <Input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                      placeholder="From"
+                    />
+                  </div>
+                  <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
                   <Input
                     type="date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
-                    className="w-[140px] h-9"
+                    className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
                     placeholder="To"
                   />
                 </div>
               </div>
             )}
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-3 sm:p-6">
             {isLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : filteredMeetings.length > 0 ? (
-              <div className="space-y-3">
+              <div className="space-y-2 sm:space-y-3">
                 {filteredMeetings.map((meeting, index) => (
                   <div
                     key={meeting.id}
-                    className={`p-4 rounded-lg border bg-card ${
+                    className={`p-3 sm:p-4 rounded-lg border bg-card ${
                       isToday(meeting.scheduled_at) && meeting.status === 'scheduled'
                         ? 'border-purple-500/50 bg-purple-500/5' : ''
                     }`}
                   >
                     {/* Top row: Serial + Phone (primary) + Meeting Status */}
-                    <div className="flex items-start justify-between gap-2 mb-3">
-                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2 mb-2 sm:mb-3">
+                      <div className="flex items-start gap-2 sm:gap-3 min-w-0 flex-1">
                         {/* Serial Number */}
-                        <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
+                        <span className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-xs sm:text-sm font-medium shrink-0">
                           {index + 1}
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <Phone className="h-4 w-4 text-primary shrink-0" />
-                            <p className="font-semibold truncate text-lg">{meeting.leads?.phone}</p>
+                          <div className="flex items-center gap-1.5 sm:gap-2">
+                            <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary shrink-0" />
+                            <p className="font-semibold text-base sm:text-lg break-all">{meeting.leads?.phone}</p>
                           </div>
                           {meeting.leads?.name && meeting.leads.name !== meeting.leads.phone && (
-                            <p className="text-sm text-muted-foreground truncate mt-0.5">
+                            <p className="text-xs sm:text-sm text-muted-foreground break-words mt-0.5">
                               {meeting.leads.name}
                             </p>
                           )}
                           {meeting.leads?.custom_fields?.company && (
-                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <Building2 className="h-3 w-3" />
-                              <span className="truncate">{meeting.leads.custom_fields.company}</span>
+                            <div className="flex items-center gap-1 text-[10px] sm:text-xs text-muted-foreground">
+                              <Building2 className="h-2.5 w-2.5 sm:h-3 sm:w-3 shrink-0" />
+                              <span className="break-words">{meeting.leads.custom_fields.company}</span>
                             </div>
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 shrink-0">
-                        <Badge className={`${demoStatusColors[meeting.status] || 'bg-gray-500'}`}>
+                      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-1.5 sm:gap-2 shrink-0">
+                        <Badge className={`${demoStatusColors[meeting.status] || 'bg-gray-500'} text-xs`}>
                           {meeting.status}
                         </Badge>
                         {meeting.product && (
-                          <Badge variant="outline" className="border-purple-500 text-purple-600">
-                            <Package className="h-3 w-3 mr-1" />
+                          <Badge variant="outline" className="border-purple-500 text-purple-600 text-xs">
+                            <Package className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5 sm:mr-1" />
                             {meeting.product.name}
                           </Badge>
                         )}
@@ -603,22 +608,22 @@ export default function MeetingsPage() {
 
                     {/* Email */}
                     {meeting.leads?.email && (
-                      <div className="flex items-center gap-1 text-sm text-muted-foreground mb-2">
-                        <Mail className="h-3 w-3" />
-                        <span className="truncate">{meeting.leads.email}</span>
+                      <div className="flex items-center gap-1 text-xs sm:text-sm text-muted-foreground mb-2">
+                        <Mail className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                        <span className="truncate break-all">{meeting.leads.email}</span>
                       </div>
                     )}
 
                     {/* Sales Rep Name - Admin Only */}
                     {isAdmin && meeting.leads?.assignee && (
-                      <div className="flex items-center gap-1 text-sm text-primary mb-3">
-                        <UserCircle className="h-3 w-3" />
-                        <span>Assigned to: {meeting.leads.assignee.name} ({meeting.leads.assignee.email})</span>
+                      <div className="flex items-center gap-1 text-xs sm:text-sm text-primary mb-2 sm:mb-3">
+                        <UserCircle className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                        <span className="break-words">Assigned to: {meeting.leads.assignee.name} ({meeting.leads.assignee.email})</span>
                       </div>
                     )}
 
                     {/* Contact Actions */}
-                    <div className="mb-3">
+                    <div className="mb-2 sm:mb-3">
                       <ContactActions
                         phone={meeting.leads?.phone || null}
                         email={meeting.leads?.email || null}
@@ -627,14 +632,14 @@ export default function MeetingsPage() {
                     </div>
 
                     {/* Lead Status */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="text-sm text-muted-foreground">Lead Status:</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-2 sm:mb-3">
+                      <span className="text-xs sm:text-sm text-muted-foreground">Lead Status:</span>
                       {mounted ? (
                         <Select
                           value={meeting.leads?.lead_status || 'new'}
                           onValueChange={(value) => handleLeadStatusChange(meeting.leads.id, value, meeting.id)}
                         >
-                          <SelectTrigger className="w-[160px] h-8 text-xs">
+                          <SelectTrigger className="w-full sm:w-[160px] h-8 sm:h-9 text-xs sm:text-sm">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -656,8 +661,8 @@ export default function MeetingsPage() {
                     </div>
 
                     {/* Date/Time */}
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
-                      <Clock className="h-4 w-4 shrink-0" />
+                    <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground mb-2 sm:mb-3">
+                      <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
                       <span>{formatInTimeZone(new Date(meeting.scheduled_at), userTimezone, 'MMM d, yyyy')}</span>
                       <span className="font-medium text-foreground">
                         {formatInTimeZone(new Date(meeting.scheduled_at), userTimezone, 'h:mm a')}
@@ -665,35 +670,35 @@ export default function MeetingsPage() {
                     </div>
 
                     {/* Action buttons */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                       {meeting.google_meet_link && (
                         <a
                           href={meeting.google_meet_link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-xs sm:text-sm font-medium rounded-lg hover:bg-primary/90"
                         >
-                          <Video className="h-4 w-4" />
+                          <Video className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                           Join Google Meet
                         </a>
                       )}
                       <Button
                         variant="outline"
                         size="sm"
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 sm:h-9 text-xs sm:text-sm"
                         onClick={() => setDeleteId(meeting.id)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       </Button>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-center py-12 text-muted-foreground">
-                <Zap className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-medium">No meetings scheduled</p>
-                <p className="text-sm">Book a meeting from a lead to see it here</p>
+              <div className="text-center py-8 sm:py-12 text-muted-foreground">
+                <Zap className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-2 sm:mb-4 opacity-50" />
+                <p className="text-sm sm:text-lg font-medium">No meetings scheduled</p>
+                <p className="text-xs sm:text-sm">Book a meeting from a lead to see it here</p>
               </div>
             )}
           </CardContent>

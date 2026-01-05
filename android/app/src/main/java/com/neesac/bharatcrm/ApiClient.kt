@@ -1,0 +1,260 @@
+package com.neesac.bharatcrm
+
+import android.content.Context
+import android.util.Log
+import com.google.gson.Gson
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+
+/**
+ * HTTP client for making API calls to the backend
+ */
+class ApiClient(private val context: Context) {
+    private val tag = "ApiClient"
+    private val gson = Gson()
+    private val baseUrl = "https://bharatcrm.neesac.ai"
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    /**
+     * POST request to log a call
+     */
+    fun logCall(
+        leadId: String?,
+        phoneNumber: String,
+        callDirection: String,
+        callStatus: String,
+        callStartedAt: String,
+        callEndedAt: String?,
+        durationSeconds: Int,
+        ringDurationSeconds: Int = 0,
+        talkTimeSeconds: Int = 0,
+        deviceInfo: Map<String, Any>? = null,
+        networkType: String? = null,
+        authToken: String? = null,
+        callback: (Boolean, String?) -> Unit
+    ) {
+        val url = "$baseUrl/api/calls/log"
+
+        val requestBody = mapOf(
+            "lead_id" to (leadId ?: ""),
+            "phone_number" to phoneNumber,
+            "call_direction" to callDirection,
+            "call_status" to callStatus,
+            "call_started_at" to callStartedAt,
+            "call_ended_at" to (callEndedAt ?: ""),
+            "duration_seconds" to durationSeconds,
+            "ring_duration_seconds" to ringDurationSeconds,
+            "talk_time_seconds" to talkTimeSeconds,
+            "device_info" to (deviceInfo ?: emptyMap<String, Any>()),
+            "network_type" to (networkType ?: "")
+        )
+
+        val json = gson.toJson(requestBody)
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = json.toRequestBody(mediaType)
+
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .post(body)
+            .addHeader("Content-Type", "application/json")
+
+        authToken?.let {
+            requestBuilder.addHeader("Authorization", "Bearer $it")
+        }
+
+        val request = requestBuilder.build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(tag, "Failed to log call", e)
+                callback(false, e.message)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseBody = response.body?.string()
+                if (response.isSuccessful) {
+                    Log.d(tag, "Call logged successfully: $responseBody")
+                    callback(true, null)
+                } else {
+                    Log.e(tag, "Failed to log call: ${response.code} - $responseBody")
+                    callback(false, responseBody)
+                }
+            }
+        })
+    }
+
+    /**
+     * GET request to fetch call logs for a lead
+     */
+    fun getCallLogs(
+        leadId: String,
+        authToken: String? = null,
+        callback: (Boolean, List<Map<String, Any>>?, String?) -> Unit
+    ) {
+        val url = "$baseUrl/api/calls/$leadId"
+
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .get()
+
+        authToken?.let {
+            requestBuilder.addHeader("Authorization", "Bearer $it")
+        }
+
+        val request = requestBuilder.build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(tag, "Failed to get call logs", e)
+                callback(false, null, e.message)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseBody = response.body?.string()
+                if (response.isSuccessful) {
+                    try {
+                        val json = gson.fromJson(responseBody, Map::class.java)
+                        val callLogs = (json["call_logs"] as? List<*>)?.map { it as Map<String, Any> } ?: emptyList()
+                        Log.d(tag, "Fetched ${callLogs.size} call logs")
+                        callback(true, callLogs, null)
+                    } catch (e: Exception) {
+                        Log.e(tag, "Error parsing call logs", e)
+                        callback(false, null, e.message)
+                    }
+                } else {
+                    Log.e(tag, "Failed to get call logs: ${response.code} - $responseBody")
+                    callback(false, null, responseBody)
+                }
+            }
+        })
+    }
+
+    /**
+     * POST request to log location
+     */
+    fun logLocation(
+        leadId: String?,
+        latitude: Double,
+        longitude: Double,
+        accuracy: Float,
+        address: String?,
+        locationType: String,
+        trackingSessionId: String?,
+        notes: String?,
+        authToken: String? = null,
+        callback: (Boolean, String?) -> Unit
+    ) {
+        val url = "$baseUrl/api/locations/track"
+
+        val requestBody = mapOf(
+            "lead_id" to (leadId ?: ""),
+            "latitude" to latitude,
+            "longitude" to longitude,
+            "accuracy" to accuracy,
+            "address" to (address ?: ""),
+            "location_type" to locationType,
+            "tracking_session_id" to (trackingSessionId ?: ""),
+            "notes" to (notes ?: "")
+        )
+
+        val json = gson.toJson(requestBody)
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = json.toRequestBody(mediaType)
+
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .post(body)
+            .addHeader("Content-Type", "application/json")
+
+        authToken?.let {
+            requestBuilder.addHeader("Authorization", "Bearer $it")
+        }
+
+        val request = requestBuilder.build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(tag, "Failed to log location", e)
+                callback(false, e.message)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseBody = response.body?.string()
+                if (response.isSuccessful) {
+                    Log.d(tag, "Location logged successfully: $responseBody")
+                    callback(true, null)
+                } else {
+                    Log.e(tag, "Failed to log location: ${response.code} - $responseBody")
+                    callback(false, responseBody)
+                }
+            }
+        })
+    }
+
+    /**
+     * POST request for manual check-in
+     */
+    fun checkIn(
+        leadId: String,
+        latitude: Double,
+        longitude: Double,
+        accuracy: Float,
+        address: String?,
+        notes: String?,
+        authToken: String? = null,
+        callback: (Boolean, String?) -> Unit
+    ) {
+        val url = "$baseUrl/api/locations/checkin"
+
+        val requestBody = mapOf(
+            "lead_id" to leadId,
+            "latitude" to latitude,
+            "longitude" to longitude,
+            "accuracy" to accuracy,
+            "address" to (address ?: ""),
+            "notes" to (notes ?: "")
+        )
+
+        val json = gson.toJson(requestBody)
+        val mediaType = "application/json; charset=utf-8".toMediaType()
+        val body = json.toRequestBody(mediaType)
+
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .post(body)
+            .addHeader("Content-Type", "application/json")
+
+        authToken?.let {
+            requestBuilder.addHeader("Authorization", "Bearer $it")
+        }
+
+        val request = requestBuilder.build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e(tag, "Failed to check in", e)
+                callback(false, e.message)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val responseBody = response.body?.string()
+                if (response.isSuccessful) {
+                    Log.d(tag, "Check-in successful: $responseBody")
+                    callback(true, null)
+                } else {
+                    Log.e(tag, "Failed to check in: ${response.code} - $responseBody")
+                    callback(false, responseBody)
+                }
+            }
+        })
+    }
+}
+

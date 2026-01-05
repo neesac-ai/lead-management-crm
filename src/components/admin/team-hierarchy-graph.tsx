@@ -440,20 +440,20 @@ function HierarchyGraphContent({ orgId }: { orgId: string }) {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
+      <CardHeader className="p-3 sm:p-6">
+        <div className="flex flex-col gap-3 sm:gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-0">
             <div>
-              <CardTitle>Team Hierarchy</CardTitle>
-              <CardDescription>Visual representation of your organizational structure</CardDescription>
+              <CardTitle className="text-sm sm:text-base">Team Hierarchy</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">Visual representation of your organizational structure</CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={expandAll}>
-                <Expand className="h-4 w-4 mr-2" />
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <Button variant="outline" size="sm" onClick={expandAll} className="h-8 sm:h-9 text-xs sm:text-sm w-full sm:w-auto">
+                <Expand className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                 Expand All
               </Button>
-              <Button variant="outline" size="sm" onClick={collapseAll}>
-                <Minimize2 className="h-4 w-4 mr-2" />
+              <Button variant="outline" size="sm" onClick={collapseAll} className="h-8 sm:h-9 text-xs sm:text-sm w-full sm:w-auto">
+                <Minimize2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                 Collapse All
               </Button>
             </div>
@@ -461,20 +461,20 @@ function HierarchyGraphContent({ orgId }: { orgId: string }) {
 
           {/* Search Bar */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
             <Input
               type="text"
               placeholder="Search employee by name or email..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-9"
+              className="pl-8 sm:pl-9 pr-8 sm:pr-9 h-8 sm:h-9 text-xs sm:text-sm w-full"
             />
             {searchQuery && (
               <button
                 onClick={clearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               </button>
             )}
 

@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { Phone, MessageCircle, Mail, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -8,11 +9,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { isNativeApp, getNativeBridge, setupNativeEventListener, parseNativeResponse } from '@/lib/native-bridge'
+import type { CallStatus } from '@/types/native-bridge.types'
+import { toast } from 'sonner'
 
 interface ContactActionsProps {
   phone?: string | null
   email?: string | null
   name?: string
+  leadId?: string
   variant?: 'default' | 'compact'
   className?: string
 }
@@ -36,15 +41,70 @@ function formatPhoneForWhatsApp(phone: string): string {
   return formatted
 }
 
-export function ContactActions({ 
-  phone, 
-  email, 
+export function ContactActions({
+  phone,
+  email,
   name = 'Lead',
+  leadId,
   variant = 'default',
   className = ''
 }: ContactActionsProps) {
+  const [isNative, setIsNative] = useState(false)
+  const [callStatus, setCallStatus] = useState<CallStatus | null>(null)
   const hasPhone = phone && phone.trim() !== ''
   const hasEmail = email && email.trim() !== ''
+
+  useEffect(() => {
+    // Check if native bridge is available
+    setIsNative(isNativeApp())
+
+    if (isNativeApp()) {
+      // Setup native event listener
+      const cleanup = setupNativeEventListener((event) => {
+        if (event.type === 'CALL_ENDED' || event.type === 'CALL_CONNECTED' || event.type === 'CALL_RINGING') {
+          // Update call status
+          const bridge = getNativeBridge()
+          if (bridge?.getLastCallStatus) {
+            const statusStr = bridge.getLastCallStatus()
+            const status = parseNativeResponse<CallStatus>(statusStr)
+            if (status) {
+              setCallStatus(status)
+            }
+          }
+        }
+      })
+
+      return cleanup
+    }
+  }, [])
+
+  const handleCall = (e: React.MouseEvent) => {
+    e.preventDefault()
+
+    if (!hasPhone || !phone) return
+
+    if (isNative && leadId) {
+      // Use native bridge for call tracking
+      const bridge = getNativeBridge()
+      if (bridge?.initiateCall) {
+        try {
+          bridge.initiateCall(leadId, phone)
+          toast.info('Opening dialer and starting call tracking...')
+        } catch (error) {
+          console.error('Error initiating call via native bridge:', error)
+          toast.error('Failed to initiate call tracking')
+          // Fallback to tel: link
+          window.location.href = `tel:${formatPhoneForLink(phone)}`
+        }
+      } else {
+        // Fallback to tel: link
+        window.location.href = `tel:${formatPhoneForLink(phone)}`
+      }
+    } else {
+      // Regular browser - use tel: link
+      window.location.href = `tel:${formatPhoneForLink(phone)}`
+    }
+  }
 
   if (!hasPhone && !hasEmail) {
     return (
@@ -54,6 +114,7 @@ export function ContactActions({
 
   const buttonSize = variant === 'compact' ? 'sm' : 'default'
   const iconSize = variant === 'compact' ? 'h-4 w-4' : 'h-5 w-5'
+  const isInCall = callStatus?.isInCall
 
   return (
     <TooltipProvider>
@@ -65,17 +126,29 @@ export function ContactActions({
               <Button
                 variant="outline"
                 size={buttonSize}
-                asChild
-                className="bg-green-500/10 border-green-500/20 hover:bg-green-500/20 text-green-600"
+                onClick={handleCall}
+                disabled={isInCall}
+                className={`${
+                  isInCall
+                    ? 'bg-yellow-500/10 border-yellow-500/20 hover:bg-yellow-500/20 text-yellow-600'
+                    : 'bg-green-500/10 border-green-500/20 hover:bg-green-500/20 text-green-600'
+                }`}
               >
-                <a href={`tel:${formatPhoneForLink(phone!)}`}>
-                  <Phone className={iconSize} />
-                  {variant !== 'compact' && <span className="ml-2">Call</span>}
-                </a>
+                <Phone className={iconSize} />
+                {variant !== 'compact' && (
+                  <span className="ml-2">
+                    {isInCall ? `In Call (${callStatus?.duration}s)` : 'Call'}
+                  </span>
+                )}
               </Button>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Call {phone}</p>
+              <p>
+                {isInCall
+                  ? `Call in progress - ${callStatus?.duration}s`
+                  : `Call ${phone}${isNative ? ' (with tracking)' : ''}`
+                }
+              </p>
             </TooltipContent>
           </Tooltip>
         )}
@@ -90,7 +163,7 @@ export function ContactActions({
                 asChild
                 className="bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-600"
               >
-                <a 
+                <a
                   href={`https://wa.me/${formatPhoneForWhatsApp(phone!)}?text=${encodeURIComponent(`Hi ${name}, `)}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -136,13 +209,3 @@ export function ContactActions({
 export function ContactActionsCompact(props: Omit<ContactActionsProps, 'variant'>) {
   return <ContactActions {...props} variant="compact" />
 }
-
-
-
-
-
-
-
-
-
-

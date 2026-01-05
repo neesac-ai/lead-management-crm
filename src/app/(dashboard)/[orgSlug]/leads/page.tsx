@@ -1400,47 +1400,50 @@ export default function LeadsPage() {
         isRefreshing={isLoading}
       />
 
-      <div className="flex-1 p-4 lg:p-6">
+      <div className="flex-1 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6">
         <Card>
-          <CardHeader className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-4 w-full">
-              <div className="flex items-center gap-4">
+          <CardHeader className="flex flex-col gap-3 sm:gap-4 p-4 sm:p-6">
+            {/* Mobile: Stack vertically | Desktop: Horizontal */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 w-full">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                 <div>
-                  <CardTitle>
+                  <CardTitle className="text-base sm:text-lg">
                     {isAdmin ? 'All Leads' : 'My Leads'}
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-xs sm:text-sm">
                     {filteredLeads.length} of {leads.length} leads
                   </CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
-                  {/* Import button - available for both admin and sales */}
-                  <Button variant="outline" onClick={() => { resetImportDialog(); setIsImportDialogOpen(true) }}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Import
-                  </Button>
-                  {mounted && (
-                    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                      <DialogTrigger asChild>
-                        <Button>
-                          <Plus className="mr-2 h-4 w-4" />
-                          Add Lead
-                        </Button>
-                      </DialogTrigger>
-                    </Dialog>
-                  )}
-                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {/* Import button - available for both admin and sales */}
+                <Button variant="outline" size="sm" onClick={() => { resetImportDialog(); setIsImportDialogOpen(true) }} className="text-xs sm:text-sm h-8 sm:h-9">
+                  <Upload className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <span className="hidden sm:inline">Import</span>
+                  <span className="sm:hidden">Imp</span>
+                </Button>
+                {mounted && (
+                  <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button size="sm" className="text-xs sm:text-sm h-8 sm:h-9">
+                        <Plus className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        <span className="hidden sm:inline">Add Lead</span>
+                        <span className="sm:hidden">Add</span>
+                      </Button>
+                    </DialogTrigger>
+                  </Dialog>
+                )}
               </div>
             </div>
 
             {/* Filters */}
-            <div className="space-y-3">
-              {/* Primary filters row */}
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="space-y-2 sm:space-y-3">
+              {/* Primary filters row - Stack on mobile */}
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
                 {mounted && (
                   <>
                     <Select value={statusFilter} onValueChange={setStatusFilter}>
-                      <SelectTrigger className="w-[160px]">
+                      <SelectTrigger className="w-full sm:w-[160px] h-8 sm:h-9 text-xs sm:text-sm">
                         <SelectValue placeholder="Status" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1459,8 +1462,8 @@ export default function LeadsPage() {
 
                     {/* Subscription Type Filter */}
                     <Select value={subscriptionTypeFilter} onValueChange={setSubscriptionTypeFilter}>
-                      <SelectTrigger className="w-[180px]">
-                        <TrendingUp className="h-4 w-4 mr-2" />
+                      <SelectTrigger className="w-full sm:w-[180px] h-8 sm:h-9 text-xs sm:text-sm">
+                        <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                         <SelectValue placeholder="Subscription" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1474,8 +1477,8 @@ export default function LeadsPage() {
                     {/* Approval Status Filter - Admin and Sales Only */}
                     {!isAccountant && (
                       <Select value={approvalStatusFilter} onValueChange={setApprovalStatusFilter}>
-                        <SelectTrigger className="w-[180px]">
-                          <CheckCircle2 className="h-4 w-4 mr-2" />
+                        <SelectTrigger className="w-full sm:w-[180px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                           <SelectValue placeholder="Approval Status" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1489,8 +1492,8 @@ export default function LeadsPage() {
                     {/* Reportees Filter - Sales Managers Only */}
                     {isSales && reportees.length > 0 && (
                       <Select value={reporteesFilter} onValueChange={(v: 'all' | 'my_reportees' | 'my_leads') => setReporteesFilter(v)}>
-                        <SelectTrigger className="w-[180px]">
-                          <Users className="h-4 w-4 mr-2" />
+                        <SelectTrigger className="w-full sm:w-[180px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                           <SelectValue placeholder="Lead Source" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1504,7 +1507,7 @@ export default function LeadsPage() {
                     {/* Sales Rep Filter - Admin Only */}
                     {isAdmin && salesTeam.length > 0 && (
                       <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                        <SelectTrigger className="w-[150px]">
+                        <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
                           <SelectValue placeholder="Sales Rep" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1520,8 +1523,8 @@ export default function LeadsPage() {
                     {/* Product Filter */}
                     {products.length > 0 && (
                       <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                        <SelectTrigger className="w-[150px]">
-                          <Package className="h-4 w-4 mr-2" />
+                        <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                           <SelectValue placeholder="Product" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1537,14 +1540,14 @@ export default function LeadsPage() {
                 )}
 
                 {/* Phone Search */}
-                <div className="relative">
-                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <div className="relative w-full sm:w-[160px]">
+                  <Phone className="absolute left-2 top-2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                   <Input
                     type="text"
                     placeholder="Search by phone..."
                     value={phoneSearch}
                     onChange={(e) => setPhoneSearch(e.target.value)}
-                    className="w-[160px] pl-8 h-9"
+                    className="w-full sm:w-[160px] pl-8 pr-2 h-8 sm:h-9 text-xs sm:text-sm"
                   />
                 </div>
 
@@ -1552,9 +1555,9 @@ export default function LeadsPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => setShowFilters(!showFilters)}
-                  className={showFilters ? 'bg-primary/10' : ''}
+                  className={`h-8 sm:h-9 text-xs sm:text-sm ${showFilters ? 'bg-primary/10' : ''}`}
                 >
-                  <Filter className="h-4 w-4 mr-1" />
+                  <Filter className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
                   More
                 </Button>
 
@@ -1563,19 +1566,20 @@ export default function LeadsPage() {
                     variant="ghost"
                     size="sm"
                     onClick={clearAllFilters}
+                    className="h-8 sm:h-9 text-xs sm:text-sm"
                   >
                     Clear all
                   </Button>
                 )}
               </div>
 
-              {/* Extended filters row */}
+              {/* Extended filters row - Stack on mobile */}
               {showFilters && mounted && (
-                <div className="flex flex-wrap items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 p-2 sm:p-3 bg-muted/50 rounded-lg">
                   {/* Tag Filter */}
                   {tags.length > 0 && (
                     <Select value={selectedTagFilter} onValueChange={setSelectedTagFilter}>
-                      <SelectTrigger className="w-[140px]">
+                      <SelectTrigger className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm">
                         <SelectValue placeholder="Tag" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1593,12 +1597,13 @@ export default function LeadsPage() {
                   )}
 
                   {/* Lead Age Filter */}
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm text-muted-foreground whitespace-nowrap">Lead age</span>
-                    <Select value={leadAgeOperator} onValueChange={setLeadAgeOperator}>
-                      <SelectTrigger className="w-[90px]">
-                        <SelectValue placeholder="Any" />
-                      </SelectTrigger>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-1">
+                    <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">Lead age</span>
+                    <div className="flex items-center gap-1">
+                      <Select value={leadAgeOperator} onValueChange={setLeadAgeOperator}>
+                        <SelectTrigger className="w-full sm:w-[90px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <SelectValue placeholder="Any" />
+                        </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Any</SelectItem>
                         <SelectItem value="lt">&lt; Less than</SelectItem>
@@ -1606,38 +1611,41 @@ export default function LeadsPage() {
                         <SelectItem value="gt">&gt; Greater than</SelectItem>
                       </SelectContent>
                     </Select>
-                    {leadAgeOperator !== 'all' && (
-                      <div className="flex items-center gap-1">
-                        <Input
-                          type="number"
-                          placeholder="0"
-                          value={leadAgeDays}
-                          onChange={(e) => setLeadAgeDays(e.target.value)}
-                          className="w-[70px] h-9"
-                          min="0"
-                        />
-                        <span className="text-sm text-muted-foreground">days</span>
-                      </div>
-                    )}
+                      {leadAgeOperator !== 'all' && (
+                        <>
+                          <Input
+                            type="number"
+                            placeholder="0"
+                            value={leadAgeDays}
+                            onChange={(e) => setLeadAgeDays(e.target.value)}
+                            className="w-[70px] h-8 sm:h-9 text-xs sm:text-sm"
+                            min="0"
+                          />
+                          <span className="text-xs sm:text-sm text-muted-foreground">days</span>
+                        </>
+                      )}
+                    </div>
                   </div>
 
                   {/* Date Range Filter */}
-                  <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                    <Input
-                      type="date"
-                      placeholder="From"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="w-[140px] h-9"
-                    />
-                    <span className="text-muted-foreground">to</span>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                      <Input
+                        type="date"
+                        placeholder="From"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                      />
+                    </div>
+                    <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
                     <Input
                       type="date"
                       placeholder="To"
                       value={dateTo}
                       onChange={(e) => setDateTo(e.target.value)}
-                      className="w-[140px] h-9"
+                      className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
                     />
                   </div>
                 </div>
@@ -1679,7 +1687,7 @@ export default function LeadsPage() {
                     role="button"
                     tabIndex={0}
                     data-no-navigation="true"
-                    className="p-4 rounded-lg border bg-card transition-colors hover:bg-muted/50 cursor-pointer"
+                    className="p-3 sm:p-4 rounded-lg border bg-card transition-colors hover:bg-muted/50 cursor-pointer space-y-2"
                     onClick={(e) => {
                       // Prevent all default behaviors and navigation
                       // This is critical to prevent 404 errors in some browsers/locations
@@ -1716,8 +1724,9 @@ export default function LeadsPage() {
                     }}
                     style={{ userSelect: 'none' }}
                   >
-                    {/* Top row: Checkbox (Admin) + Serial + Phone (primary) + Status + Delete */}
-                    <div className="flex items-start justify-between gap-2 mb-2">
+                    {/* Mobile: Vertical Stack | Desktop: Horizontal Layout */}
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-3">
+                      {/* Left Section: Serial + Phone + Name + Company */}
                       <div className="flex items-start gap-3 min-w-0 flex-1">
                         {/* Checkbox for bulk delete - Admin only */}
                         {isAdmin && (
@@ -1727,70 +1736,97 @@ export default function LeadsPage() {
                               handleSelectLeadForDelete(lead.id)
                             }}
                             onClick={(e) => e.stopPropagation()}
-                            className="mt-1"
+                            className="mt-1 shrink-0"
                           />
                         )}
                         {/* Serial Number */}
                         <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
                           {index + 1}
                         </span>
-                        <div className="min-w-0 flex-1">
+                        {/* Phone and Details - Stacked vertically on mobile */}
+                        <div className="min-w-0 flex-1 space-y-1">
+                          {/* Phone - Always visible and prominent */}
                           <div className="flex items-center gap-2">
                             <Phone className="h-4 w-4 text-primary shrink-0" />
-                            <p className="font-semibold text-base truncate">{lead.phone}</p>
+                            <p className="font-semibold text-base">{lead.phone}</p>
                           </div>
+                          {/* Name */}
                           {lead.name && lead.name !== lead.phone && (
-                            <p className="text-sm text-muted-foreground truncate mt-0.5">
+                            <p className="text-sm text-muted-foreground">
                               {lead.name}
                             </p>
                           )}
+                          {/* Company */}
                           {lead.custom_fields?.company && (
-                            <p className="text-xs text-muted-foreground truncate">
+                            <p className="text-xs text-muted-foreground">
                               {lead.custom_fields.company}
                             </p>
                           )}
+                          {/* Email */}
+                          {lead.email && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Mail className="h-3.5 w-3.5 shrink-0" />
+                              <span className="break-all">{lead.email}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-2 shrink-0">
-                        <Badge className={`${statusColors[lead.status] || 'bg-gray-500'}`}>
+
+                      {/* Right Section: Status Badges - Stacked on mobile */}
+                      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 shrink-0 sm:items-start">
+                        <Badge className={`text-xs w-fit ${statusColors[lead.status] || 'bg-gray-500'}`}>
                           {getStatusLabel(lead.status)}
                         </Badge>
                         {/* Subscription status for deal won leads */}
                         {lead.status === 'deal_won' && lead.subscription && (
                           <>
                             {lead.subscription.approval_status === 'pending' ? (
-                              <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50">
+                              <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50 text-xs w-fit">
                                 <Clock className="h-3 w-3 mr-1" />
                                 Pending Approval
                               </Badge>
                             ) : lead.subscription.approval_status === 'approved' ? (
-                              <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50">
+                              <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50 text-xs w-fit">
                                 <CheckCircle2 className="h-3 w-3 mr-1" />
                                 Approved
                               </Badge>
                             ) : null}
                             {lead.subscription.status && (
-                              <Badge variant="outline" className={
+                              <Badge variant="outline" className={`text-xs w-fit ${
                                 lead.subscription.status === 'active' ? 'border-green-500 text-green-600' :
                                   lead.subscription.status === 'paused' ? 'border-yellow-500 text-yellow-600' :
                                     lead.subscription.status === 'expired' ? 'border-red-500 text-red-600' :
                                       'border-gray-500 text-gray-600'
-                              }>
+                              }`}>
                                 {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
                               </Badge>
                             )}
                           </>
                         )}
                         {lead.subscription_type && (
-                          <Badge variant="outline" className={lead.subscription_type === 'trial' ? 'border-blue-500 text-blue-600' : 'border-green-500 text-green-600'}>
+                          <Badge variant="outline" className={`text-xs w-fit ${lead.subscription_type === 'trial' ? 'border-blue-500 text-blue-600' : 'border-green-500 text-green-600'}`}>
                             {lead.subscription_type === 'trial' ? 'Trial' : 'Paid'}
                           </Badge>
                         )}
                         {lead.product && (
-                          <Badge variant="outline" className="border-purple-500 text-purple-600">
+                          <Badge variant="outline" className="border-purple-500 text-purple-600 text-xs w-fit">
                             <Package className="h-3 w-3 mr-1" />
                             {lead.product.name}
                           </Badge>
+                        )}
+                        {/* Delete button - Admin only */}
+                        {(userProfile?.role === 'admin' || userProfile?.role === 'super_admin') && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-100 shrink-0 self-start"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openDeleteConfirmDialog(lead)
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -1817,7 +1853,7 @@ export default function LeadsPage() {
 
                     {/* Subscription Details for Deal Won */}
                     {lead.status === 'deal_won' && lead.subscription && (
-                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground mb-2 p-2 bg-muted/50 rounded-md">
+                      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 text-xs text-muted-foreground mb-2 p-2 bg-muted/50 rounded-md">
                         {lead.subscription.approval_status && (
                           <span className="flex items-center gap-1">
                             <span className="font-medium">Approval:</span>
@@ -1854,18 +1890,9 @@ export default function LeadsPage() {
                       </div>
                     )}
 
-                    {/* Email */}
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mb-2">
-                      {lead.email && (
-                        <span className="flex items-center gap-1">
-                          <Mail className="h-3.5 w-3.5" />
-                          <span className="truncate max-w-[200px]">{lead.email}</span>
-                        </span>
-                      )}
-                    </div>
 
-                    {/* Bottom row: Source + Age + Assignment */}
-                    <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
+                    {/* Bottom row: Source + Age + Assignment - Stacked on mobile */}
+                    <div className="flex flex-col gap-2 text-xs text-muted-foreground pt-2 border-t border-border/50">
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs">{lead.source}</Badge>
                         <span className="flex items-center gap-1">
@@ -1873,43 +1900,29 @@ export default function LeadsPage() {
                           {getLeadAge(lead.created_at)}d
                         </span>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right text-xs">
-                          {lead.assignee ? (
-                            <div>
-                              <span className="text-primary">→ Assigned to: {lead.assignee.name} ({lead.assignee.email})</span>
-                              {lead.creator && (
-                                <div className="text-muted-foreground mt-0.5">
-                                  Created by: {lead.creator.name} ({lead.creator.email})
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div>
-                              {isAdmin || (userProfile?.role === 'sales' && reportees.length > 0) ? (
-                                <span className="text-yellow-600">Unassigned</span>
-                              ) : null}
-                              {lead.creator && (
-                                <div className="text-muted-foreground mt-0.5">
-                                  Created by: {lead.creator.name} ({lead.creator.email})
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {/* Delete button - Admin only */}
-                        {(userProfile?.role === 'admin' || userProfile?.role === 'super_admin') && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-100"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              openDeleteConfirmDialog(lead)
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                      <div className="space-y-1">
+                        {lead.assignee ? (
+                          <div>
+                            <span className="text-primary">
+                              → Assigned to: {lead.assignee.name} ({lead.assignee.email})
+                            </span>
+                            {lead.creator && (
+                              <div className="text-muted-foreground mt-0.5">
+                                Created by: {lead.creator.name} ({lead.creator.email})
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            {isAdmin || (userProfile?.role === 'sales' && reportees.length > 0) ? (
+                              <span className="text-yellow-600">Unassigned</span>
+                            ) : null}
+                            {lead.creator && (
+                              <div className="text-muted-foreground mt-0.5">
+                                Created by: {lead.creator.name} ({lead.creator.email})
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

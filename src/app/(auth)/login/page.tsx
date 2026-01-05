@@ -16,7 +16,7 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const redirect = searchParams.get('redirect')
   const errorParam = searchParams.get('error')
-  
+
   const [isLoading, setIsLoading] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -30,7 +30,7 @@ function LoginForm() {
 
     try {
       const supabase = createClient()
-      
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -97,7 +97,7 @@ function LoginForm() {
       {/* Mobile logo */}
       <div className="lg:hidden flex flex-col items-center justify-center mb-8 gap-2">
         <span className="text-2xl font-bold tracking-tight">BharatCRM</span>
-        <Image src="/neesac-logo.svg" alt="neesac.ai" width={80} height={20} className="opacity-70" />
+        <span className="text-sm text-muted-foreground">by neesac.ai</span>
       </div>
 
       <div className="space-y-2">
@@ -139,8 +139,8 @@ function LoginForm() {
             <Label htmlFor="password" className="text-sm font-medium">
               Password
             </Label>
-            <Link 
-              href="/forgot-password" 
+            <Link
+              href="/forgot-password"
               className="text-sm text-primary hover:text-primary/80 transition-colors"
             >
               Forgot password?
@@ -161,8 +161,8 @@ function LoginForm() {
           </div>
         </div>
 
-        <Button 
-          type="submit" 
+        <Button
+          type="submit"
           className="w-full h-11 text-base font-medium"
           disabled={isLoading}
         >
@@ -193,8 +193,8 @@ function LoginForm() {
 
       <p className="text-center text-sm text-muted-foreground">
         Don&apos;t have an account?{' '}
-        <Link 
-          href="/register" 
+        <Link
+          href="/register"
           className="text-primary font-medium hover:text-primary/80 transition-colors"
         >
           Create an account

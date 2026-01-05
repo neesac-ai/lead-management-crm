@@ -272,10 +272,10 @@ export function Sidebar({ orgSlug }: SidebarProps) {
             ? pathname === item.href || pathname === item.href + '/'
             : pathname === item.href || pathname.startsWith(item.href + '/')
           return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setMobileOpen(false)}
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setMobileOpen(false)}
               className={cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
                 isActive

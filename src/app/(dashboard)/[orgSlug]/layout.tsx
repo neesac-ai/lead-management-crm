@@ -1,6 +1,7 @@
 import { redirect, notFound } from 'next/navigation'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { Sidebar } from '@/components/layout/sidebar'
+import { BottomNav } from '@/components/layout/bottom-nav'
 import { GoogleAuthToast } from '@/components/google-auth-toast'
 import { OrgProviderWrapper } from '@/components/providers/org-provider-wrapper'
 import { Suspense } from 'react'
@@ -16,7 +17,7 @@ export default async function OrgDashboardLayout({
 }: OrgLayoutProps) {
   const { orgSlug } = await params
   const supabase = await createClient()
-  
+
   const { data: { user }, error: authError } = await supabase.auth.getUser()
 
   if (authError) {
@@ -82,9 +83,10 @@ export default async function OrgDashboardLayout({
           <GoogleAuthToast />
         </Suspense>
         <Sidebar orgSlug={orgSlug} />
-        <main className="pt-16 lg:pt-0 lg:pl-64">
+        <main className="pt-16 pb-16 lg:pt-0 lg:pb-0 lg:pl-64">
           {children}
         </main>
+        <BottomNav orgSlug={orgSlug} />
       </div>
     </OrgProviderWrapper>
   )

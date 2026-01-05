@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Testing Tool</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #333;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #0070f3;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        button:hover {
+            background: #0051cc;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .result pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .success {
+            color: #22c55e;
+            font-weight: 500;
+        }
+
+        .error {
+            color: #ef4444;
+            font-weight: 500;
+        }
+
+        .info {
+            color: #3b82f6;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #eff6ff;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🧪 API Testing Tool</h1>
+        <p class="subtitle">Test your call tracking and location APIs</p>
+
+        <div class="info">
+            <strong>📋 Instructions:</strong><br>
+            1. Make sure you're logged into your app in another tab<br>
+            2. <strong>Lead ID is required</strong> for Check-In and Call Log<br>
+            3. <strong>Lead ID is optional</strong> for Location Tracking (for team member tracking)<br>
+            4. Enter Lead ID below and click the test buttons
+        </div>
+
+        <div class="input-group">
+            <label for="leadId">Lead ID <span style="color: #666; font-weight: normal;">(required for Check-In & Call
+                    Log, optional for Tracking)</span></label>
+            <input type="text" id="leadId" placeholder="Enter Lead ID (UUID) - optional for location tracking">
+        </div>
+
+        <div>
+            <button onclick="testCheckIn()">📍 Test Location Check-In</button>
+            <button onclick="testCallLog()">📞 Test Call Log</button>
+            <button onclick="testLocationTrack()">🗺️ Test Location Tracking (No Lead ID)</button>
+            <button onclick="testGetLocations()">📊 Get Location History</button>
+            <button onclick="testTeamLocations()">👥 Get Team Locations (Admin Only)</button>
+        </div>
+
+        <div class="result" id="result" style="display: none;">
+            <pre id="resultContent"></pre>
+        </div>
+    </div>
+
+    <script>
+        function showResult(data, isError = false) {
+            const resultDiv = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+            resultDiv.style.display = 'block';
+
+            const className = isError ? 'error' : 'success';
+            const prefix = isError ? '❌ Error:' : '✅ Success:';
+
+            resultContent.innerHTML = `<span class="${className}">${prefix}</span>\n${JSON.stringify(data, null, 2)}`;
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Generate UUID v4
+        function generateUUID() {
+            if (crypto && crypto.randomUUID) {
+                return crypto.randomUUID();
+            }
+            // Fallback for older browsers
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function getLeadId() {
+            const leadId = document.getElementById('leadId').value.trim();
+            if (!leadId) {
+                alert('Please enter a Lead ID first');
+                return null;
+            }
+            return leadId;
+        }
+
+        async function testCheckIn() {
+            const leadId = getLeadId();
+            if (!leadId) return;
+
+            try {
+                // Get current location
+                navigator.geolocation.getCurrentPosition(async (position) => {
+                    const { latitude, longitude, accuracy } = position.coords;
+
+                    const response = await fetch('/api/locations/checkin', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lead_id: leadId,
+                            latitude: latitude,
+                            longitude: longitude,
+                            accuracy: accuracy,
+                            notes: 'Test check-in from API testing tool'
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        showResult(data);
+                    } else {
+                        showResult(data, true);
+                    }
+                }, (error) => {
+                    showResult({ error: 'Geolocation error', message: error.message }, true);
+                });
+            } catch (error) {
+                showResult({ error: error.message }, true);
+            }
+        }
+
+        async function testCallLog() {
+            const leadId = getLeadId();
+            if (!leadId) return;
+
+            try {
+                const response = await fetch('/api/calls/log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        lead_id: leadId,
+                        phone_number: '+1234567890',
+                        call_direction: 'outgoing', // Fixed: lowercase
+                        call_status: 'completed', // Fixed: lowercase
+                        call_started_at: new Date(Date.now() - 120000).toISOString(),
+                        call_ended_at: new Date().toISOString(),
+                        duration_seconds: 120,
+                        talk_time_seconds: 115,
+                        ring_duration_seconds: 5,
+                        device_info: {
+                            platform: 'browser',
+                            userAgent: navigator.userAgent
+                        }
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult(data);
+                } else {
+                    showResult(data, true);
+                }
+            } catch (error) {
+                showResult({ error: error.message }, true);
+            }
+        }
+
+        async function testLocationTrack() {
+            // Lead ID is optional for location tracking (for team member tracking)
+            const leadId = document.getElementById('leadId').value.trim();
+
+            // Generate a proper UUID for tracking session
+            const trackingSessionId = generateUUID();
+
+            // Get current location for more realistic test
+            try {
+                navigator.geolocation.getCurrentPosition(async (position) => {
+                    const { latitude, longitude, accuracy } = position.coords;
+
+                    const response = await fetch('/api/locations/track', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lead_id: leadId || null, // Optional - null for team member tracking
+                            latitude: latitude,
+                            longitude: longitude,
+                            accuracy: accuracy,
+                            location_type: 'tracking',
+                            tracking_session_id: trackingSessionId, // Fixed: proper UUID format
+                            notes: leadId ? 'Test tracking point for lead' : 'Test team member location tracking'
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        showResult({
+                            ...data,
+                            note: leadId ? 'Location tracked with lead association' : 'Location tracked for team member (no lead association)'
+                        });
+                    } else {
+                        showResult(data, true);
+                    }
+                }, (error) => {
+                    // Fallback to test coordinates if geolocation fails
+                    const trackingSessionId = generateUUID();
+                    fetch('/api/locations/track', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            lead_id: leadId || null,
+                            latitude: 12.9716, // Bangalore coordinates
+                            longitude: 77.5946,
+                            accuracy: 10.5,
+                            location_type: 'tracking',
+                            tracking_session_id: trackingSessionId, // Fixed: proper UUID format
+                            notes: leadId ? 'Test tracking point for lead' : 'Test team member location tracking'
+                        })
+                    })
+                        .then(r => r.json())
+                        .then(data => {
+                            if (data.error) {
+                                showResult(data, true);
+                            } else {
+                                showResult({
+                                    ...data,
+                                    note: leadId ? 'Location tracked with lead association' : 'Location tracked for team member (no lead association)',
+                                    warning: 'Used test coordinates (geolocation not available)'
+                                });
+                            }
+                        })
+                        .catch(err => showResult({ error: err.message }, true));
+                });
+            } catch (error) {
+                showResult({ error: error.message }, true);
+            }
+        }
+
+        async function testGetLocations() {
+            const leadId = getLeadId();
+            if (!leadId) {
+                // If no lead ID, try to get all team locations (would need a different endpoint)
+                showResult({
+                    error: 'Lead ID is required to get location history',
+                    note: 'To get all team locations, use the "Get Team Locations" button'
+                }, true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/locations/${leadId}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult({
+                        message: `Found ${data.locations?.length || 0} location entries for lead ${leadId}`,
+                        locations: data.locations
+                    });
+                } else {
+                    showResult(data, true);
+                }
+            } catch (error) {
+                showResult({ error: error.message }, true);
+            }
+        }
+
+        async function testTeamLocations() {
+            // No lead ID needed - gets all team member locations
+            try {
+                const response = await fetch('/api/locations/team');
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult({
+                        message: `Found ${data.total || 0} team members with location data`,
+                        total: data.total,
+                        locations: data.locations,
+                        note: 'This endpoint requires admin role. Shows latest location for each team member.'
+                    });
+                } else {
+                    showResult(data, true);
+                }
+            } catch (error) {
+                showResult({ error: error.message }, true);
+            }
+        }
+    </script>
+</body>
+
+</html>

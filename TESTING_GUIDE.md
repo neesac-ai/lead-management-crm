@@ -1,305 +1,238 @@
-# Platform Integrations Testing Guide
+# Testing Guide - Native Android App Integration
 
-## Prerequisites
+## Current Status
 
-1. **Run the database migration**
-   ```sql
-   -- Execute in Supabase SQL Editor
-   -- File: supabase/migrations/028_platform_integrations.sql
+### ✅ What's Already Built
+
+1. **Backend API Endpoints** (Ready to use)
+   - Call Tracking: `/api/calls/log`, `/api/calls/[leadId]`, `/api/calls/analytics`
+   - Location Tracking: `/api/locations/checkin`, `/api/locations/track`, `/api/locations/geofence`, `/api/locations/[leadId]`, `/api/locations/team`
+
+2. **Database Migrations** (Need to be applied)
+   - `supabase/migrations/032_call_logs.sql` - Call logs table
+   - `supabase/migrations/033_location_tracking.sql` - Location tracking tables
+
+3. **PWA Frontend Integration** (Ready to test)
+   - Native bridge detection (`src/lib/native-bridge.ts`)
+   - Updated contact actions with call tracking
+   - Location check-in button
+   - Download page
+   - Settings page updates
+
+4. **Android Native Code** (Needs to be built)
+   - Call tracking bridge
+   - Location tracking bridge
+   - MainActivity with WebView
+
+## What You Can Test Right Now (Without Android App)
+
+### 1. PWA Frontend Changes
+
+You can test the PWA frontend changes locally:
+
+```bash
+# Start your Next.js dev server
+npm run dev
+```
+
+**Test these features:**
+- ✅ Native bridge detection (will return `false` in browser, but code is ready)
+- ✅ Download page at `/download`
+- ✅ Settings page updates (shows native app download section)
+- ✅ Contact actions UI (will fallback to `tel:` links in browser)
+- ✅ Location check-in button (will use browser Geolocation API as fallback)
+
+**Note:** The native features won't work in browser, but the UI and fallback behavior will work.
+
+### 2. Backend API Endpoints
+
+The API endpoints are ready, but you need to apply migrations first:
+
+```bash
+# Apply database migrations to your Supabase instance
+# Option 1: Using Supabase CLI
+supabase db push
+
+# Option 2: Apply manually via Supabase Dashboard
+# Go to SQL Editor and run:
+# - supabase/migrations/032_call_logs.sql
+# - supabase/migrations/033_location_tracking.sql
+```
+
+**After migrations are applied, you can test:**
+- ✅ POST `/api/calls/log` - Log call from native app
+- ✅ GET `/api/calls/[leadId]` - Get call history for a lead
+- ✅ POST `/api/locations/checkin` - Manual check-in
+- ✅ POST `/api/locations/track` - Continuous location tracking
+- ✅ GET `/api/locations/[leadId]` - Get location history
+
+## What Requires Android App Build
+
+### To Test Native Features Fully:
+
+1. **Build Android APK**
+   ```bash
+   cd android
+   ./gradlew assembleDebug
+   # APK will be at: android/app/build/outputs/apk/debug/app-debug.apk
    ```
 
-2. **Verify migration success**
-   - Check that these tables exist:
-     - `platform_integrations`
-     - `integration_sync_logs`
-     - `campaign_assignments`
-   - Check that `leads` table has new columns:
-     - `integration_id`
-     - `external_id`
-     - `integration_metadata`
+2. **Install on Android Device**
+   - Enable "Install from Unknown Sources" in Android settings
+   - Transfer APK to device and install
+   - Grant required permissions when prompted
 
-## Testing Steps
+3. **Test Native Features**
+   - Call tracking (exact duration from device call logs)
+   - Location check-in (GPS coordinates)
+   - Geofencing (automatic check-ins)
 
-### 1. Access Integrations Page
+## Step-by-Step Testing Plan
 
-1. Log in as an **admin** user
-2. Navigate to **Integrations** in the sidebar (should appear for admin role)
-3. Verify the page loads and shows "No Integrations" message
+### Phase 1: Test PWA Frontend (No Android App Needed)
 
-### 2. Create a Facebook Integration
-
-1. Click **"Add Integration"** button
-2. Fill in the form:
-   - **Integration Name**: "Facebook Test Integration"
-   - **Platform**: Select Facebook (📘)
-   - **Webhook Secret**: Enter a test secret (e.g., "test_secret_123")
-3. Click **"Create Integration"**
-4. Verify:
-   - Redirects to integration detail page
-   - Integration shows as "Active" with "idle" status
-   - Webhook URL is displayed
-
-### 3. Test Connection
-
-1. On the integration detail page, click **"Test Connection"**
-2. **Expected**: Should show error (since credentials aren't configured yet)
-3. This is expected - we'll configure credentials next
-
-### 4. Configure Integration Credentials
-
-1. Go to **Settings** tab on integration detail page
-2. Update integration via API (for testing):
+1. **Start dev server:**
    ```bash
-   # Get your integration ID from the URL
-   curl -X PATCH http://localhost:3000/api/integrations/{integration_id} \
+   npm run dev
+   ```
+
+2. **Test download page:**
+   - Navigate to `http://localhost:3000/download`
+   - Verify UI shows correctly
+   - Check platform detection (should show "Desktop/Other Devices" on desktop)
+
+3. **Test settings page:**
+   - Navigate to `/[orgSlug]/settings`
+   - Verify native app download section appears
+   - Check that Google Drive sync shows as deprecated when using native app
+
+4. **Test contact actions:**
+   - Open any lead detail dialog
+   - Click call button (should open `tel:` link in browser)
+   - Verify UI shows correctly
+
+5. **Test location check-in (browser fallback):**
+   - Open lead detail dialog
+   - Click "Check In" button (if visible - only shows in native app)
+   - In browser, it will use Geolocation API
+
+### Phase 2: Apply Database Migrations
+
+1. **Apply migrations:**
+   ```bash
+   # Using Supabase CLI
+   supabase db push
+
+   # OR manually via Supabase Dashboard SQL Editor
+   ```
+
+2. **Verify tables created:**
+   - Check Supabase Dashboard → Table Editor
+   - Verify `call_logs` table exists
+   - Verify `team_locations`, `geofences`, `visit_sessions`, `location_tracking_settings` tables exist
+
+3. **Test API endpoints (using Postman/curl):**
+   ```bash
+   # Test call log endpoint
+   curl -X POST http://localhost:3000/api/calls/log \
      -H "Content-Type: application/json" \
      -H "Cookie: your-auth-cookie" \
      -d '{
-       "credentials": {
-         "access_token": "your-facebook-access-token"
-       },
-       "config": {
-         "form_id": "your-lead-form-id",
-         "ad_account_id": "your-ad-account-id"
-       }
+       "lead_id": "lead-uuid",
+       "phone_number": "+1234567890",
+       "call_direction": "OUTGOING",
+       "call_status": "COMPLETED",
+       "duration_seconds": 120
      }'
-   ```
-3. Or update directly in Supabase:
-   ```sql
-   UPDATE platform_integrations
-   SET credentials = '{"access_token": "your-token"}'::jsonb,
-       config = '{"form_id": "your-form-id", "ad_account_id": "your-ad-account-id"}'::jsonb
-   WHERE id = 'your-integration-id';
-   ```
 
-### 5. Test Connection Again
-
-1. Click **"Test Connection"** button
-2. **Expected**: 
-   - If credentials are valid: "Connection test successful"
-   - If invalid: Error message with details
-
-### 6. Test Manual Sync
-
-1. Click **"Sync Now"** button
-2. **Expected**:
-   - Button shows "Syncing..." state
-   - After completion: Toast shows "Sync completed: X leads created"
-   - Integration status updates
-   - Check `integration_sync_logs` table for sync record
-
-### 7. Test Campaign Assignment
-
-1. Go to **"Campaign Assignments"** tab
-2. Click **"Fetch Campaigns"** button
-   - **Expected**: Fetches campaigns from Facebook API (if configured)
-3. Click **"Add Assignment"** button
-4. Fill in the form:
-   - **Campaign ID**: "123456789" (test ID)
-   - **Campaign Name**: "Test Campaign"
-   - **Assign To**: Select a sales rep from dropdown
-   - **Active**: Checked
-5. Click **"Create"**
-6. **Verify**:
-   - Assignment appears in the table
-   - Shows campaign name, ID, assigned user, and status
-
-### 8. Test Webhook (Facebook)
-
-#### Option A: Using Facebook Developer Console
-
-1. Go to Facebook Developer Console
-2. Navigate to your app → Webhooks
-3. Add webhook URL: `https://yourdomain.com/api/integrations/webhooks/facebook?secret=test_secret_123`
-4. Subscribe to `leadgen` events
-5. Facebook will send a verification GET request
-6. **Verify**: Webhook is verified successfully
-
-#### Option B: Manual Webhook Test
-
-1. Use a tool like Postman or curl:
-   ```bash
-   curl -X POST http://localhost:3000/api/integrations/webhooks/facebook?secret=test_secret_123 \
+   # Test location check-in endpoint
+   curl -X POST http://localhost:3000/api/locations/checkin \
      -H "Content-Type: application/json" \
-     -H "X-Hub-Signature-256: sha256=calculated_signature" \
+     -H "Cookie: your-auth-cookie" \
      -d '{
-       "object": "page",
-       "entry": [{
-         "changes": [{
-           "value": {
-             "leadgen_id": "test_lead_123",
-             "form_id": "form_123",
-             "page_id": "page_123",
-             "adgroup_id": "campaign_123",
-             "ad_id": "ad_123",
-             "created_time": 1234567890,
-             "field_data": [
-               {"name": "full_name", "values": ["John Doe"]},
-               {"name": "email", "values": ["john@example.com"]},
-               {"name": "phone_number", "values": ["+1234567890"]}
-             ]
-           }
-         }]
-       }]
+       "lead_id": "lead-uuid",
+       "latitude": 12.9716,
+       "longitude": 77.5946,
+       "accuracy": 10.5
      }'
    ```
 
-2. **Verify**:
-   - Lead is created in `leads` table
-   - Lead has `integration_id` set
-   - Lead has `external_id` = "test_lead_123"
-   - Lead has `integration_metadata` with campaign data
-   - Lead is assigned based on campaign assignment (if configured)
-   - Check `integration_sync_logs` for webhook log entry
+### Phase 3: Build and Test Android App
 
-### 9. Verify Lead Assignment Logic
-
-#### Test Campaign-Based Assignment
-
-1. Create a campaign assignment for a specific campaign ID
-2. Create a lead via webhook with that campaign ID in metadata
-3. **Verify**: Lead is assigned to the configured sales rep
-
-#### Test Fallback Assignment
-
-1. Create a lead via webhook with a campaign ID that has NO assignment
-2. **Verify**: Lead follows normal assignment rules (percentage/round-robin)
-
-### 10. Test Polling Service
-
-1. Call the polling endpoint:
+1. **Build APK:**
    ```bash
-   curl -X POST http://localhost:3000/api/integrations/poll \
-     -H "Authorization: Bearer your-polling-secret"
+   cd android
+   ./gradlew assembleDebug
    ```
 
-2. **Verify**:
-   - All active integrations are polled
-   - New leads are fetched and created
-   - `integration_sync_logs` shows scheduled sync entries
-   - Integration `last_sync_at` is updated
+2. **Install on device:**
+   - Transfer `android/app/build/outputs/apk/debug/app-debug.apk` to Android device
+   - Install APK
+   - Grant permissions: Location, Phone, Call Logs
 
-### 11. Verify Lead Appears in CRM
+3. **Test native features:**
+   - Open app (should load PWA)
+   - Navigate to a lead
+   - Click "Call" button → Should open dialer and track call
+   - Click "Check In" button → Should get GPS location and log check-in
+   - Verify call logs appear in lead detail dialog
+   - Verify location history appears
 
-1. Go to **Leads** page
-2. **Verify**:
-   - Integration-created leads appear in the list
-   - Source shows as "facebook" (or platform name)
-   - Lead detail shows integration metadata
-   - Lead is assigned correctly
+## Quick Test Checklist
 
-### 12. Test Error Handling
+### ✅ Can Test Now (PWA Frontend)
+- [ ] Download page UI
+- [ ] Settings page native app section
+- [ ] Contact actions UI (browser fallback)
+- [ ] Location check-in UI (browser Geolocation fallback)
+- [ ] Native bridge detection (returns false in browser)
 
-1. Deactivate an integration
-2. Try to sync
-3. **Expected**: Error message "Integration is not active"
+### ⚠️ Needs Database Migrations
+- [ ] Apply `032_call_logs.sql` migration
+- [ ] Apply `033_location_tracking.sql` migration
+- [ ] Test API endpoints with Postman/curl
 
-4. Create integration with invalid credentials
-5. Test connection
-6. **Expected**: Error message with details
+### 📱 Needs Android App Build
+- [ ] Build APK (`./gradlew assembleDebug`)
+- [ ] Install on Android device
+- [ ] Test call tracking
+- [ ] Test location check-in
+- [ ] Test geofencing
 
-7. Send invalid webhook payload
-8. **Expected**: Error logged, no lead created
+## Troubleshooting
 
-### 13. Test RLS Policies
+### API Endpoints Return 500 Error
+- **Cause:** Database migrations not applied
+- **Fix:** Apply migrations via `supabase db push` or Supabase Dashboard
 
-1. Log in as a **sales** user
-2. Try to access `/integrations` page
-3. **Expected**: Access denied or page not visible
+### Native Bridge Not Detected
+- **Cause:** Running in browser, not native app
+- **Fix:** This is expected. Native bridge only works in Android app.
 
-4. Log in as **admin**
-5. Create integration
-6. **Verify**: Only admin can see/manage integrations
+### Location Check-In Not Working in Browser
+- **Cause:** Browser Geolocation API requires HTTPS (or localhost)
+- **Fix:** Use `http://localhost:3000` or deploy with HTTPS
 
-### 14. Test Campaign Assignment Updates
+### Android App Build Fails
+- **Cause:** Missing dependencies or configuration
+- **Fix:**
+  - Check `android/build.gradle` and `android/app/build.gradle`
+  - Ensure Android SDK is installed
+  - Run `./gradlew clean` and try again
 
-1. Edit an existing campaign assignment
-2. Change assigned user
-3. **Verify**: Assignment updates successfully
+## Next Steps
 
-4. Toggle assignment active/inactive
-5. **Verify**: Status updates, affects new lead assignments
+1. **Test PWA frontend** (can do now)
+2. **Apply database migrations** (required for API endpoints)
+3. **Build Android app** (required for native features)
+4. **Test end-to-end** (native app → PWA → backend)
 
-6. Delete an assignment
-7. **Verify**: Assignment removed, future leads use fallback logic
+## Summary
 
-## Database Verification Queries
+**You can test the PWA frontend changes right now** without the Android app or migrations. The UI will work with browser fallbacks.
 
-```sql
--- Check integrations
-SELECT * FROM platform_integrations;
+**To test the full functionality**, you need:
+1. ✅ Database migrations applied (5 minutes)
+2. ✅ Android app built and installed (15-30 minutes)
 
--- Check sync logs
-SELECT * FROM integration_sync_logs ORDER BY created_at DESC LIMIT 10;
-
--- Check campaign assignments
-SELECT ca.*, u.name as assigned_user_name
-FROM campaign_assignments ca
-LEFT JOIN users u ON ca.assigned_to = u.id;
-
--- Check leads created by integrations
-SELECT l.*, pi.name as integration_name, pi.platform
-FROM leads l
-LEFT JOIN platform_integrations pi ON l.integration_id = pi.id
-WHERE l.integration_id IS NOT NULL
-ORDER BY l.created_at DESC;
-
--- Check integration metadata
-SELECT 
-  id,
-  name,
-  integration_metadata->>'campaign_id' as campaign_id,
-  integration_metadata->>'campaign_name' as campaign_name
-FROM leads
-WHERE integration_metadata IS NOT NULL;
-```
-
-## Common Issues & Solutions
-
-### Issue: "Integration not found" error
-- **Solution**: Verify integration exists and user has access (same org)
-
-### Issue: Webhook signature verification fails
-- **Solution**: Ensure webhook secret matches in integration config
-
-### Issue: Leads not being assigned
-- **Solution**: 
-  - Check campaign assignment exists and is active
-  - Verify campaign_id in lead's integration_metadata matches assignment
-  - Check sales team members exist and are active
-
-### Issue: Polling service returns 401
-- **Solution**: Set `POLLING_SECRET` env variable and include in Authorization header
-
-### Issue: Campaigns not fetching
-- **Solution**: 
-  - Verify credentials are configured
-  - Check ad_account_id is set in config
-  - Verify API permissions
-
-## Next Steps for Full Implementation
-
-1. **Complete WhatsApp Integration**:
-   - Implement webhook signature verification
-   - Implement lead extraction
-   - Implement API client
-
-2. **Complete LinkedIn Integration**:
-   - Implement OAuth flow
-   - Implement webhook handler
-   - Implement API client
-
-3. **Complete Instagram Integration**:
-   - Uses Facebook infrastructure (mostly done)
-   - Test with Instagram-specific endpoints
-
-4. **Add OAuth Flow UI**:
-   - Create OAuth initiation pages
-   - Handle OAuth callbacks
-   - Store tokens securely
-
-5. **Add Monitoring**:
-   - Dashboard for integration health
-   - Alerts for failed syncs
-   - Metrics and analytics
-
+The backend APIs are already created and ready - they just need the database tables to exist!

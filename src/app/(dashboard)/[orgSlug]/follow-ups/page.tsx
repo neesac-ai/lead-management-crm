@@ -455,13 +455,13 @@ export default function FollowUpsPage() {
                 <CardTitle>Scheduled Follow-ups</CardTitle>
                 <CardDescription>{filteredFollowUps.length} follow-up{filteredFollowUps.length !== 1 ? 's' : ''}</CardDescription>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
                 {mounted && (
                   <>
                     {/* Sales Rep Filter - Admin Only */}
                     {isAdmin && salesTeam.length > 0 && (
                       <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                        <SelectTrigger className="w-[150px]">
+                        <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
                           <SelectValue placeholder="Sales Rep" />
                         </SelectTrigger>
                         <SelectContent>
@@ -476,8 +476,8 @@ export default function FollowUpsPage() {
                     {/* Product Filter */}
                     {products.length > 0 && (
                       <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                        <SelectTrigger className="w-[150px]">
-                          <Package className="h-4 w-4 mr-2" />
+                        <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                           <SelectValue placeholder="Product" />
                         </SelectTrigger>
                         <SelectContent>
@@ -493,42 +493,45 @@ export default function FollowUpsPage() {
                 )}
 
                 {/* Phone Search */}
-                <div className="relative">
-                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <div className="relative w-full sm:w-[160px]">
+                  <Phone className="absolute left-2 top-2 sm:left-2.5 sm:top-2.5 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                   <Input
                     type="text"
                     placeholder="Search by phone..."
                     value={phoneSearch}
                     onChange={(e) => setPhoneSearch(e.target.value)}
-                    className="w-[160px] pl-8 h-9"
+                    className="w-full sm:w-[160px] pl-8 pr-2 h-8 sm:h-9 text-xs sm:text-sm"
                   />
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowFilters(!showFilters)}
-                  className={showFilters ? 'bg-primary/10' : ''}
-                >
-                  <Filter className="h-4 w-4 mr-1" />
-                  More
-                </Button>
-
-                {hasActiveFilters && (
+                <div className="flex items-center gap-2">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    onClick={clearAllFilters}
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={`h-8 sm:h-9 text-xs sm:text-sm ${showFilters ? 'bg-primary/10' : ''}`}
                   >
-                    Clear
+                    <Filter className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                    More
                   </Button>
-                )}
+
+                  {hasActiveFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearAllFilters}
+                      className="h-8 sm:h-9 text-xs sm:text-sm"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Extended Filters */}
             {showFilters && (
-              <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-4 p-2 sm:p-3 bg-muted/50 rounded-lg">
                 {/* Show Upcoming Only */}
                 <div className="flex items-center gap-2">
                   <Checkbox
@@ -536,27 +539,29 @@ export default function FollowUpsPage() {
                     checked={showUpcomingOnly}
                     onCheckedChange={(checked) => setShowUpcomingOnly(checked === true)}
                   />
-                  <Label htmlFor="upcoming-only" className="text-sm cursor-pointer">
+                  <Label htmlFor="upcoming-only" className="text-xs sm:text-sm cursor-pointer">
                     Upcoming only
                   </Label>
                 </div>
 
                 {/* Date Range Filter */}
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="w-[140px] h-9"
-                    placeholder="From"
-                  />
-                  <span className="text-muted-foreground">to</span>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                    <Input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                      placeholder="From"
+                    />
+                  </div>
+                  <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
                   <Input
                     type="date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
-                    className="w-[140px] h-9"
+                    className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
                     placeholder="To"
                   />
                 </div>

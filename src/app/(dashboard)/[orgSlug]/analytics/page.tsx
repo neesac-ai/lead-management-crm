@@ -813,31 +813,31 @@ export default function AnalyticsPage() {
         description={canViewTeam ? "Team performance and insights" : "Your performance metrics"}
       />
 
-      <div className="flex-1 p-4 lg:p-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="overview" className="flex items-center gap-2">
-              <BarChart3 className="h-4 w-4" />
+      <div className="flex-1 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-3 sm:space-y-4 lg:space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-2 h-auto">
+            <TabsTrigger value="overview" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm px-2 sm:px-4 py-2">
+              <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="calls" className="flex items-center gap-2">
-              <Phone className="h-4 w-4" />
+            <TabsTrigger value="calls" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm px-2 sm:px-4 py-2">
+              <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Calls
             </TabsTrigger>
           </TabsList>
 
           {/* OVERVIEW TAB */}
-          <TabsContent value="overview" className="space-y-6">
+          <TabsContent value="overview" className="space-y-3 sm:space-y-4 lg:space-y-6 mt-3 sm:mt-4">
             {/* Date Filter */}
             <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
+              <CardHeader className="pb-2 sm:pb-3 p-3 sm:p-6">
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                  <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   Time Period
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap items-center gap-2">
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
                   {[
                     { value: 'today', label: 'Today' },
                     { value: 'last_7_days', label: 'Last 7 Days' },
@@ -850,24 +850,25 @@ export default function AnalyticsPage() {
                       variant={dateFilter === filter.value ? 'default' : 'outline'}
                       size="sm"
                       onClick={() => setDateFilter(filter.value as DateFilter)}
+                      className="text-xs sm:text-sm h-8 sm:h-9"
                     >
                       {filter.label}
                     </Button>
                   ))}
                   {dateFilter === 'custom' && (
-                    <div className="flex items-center gap-2 ml-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto sm:ml-2">
                       <Input
                         type="date"
                         value={customDateFrom}
                         onChange={(e) => setCustomDateFrom(e.target.value)}
-                        className="w-[140px] h-9"
+                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
                       />
-                      <span className="text-muted-foreground">to</span>
+                      <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
                       <Input
                         type="date"
                         value={customDateTo}
                         onChange={(e) => setCustomDateTo(e.target.value)}
-                        className="w-[140px] h-9"
+                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
                       />
                     </div>
                   )}
@@ -876,72 +877,72 @@ export default function AnalyticsPage() {
             </Card>
 
             {/* Summary Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3 lg:gap-4">
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <Target className="h-5 w-5 text-blue-600" />
+                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg shrink-0">
+                      <Target className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
                     </div>
-                    <div>
-                      <p className="text-2xl font-bold">{totalLeads}</p>
-                      <p className="text-xs text-muted-foreground">Total Leads</p>
+                    <div className="min-w-0">
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{totalLeads}</p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Total Leads</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-yellow-100 rounded-lg">
-                      <Phone className="h-5 w-5 text-yellow-600" />
+                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="p-1.5 sm:p-2 bg-yellow-100 rounded-lg shrink-0">
+                      <Phone className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-600" />
                     </div>
-                    <div>
-                      <p className="text-2xl font-bold">{actionedLeadsCount}</p>
-                      <p className="text-xs text-muted-foreground">Actioned</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cyan-100 rounded-lg">
-                      <BarChart3 className="h-5 w-5 text-cyan-600" />
-                    </div>
-                    <div>
-                      <p className="text-2xl font-bold">{actionRate}%</p>
-                      <p className="text-xs text-muted-foreground">Action Rate</p>
+                    <div className="min-w-0">
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{actionedLeadsCount}</p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Actioned</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-green-100 rounded-lg">
-                      <CheckCircle2 className="h-5 w-5 text-green-600" />
+                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="p-1.5 sm:p-2 bg-cyan-100 rounded-lg shrink-0">
+                      <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 text-cyan-600" />
                     </div>
-                    <div>
-                      <p className="text-2xl font-bold">{wonDeals}</p>
-                      <p className="text-xs text-muted-foreground">Deals Won</p>
+                    <div className="min-w-0">
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{actionRate}%</p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Action Rate</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardContent className="pt-6">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-purple-100 rounded-lg">
-                      <TrendingUp className="h-5 w-5 text-purple-600" />
+                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg shrink-0">
+                      <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
                     </div>
-                    <div>
-                      <p className="text-2xl font-bold">{conversionRate}%</p>
-                      <p className="text-xs text-muted-foreground">Win Rate</p>
+                    <div className="min-w-0">
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{wonDeals}</p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Deals Won</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                  <div className="flex items-center gap-2 sm:gap-3">
+                    <div className="p-1.5 sm:p-2 bg-purple-100 rounded-lg shrink-0">
+                      <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{conversionRate}%</p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Win Rate</p>
                     </div>
                   </div>
                 </CardContent>
@@ -950,38 +951,38 @@ export default function AnalyticsPage() {
 
             {/* Subscription Type Breakdown */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5" />
+              <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                  <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
                   Subscription Type Breakdown
                 </CardTitle>
               </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Trial</p>
-                      <p className="text-2xl font-bold text-blue-600">{trialLeads}</p>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 lg:gap-4">
+                  <div className="flex items-center justify-between p-2 sm:p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">Trial</p>
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-600 truncate">{trialLeads}</p>
                     </div>
-                    <Badge variant="outline" className="border-blue-500 text-blue-600">
+                    <Badge variant="outline" className="border-blue-500 text-blue-600 text-xs shrink-0 ml-2">
                       {totalLeads > 0 ? Math.round((trialLeads / totalLeads) * 100) : 0}%
                     </Badge>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950 rounded-lg">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Paid</p>
-                      <p className="text-2xl font-bold text-green-600">{paidLeads}</p>
+                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">Paid</p>
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold text-green-600 truncate">{paidLeads}</p>
                     </div>
-                    <Badge variant="outline" className="border-green-500 text-green-600">
+                    <Badge variant="outline" className="border-green-500 text-green-600 text-xs shrink-0 ml-2">
                       {totalLeads > 0 ? Math.round((paidLeads / totalLeads) * 100) : 0}%
                     </Badge>
                   </div>
-                  <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Not Specified</p>
-                      <p className="text-2xl font-bold text-gray-600">{unspecifiedLeads}</p>
+                  <div className="flex items-center justify-between p-2 sm:p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <div className="min-w-0">
+                      <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">Not Specified</p>
+                      <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-600 truncate">{unspecifiedLeads}</p>
                     </div>
-                    <Badge variant="outline" className="border-gray-500 text-gray-600">
+                    <Badge variant="outline" className="border-gray-500 text-gray-600 text-xs shrink-0 ml-2">
                       {totalLeads > 0 ? Math.round((unspecifiedLeads / totalLeads) * 100) : 0}%
                     </Badge>
                   </div>
@@ -991,13 +992,13 @@ export default function AnalyticsPage() {
 
             {/* Status Breakdown */}
             <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5" />
+              <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                  <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
                   Lead Status Breakdown
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-3 sm:p-6 pt-0">
                 {totalLeads === 0 ? (
                   <p className="text-center text-muted-foreground py-8">
                     No leads found for this time period
@@ -1035,16 +1036,16 @@ export default function AnalyticsPage() {
             {/* Team Performance (Admin and Managers) */}
             {canViewTeam && salesTeam.length > 0 && (
               <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2">
-                      <Users className="h-5 w-5" />
+                <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0">
+                    <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                      <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
                       Team Performance
                     </CardTitle>
-                    <p className="text-xs text-muted-foreground">Click on a row to see details</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground">Click on a row to see details</p>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-3 sm:p-6 pt-0">
                   <div className="hidden md:block overflow-x-auto">
                     <table className="w-full">
                       <thead>
@@ -1131,22 +1132,22 @@ export default function AnalyticsPage() {
                           <Badge variant="secondary">{perf.totalLeads} leads</Badge>
                         </div>
 
-                        <div className="grid grid-cols-4 gap-2 text-center text-sm">
+                        <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-center text-sm">
                           <div className="bg-slate-50 rounded p-2">
                             <p className="text-muted-foreground text-xs">Total</p>
-                            <p className="font-medium">{perf.totalLeads}</p>
+                            <p className="font-medium text-base">{perf.totalLeads}</p>
                           </div>
                           <div className="bg-blue-50 rounded p-2">
                             <p className="text-muted-foreground text-xs">Actioned</p>
-                            <p className="font-medium">{perf.actionedLeads}</p>
+                            <p className="font-medium text-base">{perf.actionedLeads}</p>
                           </div>
                           <div className="bg-cyan-50 rounded p-2">
                             <p className="text-muted-foreground text-xs">Action%</p>
-                            <p className="font-medium">{perf.actionRate}%</p>
+                            <p className="font-medium text-base">{perf.actionRate}%</p>
                           </div>
                           <div className="bg-green-50 rounded p-2">
                             <p className="text-muted-foreground text-xs">Won</p>
-                            <p className="font-medium">{perf.statusBreakdown.deal_won}</p>
+                            <p className="font-medium text-base">{perf.statusBreakdown.deal_won}</p>
                           </div>
                         </div>
                       </div>
@@ -1159,28 +1160,28 @@ export default function AnalyticsPage() {
             {/* Activity Summary for Sales (non-managers) */}
             {!canViewTeam && (
               <Card>
-                <CardHeader>
-                  <CardTitle>Your Activity Summary</CardTitle>
+                <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+                  <CardTitle className="text-sm sm:text-base">Your Activity Summary</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="text-center p-4 bg-slate-50 rounded-lg">
-                      <p className="text-3xl font-bold text-slate-700">
+                <CardContent className="p-3 sm:p-6 pt-0">
+                  <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
+                    <div className="text-center p-3 sm:p-4 bg-slate-50 rounded-lg">
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-700">
                         {statusBreakdown.new + statusBreakdown.call_not_picked + statusBreakdown.follow_up_again}
                       </p>
-                      <p className="text-sm text-muted-foreground">Leads to Follow Up</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground">Leads to Follow Up</p>
                     </div>
-                    <div className="text-center p-4 bg-purple-50 rounded-lg">
-                      <p className="text-3xl font-bold text-purple-700">{statusBreakdown.demo_booked}</p>
-                      <p className="text-sm text-muted-foreground">Meetings Scheduled</p>
+                    <div className="text-center p-3 sm:p-4 bg-purple-50 rounded-lg">
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-purple-700">{statusBreakdown.demo_booked}</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground">Meetings Scheduled</p>
                     </div>
-                    <div className="text-center p-4 bg-green-50 rounded-lg">
-                      <p className="text-3xl font-bold text-green-700">{statusBreakdown.deal_won}</p>
-                      <p className="text-sm text-muted-foreground">Deals Closed</p>
+                    <div className="text-center p-3 sm:p-4 bg-green-50 rounded-lg">
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-green-700">{statusBreakdown.deal_won}</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground">Deals Closed</p>
                     </div>
-                    <div className="text-center p-4 bg-indigo-50 rounded-lg">
-                      <p className="text-3xl font-bold text-indigo-700">{statusBreakdown.demo_completed}</p>
-                      <p className="text-sm text-muted-foreground">Meetings Completed</p>
+                    <div className="text-center p-3 sm:p-4 bg-indigo-50 rounded-lg">
+                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-indigo-700">{statusBreakdown.demo_completed}</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground">Meetings Completed</p>
                     </div>
                   </div>
                 </CardContent>
@@ -1210,11 +1211,11 @@ export default function AnalyticsPage() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
                 {/* Team Member Filter (Admin and Managers) */}
                 {canViewTeam && salesTeam.length > 0 && (
                   <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                    <SelectTrigger className="w-[180px]">
+                    <SelectTrigger className="w-full sm:w-[180px] h-8 sm:h-9 text-xs sm:text-sm">
                       <SelectValue placeholder="Filter by member" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1229,8 +1230,8 @@ export default function AnalyticsPage() {
                 )}
 
                 {folderConfigured && isGoogleConnected && (
-                  <Button variant="outline" onClick={handleManualSync} disabled={syncing}>
-                    <RefreshCw className={`w-4 h-4 mr-2 ${syncing ? 'animate-spin' : ''}`} />
+                  <Button variant="outline" onClick={handleManualSync} disabled={syncing} className="h-8 sm:h-9 text-xs sm:text-sm">
+                    <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 ${syncing ? 'animate-spin' : ''}`} />
                     {syncing ? 'Syncing...' : 'Refresh'}
                   </Button>
                 )}
@@ -1284,27 +1285,27 @@ export default function AnalyticsPage() {
             )}
 
             {/* Call Stats */}
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Total Calls</CardTitle>
+                <CardHeader className="pb-2 p-3 sm:p-6">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Calls</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-3 sm:p-6 pt-0">
                   <div className="flex items-center gap-2">
-                    <Phone className="w-5 h-5 text-primary" />
-                    <span className="text-2xl font-bold">{repCallStats.totalCalls}</span>
+                    <Phone className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+                    <span className="text-xl sm:text-2xl font-bold">{repCallStats.totalCalls}</span>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Total Duration</CardTitle>
+                <CardHeader className="pb-2 p-3 sm:p-6">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Duration</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="p-3 sm:p-6 pt-0">
                   <div className="flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-blue-500" />
-                    <span className="text-2xl font-bold">
+                    <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500 shrink-0" />
+                    <span className="text-xl sm:text-2xl font-bold">
                       {Math.round(repCallStats.totalDuration / 60)} min
                     </span>
                   </div>
@@ -1312,27 +1313,33 @@ export default function AnalyticsPage() {
               </Card>
 
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Sentiment</CardTitle>
+                <CardHeader className="pb-2 p-3 sm:p-6">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Sentiment</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <TrendingUp className="w-4 h-4 text-green-500" />
-                    <span className="text-sm">{repCallStats.positive}</span>
-                    <Minus className="w-4 h-4 text-yellow-500" />
-                    <span className="text-sm">{repCallStats.neutral}</span>
-                    <TrendingDown className="w-4 h-4 text-red-500" />
-                    <span className="text-sm">{repCallStats.negative}</span>
+                <CardContent className="p-3 sm:p-6 pt-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-500 shrink-0" />
+                      <span className="text-xs sm:text-sm">{repCallStats.positive}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <Minus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-yellow-500 shrink-0" />
+                      <span className="text-xs sm:text-sm">{repCallStats.neutral}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 sm:gap-2">
+                      <TrendingDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500 shrink-0" />
+                      <span className="text-xs sm:text-sm">{repCallStats.negative}</span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
               <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Processing</CardTitle>
+                <CardHeader className="pb-2 p-3 sm:p-6">
+                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Processing</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-4 text-sm">
+                <CardContent className="p-3 sm:p-6 pt-0">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm">
                     <span className="text-green-600">{callStats.completed} Done</span>
                     <span className="text-amber-600">{callStats.pending} Pending</span>
                     <span className="text-red-600">{callStats.failed} Failed</span>
@@ -1350,12 +1357,12 @@ export default function AnalyticsPage() {
                     <CardDescription>Click on a recording to view details and AI analysis</CardDescription>
                   </div>
                   <div className="relative w-full sm:w-64">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Search className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground" />
                     <Input
                       placeholder="Search recordings..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-9"
+                      className="w-full pl-8 sm:pl-9 pr-2 h-8 sm:h-9 text-xs sm:text-sm"
                     />
                   </div>
                 </div>
@@ -1470,36 +1477,36 @@ export default function AnalyticsPage() {
               </DialogHeader>
 
               {/* Stats Summary */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-4">
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
-                  <p className="text-2xl font-bold">{selectedRepForDetail.totalLeads}</p>
-                  <p className="text-xs text-muted-foreground">Total Leads</p>
+              <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 py-3 sm:py-4">
+                <div className="text-center p-2 sm:p-3 bg-slate-50 dark:bg-slate-900 rounded-lg">
+                  <p className="text-xl sm:text-2xl font-bold">{selectedRepForDetail.totalLeads}</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">Total Leads</p>
                 </div>
-                <div className="text-center p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                  <p className="text-2xl font-bold text-blue-600">{selectedRepForDetail.actionedLeads}</p>
-                  <p className="text-xs text-muted-foreground">Actioned</p>
+                <div className="text-center p-2 sm:p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
+                  <p className="text-xl sm:text-2xl font-bold text-blue-600">{selectedRepForDetail.actionedLeads}</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">Actioned</p>
                 </div>
-                <div className="text-center p-3 bg-green-50 dark:bg-green-950 rounded-lg">
-                  <p className="text-2xl font-bold text-green-600">{selectedRepForDetail.statusBreakdown.deal_won}</p>
-                  <p className="text-xs text-muted-foreground">Deals Won</p>
+                <div className="text-center p-2 sm:p-3 bg-green-50 dark:bg-green-950 rounded-lg">
+                  <p className="text-xl sm:text-2xl font-bold text-green-600">{selectedRepForDetail.statusBreakdown.deal_won}</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">Deals Won</p>
                 </div>
-                <div className="text-center p-3 bg-purple-50 dark:bg-purple-950 rounded-lg">
-                  <p className="text-2xl font-bold text-purple-600">{selectedRepForDetail.conversionRate}%</p>
-                  <p className="text-xs text-muted-foreground">Win Rate</p>
+                <div className="text-center p-2 sm:p-3 bg-purple-50 dark:bg-purple-950 rounded-lg">
+                  <p className="text-xl sm:text-2xl font-bold text-purple-600">{selectedRepForDetail.conversionRate}%</p>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">Win Rate</p>
                 </div>
               </div>
 
               {/* Lead Status Breakdown */}
               <div className="border rounded-lg p-4 space-y-2">
                 <h4 className="text-sm font-medium text-muted-foreground mb-3">Lead Status Breakdown</h4>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs sm:text-sm">
                   {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((status) => {
                     const count = selectedRepForDetail.statusBreakdown[status]
                     if (count === 0) return null
                     return (
                       <div key={status} className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
-                        <span className="text-muted-foreground">{STATUS_LABELS[status]}:</span>
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[status]}`} />
+                        <span className="text-muted-foreground truncate">{STATUS_LABELS[status]}:</span>
                         <span className="font-medium">{count}</span>
                       </div>
                     )
@@ -1674,7 +1681,7 @@ export default function AnalyticsPage() {
                           </div>
 
                           {/* Score Breakdown */}
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 sm:gap-3">
                             {[
                               { label: 'Communication', key: 'communication_clarity' },
                               { label: 'Product Knowledge', key: 'product_knowledge' },
@@ -1685,9 +1692,9 @@ export default function AnalyticsPage() {
                               const score = (selectedRecording.call_quality as Record<string, number>)[key] || 0
                               const color = score >= 7 ? 'text-green-600' : score >= 5 ? 'text-yellow-600' : 'text-red-600'
                               return (
-                                <div key={key} className="p-3 rounded-lg border">
+                                <div key={key} className="p-2 sm:p-3 rounded-lg border">
                                   <p className="text-xs text-muted-foreground">{label}</p>
-                                  <p className={`text-lg font-semibold ${color}`}>{score}/10</p>
+                                  <p className={`text-base sm:text-lg font-semibold ${color}`}>{score}/10</p>
                                 </div>
                               )
                             })}

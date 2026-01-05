@@ -8,18 +8,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { 
+import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { 
-  Building2, 
-  Calendar, 
-  CheckCircle2, 
-  XCircle, 
+import {
+  Building2,
+  Calendar,
+  CheckCircle2,
+  XCircle,
   Loader2,
   ExternalLink,
   Sparkles,
@@ -31,7 +31,11 @@ import {
   Key,
   Pencil,
   X,
+  Download,
+  Smartphone,
+  MapPin,
 } from 'lucide-react'
+import { isNativeApp } from '@/lib/native-bridge'
 import { toast } from 'sonner'
 import Link from 'next/link'
 
@@ -69,19 +73,19 @@ export default function SettingsPage({ params }: PageProps) {
   const [orgEmail, setOrgEmail] = useState('')
   const [isSavingOrg, setIsSavingOrg] = useState(false)
   const [hasAIConfig, setHasAIConfig] = useState(false)
-  
+
   // Profile editing states
   const [profileName, setProfileName] = useState('')
   const [companyName, setCompanyName] = useState('')
   const [isSavingProfile, setIsSavingProfile] = useState(false)
   const [isEditingProfile, setIsEditingProfile] = useState(false)
-  
+
   // Password reset states
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [isChangingPassword, setIsChangingPassword] = useState(false)
   const [showPasswordSection, setShowPasswordSection] = useState(false)
-  
+
   // Drive folder states
   const [syncSettings, setSyncSettings] = useState<{
     id?: string
@@ -100,7 +104,7 @@ export default function SettingsPage({ params }: PageProps) {
 
   const fetchData = async () => {
     const supabase = createClient()
-    
+
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
@@ -156,7 +160,7 @@ export default function SettingsPage({ params }: PageProps) {
 
   const handleSaveProfile = async () => {
     if (!userProfile?.id) return
-    
+
     setIsSavingProfile(true)
     const supabase = createClient()
 
@@ -181,12 +185,12 @@ export default function SettingsPage({ params }: PageProps) {
       toast.error('Please fill in all password fields')
       return
     }
-    
+
     if (newPassword !== confirmPassword) {
       toast.error('Passwords do not match')
       return
     }
-    
+
     if (newPassword.length < 6) {
       toast.error('Password must be at least 6 characters')
       return
@@ -261,9 +265,9 @@ export default function SettingsPage({ params }: PageProps) {
 
     const { error } = await supabase
       .from('users')
-      .update({ 
-        google_access_token: null, 
-        google_refresh_token: null 
+      .update({
+        google_access_token: null,
+        google_refresh_token: null
       })
       .eq('auth_id', user.id)
 
@@ -278,7 +282,7 @@ export default function SettingsPage({ params }: PageProps) {
 
   const handleSaveOrg = async () => {
     if (!userProfile?.org_id) return
-    
+
     setIsSavingOrg(true)
     const supabase = createClient()
 
@@ -300,11 +304,11 @@ export default function SettingsPage({ params }: PageProps) {
   const handleBrowseFolders = async () => {
     setShowFolderBrowser(true)
     setLoadingFolders(true)
-    
+
     try {
       const response = await fetch('/api/google/drive/folders')
       const data = await response.json()
-      
+
       if (data.error) {
         toast.error(data.error)
         setShowFolderBrowser(false)
@@ -316,13 +320,13 @@ export default function SettingsPage({ params }: PageProps) {
       toast.error('Failed to load folders')
       setShowFolderBrowser(false)
     }
-    
+
     setLoadingFolders(false)
   }
 
   const handleSelectFolder = async (folder: DriveFolder) => {
     if (!userProfile?.id || !userProfile?.org_id) return
-    
+
     setSavingFolder(true)
     const supabase = createClient()
 
@@ -379,7 +383,7 @@ export default function SettingsPage({ params }: PageProps) {
 
   const handleDisconnectFolder = async () => {
     if (!syncSettings?.id) return
-    
+
     const supabase = createClient()
     const { error } = await supabase
       .from('drive_sync_settings')
@@ -408,11 +412,11 @@ export default function SettingsPage({ params }: PageProps) {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header 
-        title="Settings" 
+      <Header
+        title="Settings"
         description="Manage your account and organization settings"
       />
-      
+
       <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         {/* Account Information - Registration Info */}
         <Card>
@@ -427,8 +431,8 @@ export default function SettingsPage({ params }: PageProps) {
                   {userProfile?.role?.replace('_', ' ')}
                 </Badge>
                 {!isEditingProfile && (
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="sm"
                     onClick={() => setIsEditingProfile(true)}
                   >
@@ -470,28 +474,28 @@ export default function SettingsPage({ params }: PageProps) {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Name</Label>
-                    <Input 
+                    <Input
                       value={profileName}
                       onChange={(e) => setProfileName(e.target.value)}
-                      placeholder="Your name" 
+                      placeholder="Your name"
                     />
                   </div>
                   {isAdmin && (
                     <div className="space-y-2">
                       <Label>Organization Name</Label>
-                      <Input 
+                      <Input
                         value={companyName}
                         onChange={(e) => {
                           setCompanyName(e.target.value)
                           setOrgName(e.target.value)
                         }}
-                        placeholder="Organization name" 
+                        placeholder="Organization name"
                       />
                     </div>
                   )}
                   <div className="space-y-2">
                     <Label>Email</Label>
-                    <Input 
+                    <Input
                       value={userProfile?.email || ''}
                       disabled
                       className="bg-muted"
@@ -501,7 +505,7 @@ export default function SettingsPage({ params }: PageProps) {
                   {orgInfo && (
                     <div className="space-y-2">
                       <Label>Organization Code</Label>
-                      <Input 
+                      <Input
                         value={orgInfo.org_code}
                         disabled
                         className="bg-muted font-mono"
@@ -509,7 +513,7 @@ export default function SettingsPage({ params }: PageProps) {
                     </div>
                   )}
                 </div>
-                
+
                 <div className="flex gap-2">
                   <Button onClick={async () => {
                     await handleSaveProfile()
@@ -521,8 +525,8 @@ export default function SettingsPage({ params }: PageProps) {
                     {(isSavingProfile || isSavingOrg) && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     Save Changes
                   </Button>
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     onClick={() => {
                       // Reset to original values
                       setProfileName(userProfile?.name || '')
@@ -541,8 +545,8 @@ export default function SettingsPage({ params }: PageProps) {
             {/* Password Reset Section */}
             <div className="pt-4 border-t">
               {!showPasswordSection ? (
-                <Button 
-                  variant="ghost" 
+                <Button
+                  variant="ghost"
                   onClick={() => setShowPasswordSection(true)}
                   className="text-muted-foreground hover:text-foreground"
                 >
@@ -556,8 +560,8 @@ export default function SettingsPage({ params }: PageProps) {
                       <Key className="h-4 w-4 text-orange-500" />
                       <h4 className="font-medium">Change Password</h4>
                     </div>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       size="sm"
                       onClick={() => {
                         setShowPasswordSection(false)
@@ -571,28 +575,28 @@ export default function SettingsPage({ params }: PageProps) {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>New Password</Label>
-                      <Input 
+                      <Input
                         type="password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Enter new password" 
+                        placeholder="Enter new password"
                       />
                     </div>
                     <div className="space-y-2">
                       <Label>Confirm Password</Label>
-                      <Input 
+                      <Input
                         type="password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Confirm new password" 
+                        placeholder="Confirm new password"
                       />
                     </div>
                   </div>
-                  <Button 
+                  <Button
                     onClick={async () => {
                       await handleChangePassword()
                       setShowPasswordSection(false)
-                    }} 
+                    }}
                     disabled={isChangingPassword}
                     className="mt-4"
                   >
@@ -641,7 +645,7 @@ export default function SettingsPage({ params }: PageProps) {
                   </>
                 )}
               </div>
-              
+
               {isGoogleConnected ? (
                 <Button variant="outline" onClick={handleDisconnectGoogle}>
                   Disconnect
@@ -710,7 +714,7 @@ export default function SettingsPage({ params }: PageProps) {
                     </>
                   )}
                 </div>
-                
+
                 {isFolderConnected ? (
                   <div className="flex gap-2">
                     <Button variant="outline" size="sm" onClick={handleBrowseFolders}>
@@ -768,7 +772,7 @@ export default function SettingsPage({ params }: PageProps) {
                     </>
                   )}
                 </div>
-                
+
                 <Button asChild>
                   <Link href={`/${orgSlug}/settings/ai`}>
                     <Sparkles className="h-4 w-4 mr-2" />
@@ -791,7 +795,7 @@ export default function SettingsPage({ params }: PageProps) {
               Choose the Google Drive folder where your call recordings are saved
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="py-4">
             {loadingFolders ? (
               <div className="flex items-center justify-center py-8">
@@ -820,7 +824,7 @@ export default function SettingsPage({ params }: PageProps) {
               </div>
             )}
           </div>
-          
+
           <div className="flex justify-between items-center pt-2 border-t">
             <Button variant="ghost" size="sm" onClick={handleBrowseFolders} disabled={loadingFolders}>
               <RefreshCw className={`h-4 w-4 mr-2 ${loadingFolders ? 'animate-spin' : ''}`} />

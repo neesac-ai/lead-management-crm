@@ -630,14 +630,15 @@ export default function SubscriptionsPage() {
         isRefreshing={isLoading}
       />
 
-      <div className="flex-1 p-4 lg:p-6 space-y-4">
+      <div className="flex-1 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6 space-y-3 sm:space-y-4">
         {/* Toggle for Approval Status Filter */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-0">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <Button
               variant={approvalFilter === 'approved' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setApprovalFilter('approved')}
+              className="h-8 sm:h-9 text-xs sm:text-sm"
             >
               Approved Only
             </Button>
@@ -645,6 +646,7 @@ export default function SubscriptionsPage() {
               variant={approvalFilter === 'pending' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setApprovalFilter('pending')}
+              className="h-8 sm:h-9 text-xs sm:text-sm"
             >
               Approval Pending
             </Button>
@@ -652,70 +654,71 @@ export default function SubscriptionsPage() {
               variant={approvalFilter === 'all' ? 'default' : 'outline'}
               size="sm"
               onClick={() => setApprovalFilter('all')}
+              className="h-8 sm:h-9 text-xs sm:text-sm"
             >
               All Subscriptions
             </Button>
           </div>
-          <div className="text-sm text-muted-foreground">
+          <div className="text-xs sm:text-sm text-muted-foreground">
             Showing {approvalFilter === 'approved' ? 'approved' : approvalFilter === 'pending' ? 'approval pending' : 'all'} subscriptions
           </div>
         </div>
 
         {/* Stats Summary */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Total</div>
-            <div className="text-xl font-bold">{stats.totalCount}</div>
+        <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2 sm:gap-3">
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Total</div>
+            <div className="text-lg sm:text-xl font-bold">{stats.totalCount}</div>
           </Card>
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Deal Value</div>
-            <div className="text-lg font-bold text-primary">{formatCurrency(stats.totalDealValue)}</div>
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Deal Value</div>
+            <div className="text-sm sm:text-lg font-bold text-primary truncate">{formatCurrency(stats.totalDealValue)}</div>
           </Card>
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Credited</div>
-            <div className="text-lg font-bold text-green-600">{formatCurrency(stats.totalCredited)}</div>
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Credited</div>
+            <div className="text-sm sm:text-lg font-bold text-green-600 truncate">{formatCurrency(stats.totalCredited)}</div>
           </Card>
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Pending</div>
-            <div className="text-lg font-bold text-red-600">{formatCurrency(stats.totalPending)}</div>
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Pending</div>
+            <div className="text-sm sm:text-lg font-bold text-red-600 truncate">{formatCurrency(stats.totalPending)}</div>
           </Card>
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Active</div>
-            <div className="text-xl font-bold text-green-600">{stats.activeCount}</div>
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Active</div>
+            <div className="text-lg sm:text-xl font-bold text-green-600">{stats.activeCount}</div>
           </Card>
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Expired</div>
-            <div className="text-xl font-bold text-red-600">{stats.inactiveCount}</div>
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Expired</div>
+            <div className="text-lg sm:text-xl font-bold text-red-600">{stats.inactiveCount}</div>
           </Card>
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Paused</div>
-            <div className="text-xl font-bold text-yellow-600">{stats.pausedCount}</div>
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Paused</div>
+            <div className="text-lg sm:text-xl font-bold text-yellow-600">{stats.pausedCount}</div>
           </Card>
-          <Card className="p-3">
-            <div className="text-xs text-muted-foreground">Non Recurring</div>
-            <div className="text-xl font-bold text-gray-600">{stats.nonRecurringCount}</div>
+          <Card className="p-2 sm:p-3">
+            <div className="text-[10px] sm:text-xs text-muted-foreground">Non Recurring</div>
+            <div className="text-lg sm:text-xl font-bold text-gray-600">{stats.nonRecurringCount}</div>
           </Card>
         </div>
 
         <Card>
-          <CardHeader className="flex flex-col gap-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <CardHeader className="flex flex-col gap-3 sm:gap-4 p-3 sm:p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
-                <CardTitle className="flex items-center gap-2">
-                  <CreditCard className="h-5 w-5" />
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                  <CreditCard className="h-4 w-4 sm:h-5 sm:w-5" />
                   Customer Subscriptions
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-xs sm:text-sm">
                   {filteredSubscriptions.length} of {subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
                 </CardDescription>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
                 {mounted && (
                   <>
                     {/* Sales Rep Filter - Admin and Managers */}
                     {canViewTeam && salesTeam.length > 0 && (
                       <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                        <SelectTrigger className="w-[140px]">
+                        <SelectTrigger className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm">
                           <SelectValue placeholder="Sales Rep" />
                         </SelectTrigger>
                         <SelectContent>
@@ -730,8 +733,8 @@ export default function SubscriptionsPage() {
                     {/* Product Filter */}
                     {products.length > 0 && (
                       <Select value={selectedProduct} onValueChange={setSelectedProduct}>
-                        <SelectTrigger className="w-[150px]">
-                          <Package className="h-4 w-4 mr-2" />
+                        <SelectTrigger className="w-full sm:w-[150px] h-8 sm:h-9 text-xs sm:text-sm">
+                          <Package className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2" />
                           <SelectValue placeholder="Product" />
                         </SelectTrigger>
                         <SelectContent>
@@ -747,20 +750,20 @@ export default function SubscriptionsPage() {
                 )}
 
                 {/* Phone Search */}
-                <div className="relative">
-                  <Phone className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <div className="relative w-full sm:w-[160px]">
+                  <Phone className="absolute left-2 top-2 sm:left-2.5 sm:top-2.5 h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                   <Input
                     type="text"
                     placeholder="Search by phone..."
                     value={phoneSearch}
                     onChange={(e) => setPhoneSearch(e.target.value)}
-                    className="w-[160px] pl-8 h-9"
+                    className="w-full sm:w-[160px] pl-8 pr-2 h-8 sm:h-9 text-xs sm:text-sm"
                   />
                 </div>
 
                 {mounted && (
                   <Select value={filter} onValueChange={setFilter}>
-                    <SelectTrigger className="w-[130px]">
+                    <SelectTrigger className="w-full sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm">
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -773,66 +776,73 @@ export default function SubscriptionsPage() {
                   </Select>
                 )}
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowFilters(!showFilters)}
-                  className={showFilters ? 'bg-primary/10' : ''}
-                >
-                  <Filter className="h-4 w-4 mr-1" />
-                  More
-                </Button>
-
-                {hasActiveFilters && (
+                <div className="flex items-center gap-2">
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    onClick={clearAllFilters}
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={`h-8 sm:h-9 text-xs sm:text-sm ${showFilters ? 'bg-primary/10' : ''}`}
                   >
-                    Clear
+                    <Filter className="h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1" />
+                    More
                   </Button>
-                )}
+
+                  {hasActiveFilters && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearAllFilters}
+                      className="h-8 sm:h-9 text-xs sm:text-sm"
+                    >
+                      Clear
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* Extended Filters */}
             {showFilters && mounted && (
-              <div className="flex flex-wrap items-center gap-4 p-3 bg-muted/50 rounded-lg">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-4 p-2 sm:p-3 bg-muted/50 rounded-lg">
                 {/* Deal Value Filter */}
-                <div className="flex items-center gap-1">
-                  <DollarSign className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">Deal Value</span>
-                  <Select value={dealValueOperator} onValueChange={setDealValueOperator}>
-                    <SelectTrigger className="w-[90px]">
-                      <SelectValue placeholder="Any" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Any</SelectItem>
-                      <SelectItem value="lt">&lt; Less</SelectItem>
-                      <SelectItem value="eq">= Equal</SelectItem>
-                      <SelectItem value="gt">&gt; Greater</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {dealValueOperator !== 'all' && (
-                    <div className="flex items-center gap-1">
-                      <span className="text-muted-foreground">₹</span>
-                      <Input
-                        type="number"
-                        placeholder="0"
-                        value={dealValueAmount}
-                        onChange={(e) => setDealValueAmount(e.target.value)}
-                        className="w-[90px] h-9"
-                        min="0"
-                      />
-                    </div>
-                  )}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-1">
+                  <div className="flex items-center gap-1.5 sm:gap-1">
+                    <DollarSign className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                    <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">Deal Value</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Select value={dealValueOperator} onValueChange={setDealValueOperator}>
+                      <SelectTrigger className="w-full sm:w-[90px] h-8 sm:h-9 text-xs sm:text-sm">
+                        <SelectValue placeholder="Any" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any</SelectItem>
+                        <SelectItem value="lt">&lt; Less</SelectItem>
+                        <SelectItem value="eq">= Equal</SelectItem>
+                        <SelectItem value="gt">&gt; Greater</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {dealValueOperator !== 'all' && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs sm:text-sm text-muted-foreground">₹</span>
+                        <Input
+                          type="number"
+                          placeholder="0"
+                          value={dealValueAmount}
+                          onChange={(e) => setDealValueAmount(e.target.value)}
+                          className="w-[90px] h-8 sm:h-9 text-xs sm:text-sm"
+                          min="0"
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Payment Filter */}
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Payment:</span>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-2">
+                  <span className="text-xs sm:text-sm text-muted-foreground">Payment:</span>
                   <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-                    <SelectTrigger className="w-[130px]">
+                    <SelectTrigger className="w-full sm:w-[130px] h-8 sm:h-9 text-xs sm:text-sm">
                       <SelectValue placeholder="All" />
                     </SelectTrigger>
                     <SelectContent>
@@ -844,67 +854,75 @@ export default function SubscriptionsPage() {
                 </div>
 
                 {/* Days Left Filter */}
-                <div className="flex items-center gap-1">
-                  <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">Days Left</span>
-                  <Select value={daysLeftOperator} onValueChange={setDaysLeftOperator}>
-                    <SelectTrigger className="w-[90px]">
-                      <SelectValue placeholder="Any" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Any</SelectItem>
-                      <SelectItem value="lt">&lt; Less</SelectItem>
-                      <SelectItem value="eq">= Equal</SelectItem>
-                      <SelectItem value="gt">&gt; Greater</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {daysLeftOperator !== 'all' && (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        type="number"
-                        placeholder="0"
-                        value={daysLeftValue}
-                        onChange={(e) => setDaysLeftValue(e.target.value)}
-                        className="w-[70px] h-9"
-                        min="0"
-                      />
-                      <span className="text-sm text-muted-foreground">days</span>
-                    </div>
-                  )}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-1">
+                  <div className="flex items-center gap-1.5 sm:gap-1">
+                    <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                    <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">Days Left</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Select value={daysLeftOperator} onValueChange={setDaysLeftOperator}>
+                      <SelectTrigger className="w-full sm:w-[90px] h-8 sm:h-9 text-xs sm:text-sm">
+                        <SelectValue placeholder="Any" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Any</SelectItem>
+                        <SelectItem value="lt">&lt; Less</SelectItem>
+                        <SelectItem value="eq">= Equal</SelectItem>
+                        <SelectItem value="gt">&gt; Greater</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {daysLeftOperator !== 'all' && (
+                      <div className="flex items-center gap-1">
+                        <Input
+                          type="number"
+                          placeholder="0"
+                          value={daysLeftValue}
+                          onChange={(e) => setDaysLeftValue(e.target.value)}
+                          className="w-[70px] h-8 sm:h-9 text-xs sm:text-sm"
+                          min="0"
+                        />
+                        <span className="text-xs sm:text-sm text-muted-foreground">days</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Date Range Filter */}
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground whitespace-nowrap">Start Date</span>
-                  <Input
-                    type="date"
-                    placeholder="From"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="w-[140px] h-9"
-                  />
-                  <span className="text-muted-foreground">to</span>
-                  <Input
-                    type="date"
-                    placeholder="To"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    className="w-[140px] h-9"
-                  />
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
+                    <span className="text-xs sm:text-sm text-muted-foreground whitespace-nowrap">Start Date</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="date"
+                      placeholder="From"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                    />
+                    <span className="text-xs sm:text-sm text-muted-foreground">to</span>
+                    <Input
+                      type="date"
+                      placeholder="To"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="flex-1 sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                    />
+                  </div>
                 </div>
               </div>
             )}
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-3 sm:p-6">
             {filteredSubscriptions.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <CreditCard className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-medium">No subscriptions found</p>
-                <p className="text-sm">Win deals to create customer subscriptions</p>
+              <div className="text-center py-8 sm:py-12 text-muted-foreground">
+                <CreditCard className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-2 sm:mb-4 opacity-50" />
+                <p className="text-sm sm:text-lg font-medium">No subscriptions found</p>
+                <p className="text-xs sm:text-sm">Win deals to create customer subscriptions</p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 {/* Desktop Table */}
                 <div className="hidden md:block overflow-x-auto">
                   <table className="w-full">
@@ -1044,71 +1062,73 @@ export default function SubscriptionsPage() {
                 </div>
 
                 {/* Mobile Cards */}
-                <div className="md:hidden space-y-3">
+                <div className="md:hidden space-y-2 sm:space-y-3">
                   {filteredSubscriptions.map((sub, index) => {
                     const statusInfo = getSubscriptionStatus(sub)
                     const daysInfo = getDaysRemaining(sub)
 
                     return (
-                      <div key={sub.id} className="border rounded-lg p-4 space-y-3">
-                        {/* Header: Serial + Phone (primary) + Status */}
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-3 min-w-0 flex-1">
-                            {/* Serial Number */}
-                            <span className="w-8 h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium shrink-0">
-                              {index + 1}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <Phone className="h-4 w-4 text-primary shrink-0" />
-                                <p className="font-semibold text-lg truncate">{sub.leads?.phone || 'Unknown'}</p>
-                              </div>
-                            {sub.leads?.name && sub.leads.name !== sub.leads.phone && (
-                              <p className="text-sm text-muted-foreground truncate mt-0.5">{sub.leads.name}</p>
-                            )}
-                            {sub.leads?.custom_fields?.company && (
-                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                <Building2 className="h-3 w-3" />
-                                <span className="truncate">{sub.leads.custom_fields.company}</span>
-                              </div>
-                            )}
+                      <div key={sub.id} className="border rounded-lg p-3 sm:p-4 space-y-2 sm:space-y-3">
+                        {/* Header: Serial + Phone (primary) */}
+                        <div className="flex items-start gap-2 sm:gap-3">
+                          {/* Serial Number */}
+                          <span className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-full bg-primary/10 text-primary text-xs sm:text-sm font-medium shrink-0">
+                            {index + 1}
+                          </span>
+                          <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
+                            {/* Phone - Always visible and prominent */}
+                            <div className="flex items-center gap-1.5 sm:gap-2">
+                              <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary shrink-0" />
+                              <p className="font-semibold text-base sm:text-lg break-all">{sub.leads?.phone || 'Unknown'}</p>
                             </div>
-                          </div>
-                          <div className="flex flex-wrap gap-2 shrink-0">
-                            {sub.approval_status === 'pending' ? (
-                              <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50">
-                                Pending Approval
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50">
-                                Approved
-                              </Badge>
+                            {/* Name */}
+                            {sub.leads?.name && sub.leads.name !== sub.leads.phone && (
+                              <p className="text-xs sm:text-sm text-muted-foreground break-words">{sub.leads.name}</p>
                             )}
-                            <Badge className={statusInfo.color}>
-                              {statusInfo.label}
-                            </Badge>
-                            {sub.product && (
-                              <Badge variant="outline" className="border-purple-500 text-purple-600">
-                                <Package className="h-3 w-3 mr-1" />
-                                {sub.product.name}
-                              </Badge>
+                            {/* Company */}
+                            {sub.leads?.custom_fields?.company && (
+                              <div className="flex items-center gap-1 text-[10px] sm:text-xs text-muted-foreground">
+                                <Building2 className="h-2.5 w-2.5 sm:h-3 sm:w-3 shrink-0" />
+                                <span className="break-words">{sub.leads.custom_fields.company}</span>
+                              </div>
                             )}
+                            {/* Badges - Stack vertically on mobile */}
+                            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-1.5 sm:gap-2 pt-1">
+                              {sub.approval_status === 'pending' ? (
+                                <Badge variant="outline" className="border-yellow-500 text-yellow-600 bg-yellow-50 text-xs w-fit">
+                                  Pending Approval
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="border-green-500 text-green-600 bg-green-50 text-xs w-fit">
+                                  Approved
+                                </Badge>
+                              )}
+                              <Badge className={`${statusInfo.color} text-xs w-fit`}>
+                                {statusInfo.label}
+                              </Badge>
+                              {sub.product && (
+                                <Badge variant="outline" className="border-purple-500 text-purple-600 text-xs w-fit">
+                                  <Package className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5 sm:mr-1" />
+                                  {sub.product.name}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
 
                         {/* Email */}
                         {sub.leads?.email && (
-                          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                            <Mail className="h-3 w-3" />
-                            <span className="truncate">{sub.leads.email}</span>
+                          <div className="flex items-center gap-1 text-xs sm:text-sm text-muted-foreground">
+                            <Mail className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                            <span className="truncate break-all">{sub.leads.email}</span>
                           </div>
                         )}
 
                         {/* Sales Rep Name - Admin Only */}
                         {isAdmin && sub.leads?.assignee && (
-                          <div className="flex items-center gap-1 text-sm text-primary">
-                            <UserCircle className="h-3 w-3" />
-                            <span>Assigned to: {sub.leads.assignee.name} ({sub.leads.assignee.email})</span>
+                          <div className="flex items-center gap-1 text-xs sm:text-sm text-primary">
+                            <UserCircle className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                            <span className="break-words">Assigned to: {sub.leads.assignee.name} ({sub.leads.assignee.email})</span>
                           </div>
                         )}
 
@@ -1120,31 +1140,31 @@ export default function SubscriptionsPage() {
                         />
 
                         {/* Financial Details */}
-                        <div className="grid grid-cols-2 gap-3 text-sm">
+                        <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
                           <div>
-                            <p className="text-muted-foreground text-xs">Deal Value</p>
-                            <p className="font-semibold">₹{sub.deal_value.toLocaleString()}</p>
+                            <p className="text-muted-foreground text-[10px] sm:text-xs">Deal Value</p>
+                            <p className="font-semibold text-sm sm:text-base">₹{sub.deal_value.toLocaleString()}</p>
                           </div>
                           <div>
-                            <p className="text-muted-foreground text-xs">Days Left</p>
-                            <p className={`font-semibold ${daysInfo.color}`}>
+                            <p className="text-muted-foreground text-[10px] sm:text-xs">Days Left</p>
+                            <p className={`font-semibold text-sm sm:text-base ${daysInfo.color}`}>
                               {daysInfo.days === -1 ? '-' : `${daysInfo.days} days`}
                             </p>
                           </div>
                           <div>
-                            <p className="text-muted-foreground text-xs">Paid</p>
-                            <p className="text-green-600">₹{sub.amount_credited.toLocaleString()}</p>
+                            <p className="text-muted-foreground text-[10px] sm:text-xs">Paid</p>
+                            <p className="text-green-600 text-sm sm:text-base">₹{sub.amount_credited.toLocaleString()}</p>
                           </div>
                           <div>
-                            <p className="text-muted-foreground text-xs">Pending</p>
-                            <p className="text-red-600">₹{sub.amount_pending.toLocaleString()}</p>
+                            <p className="text-muted-foreground text-[10px] sm:text-xs">Pending</p>
+                            <p className="text-red-600 text-sm sm:text-base">₹{sub.amount_pending.toLocaleString()}</p>
                           </div>
                         </div>
 
                         {/* Period + Actions */}
-                        <div className="flex items-center justify-between pt-2 border-t text-sm">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t text-xs sm:text-sm">
                           <div className="flex items-center gap-1 text-muted-foreground">
-                            <Clock className="h-3 w-3" />
+                            <Clock className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                             {format(parseISO(sub.start_date), 'dd MMM')} - {sub.validity_days >= 36500 ? 'Non Recurring' : format(parseISO(sub.end_date), 'dd MMM yyyy')}
                           </div>
                           {/* Only admin can pause/resume subscriptions (not for pending approvals) */}
@@ -1153,15 +1173,16 @@ export default function SubscriptionsPage() {
                               size="sm"
                               variant="outline"
                               onClick={() => togglePause(sub.id, sub.status)}
+                              className="h-7 sm:h-8 text-xs"
                             >
                               {sub.status === 'paused' ? (
                                 <>
-                                  <Play className="h-3 w-3 mr-1" />
+                                  <Play className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
                                   Resume
                                 </>
                               ) : (
                                 <>
-                                  <Pause className="h-3 w-3 mr-1" />
+                                  <Pause className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
                                   Pause
                                 </>
                               )}
