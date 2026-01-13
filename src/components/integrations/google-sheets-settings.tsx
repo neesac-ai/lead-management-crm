@@ -246,24 +246,26 @@ export function GoogleSheetsSettings({
   }
 
   const fetchLeadsWithAssignment = async () => {
-    if (hasUnsavedChanges) {
-      const saved = await persistConfig({ suppressToast: true })
-      if (!saved) {
-        return
-      }
-    }
-
     setIsAssigningSheet(true)
     try {
-      // Persist sheet-level assignment choice (for future scheduled polls too)
+      // Persist ALL current settings + mapping + assignment in a single PATCH.
+      // IMPORTANT: Avoid a second PATCH with stale integration.config, which can wipe column_mapping
+      // and cause GoogleSheetsIntegration.fetchLeads() to return 0 rows (phone column not found).
       const nextConfig = {
         ...(integration.config || {}),
+        sheet_url: trimmedSheetUrl,
+        sheet_tab_name: trimmedTabName,
+        column_mapping: mapping,
         sheet_assigned_to: sheetAssignee || null,
         manual_headers: manualHeadersText
           .split(',')
           .map((h) => h.trim())
           .filter(Boolean),
       } as Record<string, unknown>
+
+      if (shouldResetCursor) {
+        delete (nextConfig as any).cursor_last_row
+      }
 
       const patch = await fetch(`/api/integrations/${integration.id}`, {
         method: 'PATCH',

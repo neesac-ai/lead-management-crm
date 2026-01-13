@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient, createClient } from '@/lib/supabase/server';
 import { FacebookIntegration } from '@/lib/integrations/facebook';
 import { InstagramIntegration } from '@/lib/integrations/instagram';
 import { GoogleSheetsIntegration } from '@/lib/integrations/google-sheets';
@@ -18,6 +18,7 @@ export async function POST(
   const { id } = await params;
   try {
     const supabase = await createClient();
+    const adminClient = await createAdminClient();
 
     // Get current user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -109,6 +110,13 @@ export async function POST(
         : (typeof body?.sheet_assigned_to === 'string' ? body.sheet_assigned_to : undefined);
     const forceUnassign = Boolean(body?.force_unassign);
 
+    console.log('[SYNC] start', {
+      integrationId: id,
+      fullSync,
+      sheet_assigned_to: body?.sheet_assigned_to ?? undefined,
+      forceUnassign,
+    });
+
     let since: Date | undefined;
     if (sinceIso) {
       const d = new Date(sinceIso);
@@ -183,6 +191,7 @@ export async function POST(
       effectiveConfig,
       since
     );
+    console.log('[SYNC] fetched leadsData', { integrationId: id, count: Array.isArray(leadsData) ? leadsData.length : 0 });
 
     let leadsCreated = 0;
     let leadsUpdated = 0; // for Google Sheets: number of rows updated (existing external_id)
@@ -196,6 +205,25 @@ export async function POST(
             : (sheetAssignedToOverride as string | null)
         )
       : undefined;
+    const shouldApplySheetAssignment =
+      integration.platform === 'google_sheets' && sheetAssignedToOverride !== undefined;
+
+    if (integration.platform === 'google_sheets') {
+      try {
+        const { count: existingCount } = await adminClient
+          .from('leads')
+          .select('*', { count: 'exact', head: true })
+          .eq('org_id', integration.org_id)
+          .eq('integration_id', id);
+        console.log('[SYNC][GSHEETS] leads before', {
+          orgId: integration.org_id,
+          integrationId: id,
+          count: existingCount ?? null,
+        });
+      } catch (e) {
+        console.log('[SYNC][GSHEETS] failed to count leads before', e);
+      }
+    }
 
     // Process each lead
     for (const leadData of leadsData) {
@@ -327,6 +355,42 @@ export async function POST(
         }
       } catch (error) {
         errors.push(`Lead ${leadData.external_id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    }
+
+    // If this sync request explicitly provided a sheet assignment override (Assign button flow),
+    // enforce the assignment on ALL leads belonging to this Google Sheets integration.
+    // This makes assignment deterministic even if cursor/dedupe logic skips some rows.
+    if (shouldApplySheetAssignment) {
+      const assignedTo = sheetAssignedTo || null;
+      console.log('[SYNC][GSHEETS] applying bulk assignment', { integrationId: id, assignedTo });
+
+      // Use service role to bypass any RLS issues (this endpoint is admin-only anyway).
+      const { error: bulkAssignError } = await adminClient
+        .from('leads')
+        .update({ assigned_to: assignedTo, updated_at: new Date().toISOString() })
+        .eq('org_id', integration.org_id)
+        .eq('integration_id', id);
+
+      if (bulkAssignError) {
+        console.log('[SYNC][GSHEETS] bulk assignment ERROR', bulkAssignError);
+        errors.push(`Bulk assignment failed: ${bulkAssignError.message}`);
+      } else {
+        try {
+          const { count: assignedCount } = await adminClient
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .eq('org_id', integration.org_id)
+            .eq('integration_id', id)
+            .is('assigned_to', assignedTo);
+          console.log('[SYNC][GSHEETS] bulk assignment done', {
+            integrationId: id,
+            assignedTo,
+            assignedCount: assignedCount ?? null,
+          });
+        } catch (e) {
+          console.log('[SYNC][GSHEETS] failed to count assigned leads after bulk assignment', e);
+        }
       }
     }
 
