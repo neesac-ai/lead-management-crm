@@ -23,6 +23,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
@@ -41,16 +47,12 @@ import {
   RefreshCw,
   Search,
   Loader2,
-  Cloud,
-  ExternalLink,
   AlertCircle,
   User as UserIcon,
-  Sparkles,
-  Trash2,
 } from 'lucide-react'
 import { User, Lead, LeadStatus } from '@/types/database.types'
-import { format, subDays, startOfDay, endOfDay, isWithinInterval, formatDistanceToNow } from 'date-fns'
-import type { CallRecording } from '@/types/ai.types'
+import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns'
+// Note: CallRecording type removed - using native call tracking only
 import Link from 'next/link'
 
 type DateFilter = 'today' | 'last_7_days' | 'last_30_days' | 'all_time' | 'custom'
@@ -120,29 +122,36 @@ export default function AnalyticsPage() {
   const [customDateFrom, setCustomDateFrom] = useState<string>('')
   const [customDateTo, setCustomDateTo] = useState<string>('')
 
-  // Call analytics state
-  const [recordings, setRecordings] = useState<CallRecording[]>([])
-  const [syncing, setSyncing] = useState(false)
-  const [processing, setProcessing] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState<string | null>(null)
+  // Call analytics state (using native call tracking)
+  type CallLog = {
+    id: string
+    lead_id: string | null
+    user_id: string
+    phone_number: string
+    call_direction: string
+    call_status: string
+    call_started_at: string
+    call_ended_at: string | null
+    duration_seconds: number
+    talk_time_seconds: number | null
+    ring_duration_seconds: number | null
+    users?: { id: string; name: string; email: string } | null
+    leads?: { id: string; name: string; phone: string | null } | null
+  }
+  const [callLogs, setCallLogs] = useState<CallLog[]>([])
+  const [isLoadingCallLogs, setIsLoadingCallLogs] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedRecording, setSelectedRecording] = useState<CallRecording | null>(null)
-  const [hasAIConfig, setHasAIConfig] = useState(false)
-  const [isGoogleConnected, setIsGoogleConnected] = useState(false)
-  const [folderConfigured, setFolderConfigured] = useState(false)
-  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null)
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
 
   const [callStats, setCallStats] = useState({
     totalCalls: 0,
     totalDuration: 0,
     avgDuration: 0,
-    positive: 0,
-    neutral: 0,
-    negative: 0,
-    pending: 0,
     completed: 0,
+    missed: 0,
     failed: 0,
+    totalTalkTime: 0,
+    avgTalkTime: 0,
   })
 
   // Sales rep detail view
@@ -164,19 +173,13 @@ export default function AnalyticsPage() {
     fetchData()
   }, [orgSlug])
 
-  // Auto-sync calls on page load and every 3 minutes (reduced from 60s for performance)
+  // Refresh call logs when tab changes to calls
   useEffect(() => {
-    if (!folderConfigured || !isGoogleConnected || loading || activeTab !== 'calls') return
-
-    // Initial sync with small delay to avoid blocking
-    const initialSync = setTimeout(autoSync, 1000)
-    // Sync every 3 minutes instead of every minute
-    const syncInterval = setInterval(autoSync, 180000)
-    return () => {
-      clearTimeout(initialSync)
-      clearInterval(syncInterval)
+    if (activeTab === 'calls' && !loading && orgId && user) {
+      fetchCallLogs(orgId, user)
     }
-  }, [folderConfigured, isGoogleConnected, loading, activeTab])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, loading, orgId, user?.id, selectedSalesRep, dateFilter, customDateFrom, customDateTo])
 
   async function fetchData() {
     try {
@@ -191,7 +194,7 @@ export default function AnalyticsPage() {
 
       if (!userData) return
       setUser(userData as User)
-      setIsGoogleConnected(!!userData.google_refresh_token)
+      // Note: Google Drive sync removed - using native call tracking only
 
       const { data: orgData } = await supabase
         .from('organizations')
@@ -319,22 +322,8 @@ export default function AnalyticsPage() {
         .eq('is_active', true)
         .limit(1)
 
-      setHasAIConfig(!!(aiConfigs && aiConfigs.length > 0))
-
-      // Check folder config
-      const { data: syncSettings } = await supabase
-        .from('drive_sync_settings')
-        .select('folder_id, last_sync_at')
-        .eq('user_id', userData.id)
-        .single()
-
-      setFolderConfigured(!!(syncSettings?.folder_id))
-      if (syncSettings?.last_sync_at) {
-        setLastSyncTime(syncSettings.last_sync_at)
-      }
-
-      // Fetch recordings
-      await fetchRecordings(currentOrgId, userData)
+      // Note: Google Drive sync removed - using native call tracking only
+      await fetchCallLogs(currentOrgId, userData)
 
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -343,215 +332,120 @@ export default function AnalyticsPage() {
     }
   }
 
-  async function fetchRecordings(currentOrgId?: string, currentUser?: User) {
+  async function fetchCallLogs(currentOrgId?: string, currentUser?: User) {
     const orgIdToUse = currentOrgId || orgId
     const userToUse = currentUser || user
     if (!orgIdToUse || !userToUse) return
 
-    // Fetch recordings without foreign key relationship
-    let query = supabase
-      .from('call_recordings')
-      .select(`
-        id, phone_number, duration_seconds, recording_date,
-        summary, sentiment, sentiment_reasoning, processing_status, processing_error,
-        transcript, key_points, action_items, call_quality,
-        drive_file_id, drive_file_name, drive_file_url,
-        user_id, lead_id
-      `)
-      .eq('org_id', orgIdToUse)
-      .order('recording_date', { ascending: false })
+    setIsLoadingCallLogs(true)
 
-    // Sales can only see their own recordings
-    // Managers can see their team's recordings
-    if (userToUse.role === 'sales') {
-      // Check if manager
-      try {
-        const { data: reportees } = await supabase
-          .rpc('get_all_reportees', { manager_user_id: userToUse.id } as any)
+    try {
+      // Build API URL with filters
+      const params = new URLSearchParams()
 
-        const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
-        if (reporteeIds.length > 0) {
-          // Manager: see recordings from self + reportees
-          query = query.in('user_id', [userToUse.id, ...reporteeIds])
-        } else {
-          // Non-manager: only own recordings
-          query = query.eq('user_id', userToUse.id)
+      // Apply date filter
+      let startDate: Date | null = null
+      let endDate: Date | null = null
+
+      if (dateFilter === 'today') {
+        startDate = startOfDay(new Date())
+        endDate = endOfDay(new Date())
+      } else if (dateFilter === 'last_7_days') {
+        startDate = startOfDay(subDays(new Date(), 7))
+        endDate = endOfDay(new Date())
+      } else if (dateFilter === 'last_30_days') {
+        startDate = startOfDay(subDays(new Date(), 30))
+        endDate = endOfDay(new Date())
+      } else if (dateFilter === 'custom' && customDateFrom && customDateTo) {
+        startDate = startOfDay(new Date(customDateFrom))
+        endDate = endOfDay(new Date(customDateTo))
+      }
+
+      if (startDate) {
+        params.append('start_date', startDate.toISOString())
+      }
+      if (endDate) {
+        params.append('end_date', endDate.toISOString())
+      }
+
+      const response = await fetch(`/api/calls/analytics?${params.toString()}`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch call logs')
+      }
+
+      const data = await response.json()
+      const logs = data.call_logs || []
+
+      // Filter by user role (sales can only see their own, managers see team)
+      let filteredLogs = logs
+      if (userToUse.role === 'sales') {
+        try {
+          const { data: reportees } = await supabase
+            .rpc('get_all_reportees', { manager_user_id: userToUse.id } as any)
+
+          const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
+          if (reporteeIds.length > 0) {
+            // Manager: see logs from self + reportees
+            filteredLogs = logs.filter((log: CallLog) =>
+              (log.user_id === userToUse.id || reporteeIds.includes(log.user_id))
+            )
+          } else {
+            // Non-manager: only own logs
+            filteredLogs = logs.filter((log: CallLog) =>
+              log.user_id === userToUse.id
+            )
+          }
+        } catch (error) {
+          // Fallback: only own logs
+          filteredLogs = logs.filter((log: CallLog) =>
+            log.user_id === userToUse.id
+          )
         }
-      } catch (error) {
-        // Fallback: only own recordings
-        query = query.eq('user_id', userToUse.id)
       }
+
+      setCallLogs(filteredLogs)
+      calculateCallStats(filteredLogs)
+    } catch (error) {
+      console.error('Error fetching call logs:', error)
+      setCallLogs([])
+    } finally {
+      setIsLoadingCallLogs(false)
     }
-
-    const { data: recordingsData, error } = await query
-
-    if (error) {
-      console.error('Error fetching recordings:', error)
-      setRecordings([])
-      return
-    }
-
-    // Fetch user names separately
-    const userIds = new Set<string>()
-    recordingsData?.forEach((rec: { user_id: string | null }) => {
-      if (rec.user_id) userIds.add(rec.user_id)
-    })
-
-    let userMap: Record<string, { id: string; name: string; email: string }> = {}
-    if (userIds.size > 0) {
-      const { data: usersData } = await supabase
-        .from('users')
-        .select('id, name, email')
-        .in('id', Array.from(userIds))
-
-      if (usersData) {
-        usersData.forEach(user => {
-          userMap[user.id] = { id: user.id, name: user.name, email: user.email }
-        })
-      }
-    }
-
-    // Map recordings with user data
-    const recordingsWithUsers = (recordingsData || []).map((rec: any) => ({
-      ...rec,
-      users: rec.user_id ? (userMap[rec.user_id] || null) : null
-    }))
-
-    setRecordings(recordingsWithUsers as CallRecording[])
-    calculateCallStats(recordingsWithUsers as CallRecording[])
   }
 
-  function calculateCallStats(recs: CallRecording[]) {
+  function calculateCallStats(logs: CallLog[]) {
     const stats = {
-      totalCalls: recs.length,
+      totalCalls: logs.length,
       totalDuration: 0,
       avgDuration: 0,
-      positive: 0,
-      neutral: 0,
-      negative: 0,
-      pending: 0,
       completed: 0,
+      missed: 0,
       failed: 0,
+      totalTalkTime: 0,
+      avgTalkTime: 0,
     }
 
-    recs.forEach(r => {
-      if (r.duration_seconds) stats.totalDuration += r.duration_seconds
-      if (r.sentiment === 'positive') stats.positive++
-      else if (r.sentiment === 'negative') stats.negative++
-      else if (r.sentiment === 'neutral') stats.neutral++
-      if (r.processing_status === 'pending') stats.pending++
-      else if (r.processing_status === 'completed') stats.completed++
-      else if (r.processing_status === 'failed') stats.failed++
+    logs.forEach(log => {
+      stats.totalDuration += log.duration_seconds || 0
+      stats.totalTalkTime += log.talk_time_seconds || 0
+      if (log.call_status === 'completed') stats.completed++
+      else if (log.call_status === 'missed') stats.missed++
+      else if (log.call_status === 'failed') stats.failed++
     })
 
     stats.avgDuration = stats.totalCalls > 0
       ? Math.round(stats.totalDuration / stats.totalCalls)
       : 0
+    stats.avgTalkTime = stats.completed > 0
+      ? Math.round(stats.totalTalkTime / stats.completed)
+      : 0
 
     setCallStats(stats)
   }
 
-  // Auto-sync in background
-  const autoSync = async () => {
-    try {
-      const response = await fetch('/api/recordings/sync', { method: 'POST' })
-      const result = await response.json()
+  // Note: Google Drive sync removed - using native call tracking only
 
-      if (result.success && result.files_imported > 0) {
-        toast.success(`${result.files_imported} new recording(s) synced`)
-      }
-
-      // Always refresh recordings list to pick up deletions and updates
-      if (result.success) {
-        setLastSyncTime(new Date().toISOString())
-        fetchRecordings()
-      }
-    } catch {
-      console.error('Auto-sync failed')
-    }
-  }
-
-  // Manual sync
-  const handleManualSync = async () => {
-    setSyncing(true)
-    try {
-      const response = await fetch('/api/recordings/sync', { method: 'POST' })
-      const result = await response.json()
-
-      if (result.success) {
-        if (result.files_imported > 0) {
-          toast.success(`${result.files_imported} recording(s) imported!`)
-        } else if (result.files_found > 0) {
-          toast.info(`Found ${result.files_found} files, all already imported`)
-        } else {
-          toast.info('No recordings found in folder')
-        }
-        setLastSyncTime(new Date().toISOString())
-        fetchRecordings()
-      } else {
-        toast.error(result.error || 'Sync failed')
-      }
-    } catch {
-      toast.error('Failed to sync recordings')
-    }
-    setSyncing(false)
-  }
-
-  // Process recording
-  const handleProcess = async (recordingId: string) => {
-    setProcessing(recordingId)
-    try {
-      const response = await fetch('/api/recordings/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId }),
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        toast.success('Recording analyzed successfully')
-        fetchRecordings()
-      } else {
-        toast.error(result.error || 'Processing failed')
-      }
-    } catch {
-      toast.error('Failed to process recording')
-    }
-    setProcessing(null)
-  }
-
-  // Delete recording (admin only)
-  const handleDelete = async (recordingId: string) => {
-    if (!confirm('Are you sure you want to delete this recording? This action cannot be undone. Note: The recording will remain in your Google Drive.')) {
-      return
-    }
-
-    setDeleting(recordingId)
-    try {
-      const response = await fetch('/api/recordings/delete', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId }),
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        toast.success('Recording deleted')
-        setRecordings(prev => prev.filter(r => r.id !== recordingId))
-        // Close dialog if the deleted recording was selected
-        if (selectedRecording?.id === recordingId) {
-          setSelectedRecording(null)
-        }
-      } else {
-        toast.error(result.error || 'Delete failed')
-      }
-    } catch {
-      toast.error('Failed to delete recording')
-    }
-    setDeleting(null)
-  }
+  // Note: handleProcess and handleDelete removed - using native call tracking only
 
   // Fetch activities for selected sales rep
   async function fetchRepActivities(userId: string) {
@@ -708,78 +602,262 @@ export default function AnalyticsPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const getSentimentIcon = (sentiment: string | null) => {
-    switch (sentiment) {
-      case 'positive': return <TrendingUp className="w-4 h-4 text-green-500" />
-      case 'negative': return <TrendingDown className="w-4 h-4 text-red-500" />
-      default: return <Minus className="w-4 h-4 text-yellow-500" />
-    }
-  }
+  // Note: getSentimentIcon, getSentimentBadge, getStatusBadge removed - using native call tracking only
 
-  const getSentimentBadge = (sentiment: string | null) => {
-    switch (sentiment) {
-      case 'positive': return <Badge className="bg-green-100 text-green-700">Positive</Badge>
-      case 'negative': return <Badge className="bg-red-100 text-red-700">Negative</Badge>
-      default: return <Badge className="bg-yellow-100 text-yellow-700">Neutral</Badge>
-    }
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return <Badge className="bg-green-100 text-green-700"><CheckCircle2 className="w-3 h-3 mr-1" />Analyzed</Badge>
-      case 'processing':
-        return <Badge className="bg-blue-100 text-blue-700"><Loader2 className="w-3 h-3 mr-1 animate-spin" />Processing</Badge>
-      case 'failed':
-        return <Badge className="bg-red-100 text-red-700"><XCircle className="w-3 h-3 mr-1" />Failed</Badge>
-      default:
-        return <Badge className="bg-gray-100 text-gray-700"><AlertCircle className="w-3 h-3 mr-1" />Pending</Badge>
-    }
-  }
-
-  // Filter recordings by search and sales rep - memoized for performance
-  const filteredRecordings = useMemo(() => {
-    return recordings.filter(r => {
+  // Filter call logs by search and sales rep - memoized for performance
+  const filteredCallLogs = useMemo(() => {
+    return callLogs.filter(log => {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase()
-        const matchesSearch = r.phone_number?.toLowerCase().includes(query) ||
-          r.summary?.toLowerCase().includes(query)
+        const matchesSearch = log.phone_number?.toLowerCase().includes(query) ||
+          log.users?.name?.toLowerCase().includes(query) ||
+          log.users?.email?.toLowerCase().includes(query)
         if (!matchesSearch) return false
       }
 
       // Sales rep filter (admin only)
       if (isAdmin && selectedSalesRep !== 'all') {
-        if (r.user_id !== selectedSalesRep) return false
+        if (log.user_id !== selectedSalesRep) return false
       }
 
       return true
     })
-  }, [recordings, searchQuery, isAdmin, selectedSalesRep])
+  }, [callLogs, searchQuery, isAdmin, selectedSalesRep])
 
-  // Calculate call stats for selected rep - memoized
-  const repCallStats = useMemo(() => {
-    const recs = selectedSalesRep === 'all'
-      ? recordings
-      : recordings.filter(r => r.user_id === selectedSalesRep)
+  const RECENT_CALLS_LIMIT = 20
+  const recentCalls = useMemo(() => {
+    return filteredCallLogs.slice(0, RECENT_CALLS_LIMIT)
+  }, [filteredCallLogs])
 
-    const stats = {
-      totalCalls: recs.length,
-      totalDuration: 0,
-      positive: 0,
-      neutral: 0,
-      negative: 0,
+  // Call Overview (for Overview tab) - aggregated across all visible call logs (ignores selectedSalesRep)
+  const callOverview = useMemo(() => {
+    const logs = callLogs
+
+    const statusCounts: Record<string, number> = {}
+    let totalDuration = 0
+    let totalTalkTime = 0
+    let totalRingTime = 0
+
+    const uniqueLeadsAll = new Set<string>()
+    const uniqueLeadsByStatus: Record<string, Set<string>> = {
+      completed: new Set(),
+      missed: new Set(),
+      failed: new Set(),
+      rejected: new Set(),
+      blocked: new Set(),
+      busy: new Set(),
     }
 
-    recs.forEach(r => {
-      if (r.duration_seconds) stats.totalDuration += r.duration_seconds
-      if (r.sentiment === 'positive') stats.positive++
-      else if (r.sentiment === 'negative') stats.negative++
-      else if (r.sentiment === 'neutral') stats.neutral++
+    for (const l of logs) {
+      const s = l.call_status || 'unknown'
+      statusCounts[s] = (statusCounts[s] || 0) + 1
+      totalDuration += l.duration_seconds || 0
+      totalTalkTime += l.talk_time_seconds || 0
+      totalRingTime += l.ring_duration_seconds || 0
+
+      if (l.lead_id) {
+        uniqueLeadsAll.add(l.lead_id)
+        if (uniqueLeadsByStatus[s]) {
+          uniqueLeadsByStatus[s].add(l.lead_id)
+        }
+      }
+    }
+
+    const totalCalls = logs.length
+    const completed = statusCounts.completed || 0
+    const missed = statusCounts.missed || 0
+    const failed = statusCounts.failed || 0
+    const rejected = statusCounts.rejected || 0
+    const blocked = statusCounts.blocked || 0
+    const busy = statusCounts.busy || 0
+
+    const answerRate = totalCalls > 0 ? Math.round((completed / totalCalls) * 100) : 0
+    const avgTalkTime = completed > 0 ? Math.round(totalTalkTime / completed) : 0
+    const avgRingTime = totalCalls > 0 ? Math.round(totalRingTime / totalCalls) : 0
+
+    // By Team Member
+    const byUser = new Map<string, {
+      userId: string
+      name: string
+      email: string
+      totalCalls: number
+      completed: number
+      missed: number
+      failed: number
+      uniqueLeads: number
+      uniqueCompletedLeads: number
+      uniqueMissedLeads: number
+      uniqueFailedLeads: number
+      totalTalkTime: number
+      avgTalkTime: number
+      answerRate: number
+      lastCallAt: string | null
+    }>()
+
+    const uniqueLeadsByUser = new Map<string, {
+      all: Set<string>
+      completed: Set<string>
+      missed: Set<string>
+      failed: Set<string>
+    }>()
+
+    for (const l of logs) {
+      const uid = l.user_id
+      const u = l.users
+      const existing = byUser.get(uid)
+      const callAt = l.call_started_at || null
+      const base = existing || {
+        userId: uid,
+        name: u?.name || 'Unknown',
+        email: u?.email || '',
+        totalCalls: 0,
+        completed: 0,
+        missed: 0,
+        failed: 0,
+        uniqueLeads: 0,
+        uniqueCompletedLeads: 0,
+        uniqueMissedLeads: 0,
+        uniqueFailedLeads: 0,
+        totalTalkTime: 0,
+        avgTalkTime: 0,
+        answerRate: 0,
+        lastCallAt: null as string | null,
+      }
+
+      base.totalCalls += 1
+      if (l.call_status === 'completed') base.completed += 1
+      else if (l.call_status === 'missed') base.missed += 1
+      else if (l.call_status === 'failed') base.failed += 1
+      base.totalTalkTime += l.talk_time_seconds || 0
+
+      if (l.lead_id) {
+        const sets = uniqueLeadsByUser.get(uid) || {
+          all: new Set<string>(),
+          completed: new Set<string>(),
+          missed: new Set<string>(),
+          failed: new Set<string>(),
+        }
+        sets.all.add(l.lead_id)
+        if (l.call_status === 'completed') sets.completed.add(l.lead_id)
+        if (l.call_status === 'missed') sets.missed.add(l.lead_id)
+        if (l.call_status === 'failed') sets.failed.add(l.lead_id)
+        uniqueLeadsByUser.set(uid, sets)
+      }
+
+      if (!base.lastCallAt || (callAt && new Date(callAt) > new Date(base.lastCallAt))) {
+        base.lastCallAt = callAt
+      }
+
+      byUser.set(uid, base)
+    }
+
+    const byUserArray = Array.from(byUser.values()).map(u => {
+      const avgTT = u.completed > 0 ? Math.round(u.totalTalkTime / u.completed) : 0
+      const ans = u.totalCalls > 0 ? Math.round((u.completed / u.totalCalls) * 100) : 0
+      const sets = uniqueLeadsByUser.get(u.userId)
+      return {
+        ...u,
+        avgTalkTime: avgTT,
+        answerRate: ans,
+        uniqueLeads: sets?.all.size || 0,
+        uniqueCompletedLeads: sets?.completed.size || 0,
+        uniqueMissedLeads: sets?.missed.size || 0,
+        uniqueFailedLeads: sets?.failed.size || 0,
+      }
+    }).sort((a, b) => b.totalCalls - a.totalCalls)
+
+    // By Lead (top 10)
+    const byLead = new Map<string, {
+      leadId: string
+      name: string
+      phone: string | null
+      totalCalls: number
+      completed: number
+      missed: number
+      failed: number
+      totalTalkTime: number
+      lastCallAt: string | null
+    }>()
+
+    for (const l of logs) {
+      if (!l.lead_id) continue
+      const lid = l.lead_id
+      const lead = l.leads
+      const existing = byLead.get(lid)
+      const callAt = l.call_started_at || null
+      const base = existing || {
+        leadId: lid,
+        name: lead?.name || 'Unknown',
+        phone: lead?.phone || null,
+        totalCalls: 0,
+        completed: 0,
+        missed: 0,
+        failed: 0,
+        totalTalkTime: 0,
+        lastCallAt: null as string | null,
+      }
+      base.totalCalls += 1
+      if (l.call_status === 'completed') base.completed += 1
+      else if (l.call_status === 'missed') base.missed += 1
+      else if (l.call_status === 'failed') base.failed += 1
+      base.totalTalkTime += l.talk_time_seconds || 0
+      if (!base.lastCallAt || (callAt && new Date(callAt) > new Date(base.lastCallAt))) {
+        base.lastCallAt = callAt
+      }
+      byLead.set(lid, base)
+    }
+
+    const byLeadArray = Array.from(byLead.values())
+      .sort((a, b) => b.totalCalls - a.totalCalls)
+      .slice(0, 10)
+
+    return {
+      totalCalls,
+      totalDuration,
+      totalTalkTime,
+      totalRingTime,
+      avgTalkTime,
+      avgRingTime,
+      answerRate,
+      uniqueLeads: uniqueLeadsAll.size,
+      uniqueLeadsByStatus: {
+        completed: uniqueLeadsByStatus.completed.size,
+        missed: uniqueLeadsByStatus.missed.size,
+        failed: uniqueLeadsByStatus.failed.size,
+        rejected: uniqueLeadsByStatus.rejected.size,
+        blocked: uniqueLeadsByStatus.blocked.size,
+        busy: uniqueLeadsByStatus.busy.size,
+      },
+      statusCounts: { completed, missed, failed, rejected, blocked, busy },
+      byUser: byUserArray,
+      byLead: byLeadArray,
+    }
+  }, [callLogs])
+
+  // Calculate call stats for selected rep - memoized (using call logs)
+  const repCallStats = useMemo(() => {
+    const logs = selectedSalesRep === 'all'
+      ? callLogs
+      : callLogs.filter(log => log.users?.id === selectedSalesRep)
+
+    const stats = {
+      totalCalls: logs.length,
+      totalDuration: 0,
+      completed: 0,
+      missed: 0,
+      failed: 0,
+    }
+
+    logs.forEach(log => {
+      stats.totalDuration += log.duration_seconds || 0
+      if (log.call_status === 'completed') stats.completed++
+      else if (log.call_status === 'missed') stats.missed++
+      else if (log.call_status === 'failed') stats.failed++
     })
 
     return stats
-  }, [recordings, selectedSalesRep])
+  }, [callLogs, selectedSalesRep])
 
   // Memoize expensive lead analytics calculations
   const filteredLeads = useMemo(() => getFilteredLeads(), [leads, dateFilter, customDateFrom, customDateTo])
@@ -1191,35 +1269,74 @@ export default function AnalyticsPage() {
 
           {/* CALLS TAB */}
           <TabsContent value="calls" className="space-y-6">
+            {/* Time Period (same as Overview tab) */}
+            <Card>
+              <CardHeader className="pb-2 sm:pb-3 p-3 sm:p-6">
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                  <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  Time Period
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
+                  {[
+                    { value: 'today', label: 'Today' },
+                    { value: 'last_7_days', label: 'Last 7 Days' },
+                    { value: 'last_30_days', label: 'Last 30 Days' },
+                    { value: 'all_time', label: 'All Time' },
+                    { value: 'custom', label: 'Custom' },
+                  ].map((filter) => (
+                    <Button
+                      key={filter.value}
+                      variant={dateFilter === filter.value ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setDateFilter(filter.value as DateFilter)}
+                      className="text-xs sm:text-sm h-8 sm:h-9"
+                    >
+                      {filter.label}
+                    </Button>
+                  ))}
+                  {dateFilter === 'custom' && (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto sm:ml-2">
+                      <Input
+                        type="date"
+                        value={customDateFrom}
+                        onChange={(e) => setCustomDateFrom(e.target.value)}
+                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                      />
+                      <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
+                      <Input
+                        type="date"
+                        value={customDateTo}
+                        onChange={(e) => setCustomDateTo(e.target.value)}
+                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Header with Refresh and Filters */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <p className="text-muted-foreground">
-                  {folderConfigured ? (
-                    <span className="flex items-center gap-2">
-                      <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                      Auto-syncing
-                      {lastSyncTime && (
-                        <span className="text-xs">
-                          • Last: {formatDistanceToNow(new Date(lastSyncTime), { addSuffix: true })}
-                        </span>
-                      )}
-                    </span>
-                  ) : (
-                    'Connect your recording folder in Settings'
-                  )}
+                  Call analytics (native tracking)
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Overview is based on the selected time period. Team member filter applies only to the logs list.
                 </p>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
-                {/* Team Member Filter (Admin and Managers) */}
+                {/* Team Member Filter (Admin and Managers) - affects log list only */}
                 {canViewTeam && salesTeam.length > 0 && (
                   <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                    <SelectTrigger className="w-full sm:w-[180px] h-8 sm:h-9 text-xs sm:text-sm">
-                      <SelectValue placeholder="Filter by member" />
+                    <SelectTrigger className="w-full sm:w-[220px] h-8 sm:h-9 text-xs sm:text-sm">
+                      <SelectValue placeholder="Filter logs by member" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Team Members</SelectItem>
+                      <SelectItem value="all">All Team Members (Logs)</SelectItem>
                       {salesTeam.map((rep) => (
                         <SelectItem key={rep.id} value={rep.id}>
                           {rep.name} ({rep.email}) - {rep.role === 'super_admin' ? 'Super Admin' : rep.role}
@@ -1229,227 +1346,456 @@ export default function AnalyticsPage() {
                   </Select>
                 )}
 
-                {folderConfigured && isGoogleConnected && (
-                  <Button variant="outline" onClick={handleManualSync} disabled={syncing} className="h-8 sm:h-9 text-xs sm:text-sm">
-                    <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 ${syncing ? 'animate-spin' : ''}`} />
-                    {syncing ? 'Syncing...' : 'Refresh'}
-                  </Button>
-                )}
+                <Button variant="outline" onClick={() => fetchCallLogs()} disabled={isLoadingCallLogs} className="h-8 sm:h-9 text-xs sm:text-sm">
+                  <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 ${isLoadingCallLogs ? 'animate-spin' : ''}`} />
+                  {isLoadingCallLogs ? 'Loading...' : 'Refresh'}
+                </Button>
               </div>
             </div>
 
             {/* Warnings */}
-            {!isGoogleConnected && (
-              <Card className="border-red-200 bg-red-50">
-                <CardContent className="flex items-center gap-4 py-4">
-                  <Cloud className="w-8 h-8 text-red-500" />
-                  <div className="flex-1">
-                    <h3 className="font-medium text-red-700">Google Drive Not Connected</h3>
-                    <p className="text-sm text-red-600">Connect your Google account in Settings</p>
-                  </div>
-                  <Button asChild variant="destructive">
-                    <Link href={`/${orgSlug}/settings`}>Go to Settings</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
+            {/* Note: Google Drive sync warnings removed - using native call tracking only */}
 
-            {isGoogleConnected && !folderConfigured && (
-              <Card className="border-amber-200 bg-amber-50">
-                <CardContent className="flex items-center gap-4 py-4">
-                  <Cloud className="w-8 h-8 text-amber-500" />
-                  <div className="flex-1">
-                    <h3 className="font-medium text-amber-700">Recording Folder Not Selected</h3>
-                    <p className="text-sm text-amber-600">Select your Google Drive folder in Settings</p>
-                  </div>
-                  <Button asChild variant="outline">
-                    <Link href={`/${orgSlug}/settings`}>Select Folder</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
+            {/* Call Analytics Overview (same style as Overview tab) */}
+            <Card>
+              <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                  <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
+                  Call Overview
+                </CardTitle>
+                <CardDescription>
+                  Summary of calls for the selected time period
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-3 sm:p-6 pt-0 space-y-4">
+                {/* Summary */}
+                <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-3 lg:gap-4">
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Calls</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.totalCalls}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-            {isGoogleConnected && !hasAIConfig && isAdmin && (
-              <Card className="border-amber-200 bg-amber-50">
-                <CardContent className="flex items-center gap-4 py-4">
-                  <Sparkles className="w-8 h-8 text-amber-500" />
-                  <div className="flex-1">
-                    <h3 className="font-medium">AI Not Configured</h3>
-                    <p className="text-sm text-muted-foreground">Configure AI for transcription and analysis</p>
-                  </div>
-                  <Button asChild>
-                    <Link href={`/${orgSlug}/settings`}>Go to Settings</Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            )}
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Completed</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.statusCounts.completed}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-            {/* Call Stats */}
-            <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
-              <Card>
-                <CardHeader className="pb-2 p-3 sm:p-6">
-                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Calls</CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 sm:p-6 pt-0">
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
-                    <span className="text-xl sm:text-2xl font-bold">{repCallStats.totalCalls}</span>
-                  </div>
-                </CardContent>
-              </Card>
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Not Picked</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.statusCounts.missed}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-              <Card>
-                <CardHeader className="pb-2 p-3 sm:p-6">
-                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Duration</CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 sm:p-6 pt-0">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500 shrink-0" />
-                    <span className="text-xl sm:text-2xl font-bold">
-                      {Math.round(repCallStats.totalDuration / 60)} min
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Failed</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-500 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.statusCounts.failed}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-              <Card>
-                <CardHeader className="pb-2 p-3 sm:p-6">
-                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Sentiment</CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 sm:p-6 pt-0">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <TrendingUp className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-500 shrink-0" />
-                      <span className="text-xs sm:text-sm">{repCallStats.positive}</span>
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Answer Rate</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.answerRate}%</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Avg Talk Time</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{formatDuration(callOverview.avgTalkTime)}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>
+                    Unique leads contacted: <span className="font-medium text-foreground">{callOverview.uniqueLeads}</span>
+                  </span>
+                  <span className="text-muted-foreground/60">|</span>
+                  <span>
+                    Unique completed leads: <span className="font-medium text-foreground">{callOverview.uniqueLeadsByStatus.completed}</span>
+                  </span>
+                  <span className="text-muted-foreground/60">|</span>
+                  <span>
+                    Unique not picked leads: <span className="font-medium text-foreground">{callOverview.uniqueLeadsByStatus.missed}</span>
+                  </span>
+                </div>
+
+                {/* Unique Leads Summary (cards) */}
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3 lg:gap-4">
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Leads</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeads}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Completed</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeadsByStatus.completed}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Not Picked</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeadsByStatus.missed}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Failed</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-500 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeadsByStatus.failed}</span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-2 p-3 sm:p-4">
+                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Answer %</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 sm:p-4 pt-0">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 shrink-0" />
+                        <span className="text-lg sm:text-xl font-bold">
+                          {callOverview.uniqueLeads > 0
+                            ? Math.round((callOverview.uniqueLeadsByStatus.completed / callOverview.uniqueLeads) * 100)
+                            : 0}%
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Call Metrics (per team member) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">
+                      {canViewTeam ? 'Team Call Performance' : 'Your Call Performance'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Avg talk time is calculated on completed calls
+                    </p>
+                  </div>
+
+                  {callOverview.byUser.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-6 text-center">
+                      No call data for this period
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/30">
+                            <th className="text-left py-2.5 px-3 font-medium">Member</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Calls</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Completed</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Not Picked</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Failed</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Answer %</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Avg Talk</th>
+                            <th className="text-right py-2.5 px-3 font-medium">Last Call</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(canViewTeam
+                            ? callOverview.byUser
+                            : callOverview.byUser.filter(u => u.userId === user?.id)
+                          ).map((u) => (
+                            <tr key={u.userId} className="border-b last:border-0">
+                              <td className="py-2.5 px-3">
+                                <div className="flex flex-col">
+                                  <span className="font-medium">{u.name}</span>
+                                  {u.email ? <span className="text-xs text-muted-foreground">{u.email}</span> : null}
+                                </div>
+                              </td>
+                              <td className="text-center py-2.5 px-3">{u.totalCalls}</td>
+                              <td className="text-center py-2.5 px-3">{u.completed}</td>
+                              <td className="text-center py-2.5 px-3">{u.missed}</td>
+                              <td className="text-center py-2.5 px-3">{u.failed}</td>
+                              <td className="text-center py-2.5 px-3">
+                                <Badge variant="secondary">{u.answerRate}%</Badge>
+                              </td>
+                              <td className="text-center py-2.5 px-3">{formatDuration(u.avgTalkTime)}</td>
+                              <td className="text-right py-2.5 px-3 text-muted-foreground">
+                                {u.lastCallAt ? format(new Date(u.lastCallAt), 'MMM d, HH:mm') : '--'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <Minus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-yellow-500 shrink-0" />
-                      <span className="text-xs sm:text-sm">{repCallStats.neutral}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 sm:gap-2">
-                      <TrendingDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-500 shrink-0" />
-                      <span className="text-xs sm:text-sm">{repCallStats.negative}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                  )}
+                </div>
 
-              <Card>
-                <CardHeader className="pb-2 p-3 sm:p-6">
-                  <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Processing</CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 sm:p-6 pt-0">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm">
-                    <span className="text-green-600">{callStats.completed} Done</span>
-                    <span className="text-amber-600">{callStats.pending} Pending</span>
-                    <span className="text-red-600">{callStats.failed} Failed</span>
+                {/* Unique Leads Metrics (per team member) */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">
+                      Unique Leads Metrics
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Unique Answer % = unique completed leads / unique leads contacted
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
-            </div>
 
-            {/* Recordings List */}
+                  {callOverview.byUser.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-6 text-center">
+                      No lead-linked call data for this period
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/30">
+                            <th className="text-left py-2.5 px-3 font-medium">Member</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Unique Leads</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Unique Completed</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Unique Not Picked</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Unique Failed</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Unique Answer %</th>
+                            <th className="text-right py-2.5 px-3 font-medium">Last Call</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(canViewTeam
+                            ? callOverview.byUser
+                            : callOverview.byUser.filter(u => u.userId === user?.id)
+                          ).map((u) => {
+                            const uniqueAnswerRate = u.uniqueLeads > 0
+                              ? Math.round((u.uniqueCompletedLeads / u.uniqueLeads) * 100)
+                              : 0
+                            return (
+                              <tr key={`unique-${u.userId}`} className="border-b last:border-0">
+                                <td className="py-2.5 px-3">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium">{u.name}</span>
+                                    {u.email ? <span className="text-xs text-muted-foreground">{u.email}</span> : null}
+                                  </div>
+                                </td>
+                                <td className="text-center py-2.5 px-3">{u.uniqueLeads}</td>
+                                <td className="text-center py-2.5 px-3">{u.uniqueCompletedLeads}</td>
+                                <td className="text-center py-2.5 px-3">{u.uniqueMissedLeads}</td>
+                                <td className="text-center py-2.5 px-3">{u.uniqueFailedLeads}</td>
+                                <td className="text-center py-2.5 px-3">
+                                  <Badge variant="secondary">{uniqueAnswerRate}%</Badge>
+                                </td>
+                                <td className="text-right py-2.5 px-3 text-muted-foreground">
+                                  {u.lastCallAt ? format(new Date(u.lastCallAt), 'MMM d, HH:mm') : '--'}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Lead breakdown */}
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Top Leads by Calls</p>
+
+                  {callOverview.byLead.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-6 text-center">
+                      No lead-linked call data for this period
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto border rounded-lg">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/30">
+                            <th className="text-left py-2.5 px-3 font-medium">Lead</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Calls</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Completed</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Not Picked</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Failed</th>
+                            <th className="text-center py-2.5 px-3 font-medium">Talk Time</th>
+                            <th className="text-right py-2.5 px-3 font-medium">Last Call</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {callOverview.byLead.map((l) => (
+                            <tr key={l.leadId} className="border-b last:border-0">
+                              <td className="py-2.5 px-3">
+                                <div className="flex flex-col">
+                                  <span className="font-medium">{l.name}</span>
+                                  {l.phone ? <span className="text-xs text-muted-foreground">{l.phone}</span> : null}
+                                </div>
+                              </td>
+                              <td className="text-center py-2.5 px-3">{l.totalCalls}</td>
+                              <td className="text-center py-2.5 px-3">{l.completed}</td>
+                              <td className="text-center py-2.5 px-3">{l.missed}</td>
+                              <td className="text-center py-2.5 px-3">{l.failed}</td>
+                              <td className="text-center py-2.5 px-3">{formatDuration(l.totalTalkTime)}</td>
+                              <td className="text-right py-2.5 px-3 text-muted-foreground">
+                                {l.lastCallAt ? format(new Date(l.lastCallAt), 'MMM d, HH:mm') : '--'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Recent Calls */}
             <Card>
               <CardHeader>
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
-                    <CardTitle>Call Recordings</CardTitle>
-                    <CardDescription>Click on a recording to view details and AI analysis</CardDescription>
-                  </div>
-                  <div className="relative w-full sm:w-64">
-                    <Search className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search recordings..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-8 sm:pl-9 pr-2 h-8 sm:h-9 text-xs sm:text-sm"
-                    />
+                    <CardTitle>Recent Calls</CardTitle>
+                    <CardDescription>Most recent calls for the selected time period</CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent>
-                {filteredRecordings.length === 0 ? (
+                {isLoadingCallLogs ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                  </div>
+                ) : recentCalls.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <Phone className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>{recordings.length === 0 ? 'No recordings synced yet' : 'No recordings match your search'}</p>
+                    <p>{callLogs.length === 0 ? 'No calls tracked yet' : 'No recent calls for this period'}</p>
+                    <p className="text-sm mt-2">Calls made from the app will appear here</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {filteredRecordings.map((recording) => (
-                      <div
-                        key={recording.id}
-                        className="flex items-center gap-4 p-4 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => setSelectedRecording(recording)}
-                      >
-                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          <Phone className="w-5 h-5 text-primary" />
-                        </div>
+                  <ScrollArea className="h-[420px] pr-3">
+                    <div className="space-y-3">
+                      {recentCalls.map((log) => {
+                        const formatDuration = (seconds: number) => {
+                          const mins = Math.floor(seconds / 60)
+                          const secs = seconds % 60
+                          return `${mins}:${secs.toString().padStart(2, '0')}`
+                        }
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{recording.phone_number}</span>
-                            {recording.sentiment && getSentimentIcon(recording.sentiment)}
-                          </div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Calendar className="w-3 h-3" />
-                            {format(new Date(recording.recording_date), 'MMM d, h:mm a')}
-                            <Clock className="w-3 h-3 ml-2" />
-                            {formatDuration(recording.duration_seconds)}
-                            {/* Show sales rep name for admin */}
-                            {isAdmin && recording.users && (
-                              <>
-                                <UserIcon className="w-3 h-3 ml-2" />
-                                <span className="text-primary">
-                                  {(recording.users as { name: string; email: string }).name} ({(recording.users as { email: string }).email})
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
+                        const getStatusColor = () => {
+                          switch (log.call_status) {
+                            case 'completed': return 'bg-green-500/10 text-green-600 border-green-500/20'
+                            case 'missed': return 'bg-orange-500/10 text-orange-600 border-orange-500/20'
+                            case 'failed': return 'bg-red-500/10 text-red-600 border-red-500/20'
+                            case 'rejected': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
+                            case 'busy': return 'bg-purple-500/10 text-purple-600 border-purple-500/20'
+                            case 'blocked': return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
+                            default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
+                          }
+                        }
 
-                        <div className="flex items-center gap-2">
-                          {getStatusBadge(recording.processing_status)}
-                          {recording.processing_status === 'pending' && hasAIConfig && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleProcess(recording.id)
-                              }}
-                              disabled={processing === recording.id}
-                              title="Analyze with AI"
-                            >
-                              {processing === recording.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Sparkles className="w-4 h-4" />
-                              )}
-                            </Button>
-                          )}
-                          {isAdmin && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDelete(recording.id)
-                              }}
-                              disabled={deleting === recording.id}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              title="Delete recording"
-                            >
-                              {deleting === recording.id ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Trash2 className="w-4 h-4" />
-                              )}
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                        const getStatusLabel = () => {
+                          switch (log.call_status) {
+                            case 'completed': return 'Completed'
+                            case 'missed': return 'Not Picked'
+                            case 'failed': return 'Failed'
+                            case 'rejected': return 'Rejected'
+                            case 'busy': return 'Busy'
+                            case 'blocked': return 'Blocked'
+                            default: return log.call_status
+                          }
+                        }
+
+                        return (
+                          <div
+                            key={log.id}
+                            className="flex items-center gap-4 p-4 rounded-lg border hover:bg-muted/50"
+                          >
+                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                              <Phone className="w-5 h-5 text-primary" />
+                            </div>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{log.phone_number}</span>
+                                <Badge variant="outline" className={`text-xs ${getStatusColor()}`}>
+                                  {getStatusLabel()}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Calendar className="w-3 h-3" />
+                                {format(new Date(log.call_started_at), 'MMM d, h:mm a')}
+                                <Clock className="w-3 h-3 ml-2" />
+                                {formatDuration(log.duration_seconds)}
+                                {log.talk_time_seconds && log.talk_time_seconds > 0 && (
+                                  <>
+                                    <span className="ml-2">•</span>
+                                    <span>Talk: {formatDuration(log.talk_time_seconds)}</span>
+                                  </>
+                                )}
+                                {/* Show sales rep name for admin */}
+                                {isAdmin && log.users && (
+                                  <>
+                                    <UserIcon className="w-3 h-3 ml-2" />
+                                    <span className="text-primary">
+                                      {log.users.name} ({log.users.email})
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </ScrollArea>
                 )}
               </CardContent>
             </Card>
@@ -1579,289 +1925,7 @@ export default function AnalyticsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Recording Detail Dialog */}
-      <Dialog open={!!selectedRecording} onOpenChange={() => setSelectedRecording(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          {selectedRecording && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <Phone className="w-5 h-5" />
-                  Call Details
-                </DialogTitle>
-                <DialogDescription>
-                  {format(new Date(selectedRecording.recording_date), 'MMMM d, yyyy at h:mm a')}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-6 py-4">
-                {/* Call Info */}
-                <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50">
-                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                    <UserIcon className="w-6 h-6 text-primary" />
-                  </div>
-                  <div>
-                    <h3 className="font-medium">{selectedRecording.phone_number}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {format(new Date(selectedRecording.recording_date), 'MMM d, yyyy')}
-                    </p>
-                  </div>
-                  <div className="ml-auto flex items-center gap-2">
-                    <Badge variant="outline">
-                      <Clock className="w-3 h-3 mr-1" />
-                      {formatDuration(selectedRecording.duration_seconds)}
-                    </Badge>
-                    {selectedRecording.sentiment && getSentimentBadge(selectedRecording.sentiment)}
-                  </div>
-                </div>
-
-                {/* Analysis Results */}
-                {selectedRecording.processing_status === 'completed' ? (
-                  <Tabs defaultValue="summary">
-                    <TabsList className="grid w-full grid-cols-4">
-                      <TabsTrigger value="summary">Summary</TabsTrigger>
-                      <TabsTrigger value="quality">Quality</TabsTrigger>
-                      <TabsTrigger value="transcript">Transcript</TabsTrigger>
-                      <TabsTrigger value="actions">Actions</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="summary" className="space-y-4 mt-4">
-                      <div>
-                        <h4 className="text-sm font-medium text-muted-foreground mb-2">Summary</h4>
-                        <p className="text-sm">{selectedRecording.summary}</p>
-                      </div>
-
-                      {/* Sentiment with reasoning */}
-                      {selectedRecording.sentiment && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-2">Sentiment Analysis</h4>
-                          <div className="flex items-center gap-2 mb-2">
-                            {getSentimentBadge(selectedRecording.sentiment)}
-                          </div>
-                          {selectedRecording.sentiment_reasoning && (
-                            <p className="text-sm text-muted-foreground italic">
-                              &quot;{selectedRecording.sentiment_reasoning}&quot;
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {selectedRecording.key_points && (selectedRecording.key_points as string[]).length > 0 && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-2">Key Points</h4>
-                          <ul className="text-sm space-y-1">
-                            {(selectedRecording.key_points as string[]).map((point, i) => (
-                              <li key={i} className="flex items-start gap-2">
-                                <span className="text-primary">•</span>
-                                {point}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {selectedRecording.next_steps && (
-                        <div>
-                          <h4 className="text-sm font-medium text-muted-foreground mb-2">Next Steps</h4>
-                          <p className="text-sm">{selectedRecording.next_steps}</p>
-                        </div>
-                      )}
-                    </TabsContent>
-
-                    {/* Call Quality Tab */}
-                    <TabsContent value="quality" className="space-y-4 mt-4">
-                      {selectedRecording.call_quality ? (
-                        <>
-                          {/* Overall Score */}
-                          <div className="text-center p-4 rounded-lg bg-muted/50">
-                            <p className="text-sm text-muted-foreground mb-1">Overall Quality Score</p>
-                            <p className="text-4xl font-bold text-primary">
-                              {(selectedRecording.call_quality as { overall_score: number }).overall_score}/10
-                            </p>
-                          </div>
-
-                          {/* Score Breakdown */}
-                          <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 sm:gap-3">
-                            {[
-                              { label: 'Communication', key: 'communication_clarity' },
-                              { label: 'Product Knowledge', key: 'product_knowledge' },
-                              { label: 'Objection Handling', key: 'objection_handling' },
-                              { label: 'Rapport Building', key: 'rapport_building' },
-                              { label: 'Closing Technique', key: 'closing_technique' },
-                            ].map(({ label, key }) => {
-                              const score = (selectedRecording.call_quality as Record<string, number>)[key] || 0
-                              const color = score >= 7 ? 'text-green-600' : score >= 5 ? 'text-yellow-600' : 'text-red-600'
-                              return (
-                                <div key={key} className="p-2 sm:p-3 rounded-lg border">
-                                  <p className="text-xs text-muted-foreground">{label}</p>
-                                  <p className={`text-base sm:text-lg font-semibold ${color}`}>{score}/10</p>
-                                </div>
-                              )
-                            })}
-                          </div>
-
-                          {/* Strengths */}
-                          {(selectedRecording.call_quality as { strengths?: string[] }).strengths?.length > 0 && (
-                            <div>
-                              <h4 className="text-sm font-medium text-green-600 mb-2">💪 Strengths</h4>
-                              <ul className="text-sm space-y-1">
-                                {((selectedRecording.call_quality as { strengths: string[] }).strengths).map((s, i) => (
-                                  <li key={i} className="flex items-start gap-2">
-                                    <span className="text-green-500">✓</span>
-                                    {s}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-
-                          {/* Areas of Improvement */}
-                          {(selectedRecording.call_quality as { areas_of_improvement?: string[] }).areas_of_improvement?.length > 0 && (
-                            <div>
-                              <h4 className="text-sm font-medium text-orange-600 mb-2">📈 Areas to Improve</h4>
-                              <ul className="text-sm space-y-1">
-                                {((selectedRecording.call_quality as { areas_of_improvement: string[] }).areas_of_improvement).map((a, i) => (
-                                  <li key={i} className="flex items-start gap-2">
-                                    <span className="text-orange-500">→</span>
-                                    {a}
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-sm text-muted-foreground text-center py-8">
-                          Call quality metrics not available. Re-analyze with latest AI to get detailed quality scores.
-                        </p>
-                      )}
-                    </TabsContent>
-
-                    <TabsContent value="transcript" className="mt-4">
-                      <div className="max-h-[300px] overflow-y-auto p-4 rounded-lg bg-muted/50 text-sm whitespace-pre-wrap">
-                        {selectedRecording.transcript || 'No transcript available'}
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="actions" className="mt-4">
-                      {selectedRecording.action_items && (selectedRecording.action_items as string[]).length > 0 ? (
-                        <ul className="space-y-2">
-                          {(selectedRecording.action_items as string[]).map((item, i) => (
-                            <li key={i} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
-                              <CheckCircle2 className="w-5 h-5 text-muted-foreground mt-0.5" />
-                              <span className="text-sm">{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-muted-foreground text-center py-8">
-                          No action items identified
-                        </p>
-                      )}
-                    </TabsContent>
-                  </Tabs>
-                ) : (
-                  <div className="text-center py-8">
-                    {selectedRecording.processing_status === 'pending' ? (
-                      <>
-                        <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                        <h3 className="font-medium">Recording Not Yet Analyzed</h3>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          Click the button below to analyze this recording with AI
-                        </p>
-                        <Button
-                          className="mt-4"
-                          onClick={() => handleProcess(selectedRecording.id)}
-                          disabled={processing === selectedRecording.id || !hasAIConfig}
-                        >
-                          {processing === selectedRecording.id ? (
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          ) : (
-                            <Sparkles className="w-4 h-4 mr-2" />
-                          )}
-                          Analyze with AI
-                        </Button>
-                      </>
-                    ) : selectedRecording.processing_status === 'processing' ? (
-                      <>
-                        <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto mb-4" />
-                        <h3 className="font-medium">Analyzing Recording...</h3>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-                        <h3 className="font-medium">Analysis Failed</h3>
-                        <p className="text-sm text-muted-foreground mt-2">
-                          {selectedRecording.processing_error || 'Unknown error occurred'}
-                        </p>
-                        <Button
-                          className="mt-4"
-                          onClick={() => handleProcess(selectedRecording.id)}
-                          disabled={processing === selectedRecording.id}
-                        >
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Retry
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* Audio Player */}
-                {selectedRecording.drive_file_id && (
-                  <div className="pt-4 border-t space-y-3">
-                    <h4 className="text-sm font-medium text-muted-foreground">Recording</h4>
-                    <div className="rounded-lg overflow-hidden bg-muted">
-                      <iframe
-                        src={`https://drive.google.com/file/d/${selectedRecording.drive_file_id}/preview`}
-                        width="100%"
-                        height="80"
-                        allow="autoplay"
-                        className="border-0"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{selectedRecording.drive_file_name}</span>
-                      <Button variant="ghost" size="sm" asChild>
-                        <a
-                          href={selectedRecording.drive_file_url || `https://drive.google.com/file/d/${selectedRecording.drive_file_id}/view`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          <ExternalLink className="w-3 h-3 mr-1" />
-                          Open in Drive
-                        </a>
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Delete Button - Admin Only */}
-                {isAdmin && (
-                  <div className="pt-4 border-t">
-                    <Button
-                      variant="destructive"
-                      className="w-full"
-                      onClick={() => handleDelete(selectedRecording.id)}
-                      disabled={deleting === selectedRecording.id}
-                    >
-                      {deleting === selectedRecording.id ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <Trash2 className="w-4 h-4 mr-2" />
-                      )}
-                      Delete Recording
-                    </Button>
-                    <p className="text-xs text-muted-foreground text-center mt-2">
-                      This will remove the recording from the app. The file will remain in Google Drive.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Note: Recording detail dialog removed - using native call tracking only */}
     </>
   )
 }

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +15,11 @@ import {
 import { Plus, Loader2, Edit, Trash2, Users, RefreshCw, XCircle, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { CampaignAssignmentDialog } from './campaign-assignment-dialog'
+
+type Integration = {
+  id: string
+  config?: Record<string, unknown> | null
+}
 
 type CampaignAssignment = {
   id: string
@@ -32,10 +36,9 @@ type CampaignAssignment = {
 
 interface CampaignAssignmentTableProps {
   integrationId: string
-  orgSlug: string
 }
 
-export function CampaignAssignmentTable({ integrationId, orgSlug }: CampaignAssignmentTableProps) {
+export function CampaignAssignmentTable({ integrationId }: CampaignAssignmentTableProps) {
   const [assignments, setAssignments] = useState<CampaignAssignment[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -66,13 +69,37 @@ export function CampaignAssignmentTable({ integrationId, orgSlug }: CampaignAssi
   const handleFetchCampaigns = async () => {
     setIsFetchingCampaigns(true)
     try {
+      // Fetch current integration config (so PATCH doesn't overwrite other config fields)
+      const integrationRes = await fetch(`/api/integrations/${integrationId}`)
+      if (!integrationRes.ok) {
+        throw new Error('Failed to fetch integration config')
+      }
+      const integrationJson = (await integrationRes.json()) as { integration?: Integration }
+      const existingConfig = (integrationJson.integration?.config || {}) as Record<string, unknown>
+
+      // Fetch campaigns from platform using current credentials/config
       const response = await fetch(`/api/integrations/${integrationId}/campaigns`)
       if (!response.ok) {
         throw new Error('Failed to fetch campaigns')
       }
-      const data = await response.json()
-      toast.success(`Found ${data.campaigns?.length || 0} campaigns`)
-      // TODO: Show dialog to select campaigns to create assignments
+      const data = (await response.json()) as { campaigns?: Array<{ id: string; name: string }> }
+
+      // Persist campaigns into integration config so both Settings + Assignments use the same list
+      const saveRes = await fetch(`/api/integrations/${integrationId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config: {
+            ...existingConfig,
+            available_campaigns: data.campaigns || [],
+          },
+        }),
+      })
+      if (!saveRes.ok) {
+        throw new Error('Failed to save campaigns')
+      }
+
+      toast.success(`Updated campaigns: ${data.campaigns?.length || 0} found`)
     } catch (error) {
       console.error('Error fetching campaigns:', error)
       toast.error('Failed to fetch campaigns from platform')
@@ -266,7 +293,6 @@ export function CampaignAssignmentTable({ integrationId, orgSlug }: CampaignAssi
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
         integrationId={integrationId}
-        orgSlug={orgSlug}
         assignment={editingAssignment}
         onSuccess={fetchAssignments}
       />

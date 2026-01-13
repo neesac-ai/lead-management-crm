@@ -363,8 +363,8 @@ export default function SubscriptionsPage() {
               const leadAssignedTo = sub.leads?.assigned_to
               const leadCreatedBy = sub.leads?.created_by
               return userIds.includes(leadAssignedTo || '') ||
-                     leadCreatedBy === profile.id ||
-                     leadAssignedTo === profile.id
+                leadCreatedBy === profile.id ||
+                leadAssignedTo === profile.id
             })
           } else {
             // Non-manager: only their assigned/created leads

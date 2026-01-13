@@ -25,10 +25,10 @@ export class FacebookIntegration extends BaseIntegrationClass {
         .createHmac('sha256', secret)
         .update(payloadString)
         .digest('hex');
-      
+
       // Facebook sends signature as 'sha256=<hash>'
       const receivedHash = signature.replace('sha256=', '');
-      
+
       return crypto.timingSafeEqual(
         Buffer.from(expectedSignature),
         Buffer.from(receivedHash)
@@ -53,7 +53,10 @@ export class FacebookIntegration extends BaseIntegrationClass {
               leadgen_id?: string;
               form_id?: string;
               page_id?: string;
+              campaign_id?: string;
+              campaign_name?: string;
               adgroup_id?: string;
+              adgroup_name?: string;
               ad_id?: string;
               created_time?: number;
               field_data?: Array<{
@@ -98,7 +101,9 @@ export class FacebookIntegration extends BaseIntegrationClass {
 
       // Build campaign data
       const campaignData = {
-        campaign_id: value.adgroup_id || '',
+        // Important: campaign assignments are keyed by campaign_id (not ad set / adgroup)
+        campaign_id: value.campaign_id || '',
+        campaign_name: value.campaign_name || undefined,
         ad_set_id: value.adgroup_id || '',
         ad_id: value.ad_id || '',
         form_id: value.form_id || '',
@@ -137,86 +142,97 @@ export class FacebookIntegration extends BaseIntegrationClass {
   ): Promise<LeadData[]> {
     try {
       const accessToken = credentials.access_token as string;
-      const formId = config.form_id as string;
+      const selectedForms = (config.selected_forms as string[] | undefined) || (config.form_ids as string[] | undefined);
+      const legacyFormId = config.form_id as string | undefined;
 
-      if (!accessToken || !formId) {
-        throw new Error('Missing access_token or form_id in credentials/config');
+      const formIds = Array.isArray(selectedForms) && selectedForms.length > 0
+        ? selectedForms
+        : (legacyFormId ? [legacyFormId] : []);
+
+      if (!accessToken || formIds.length === 0) {
+        throw new Error('Missing access_token or selected_forms/form_id in credentials/config');
       }
 
       const leads: LeadData[] = [];
-      let url = `https://graph.facebook.com/v18.0/${formId}/leads?access_token=${accessToken}`;
 
-      // Add since parameter if provided
-      if (since) {
-        const sinceTimestamp = Math.floor(since.getTime() / 1000);
-        url += `&since=${sinceTimestamp}`;
-      }
+      const fetchLeadsForForm = async (formId: string): Promise<void> => {
+        let url =
+          `https://graph.facebook.com/v18.0/${formId}/leads?` +
+          `fields=id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name&` +
+          `access_token=${accessToken}`;
 
-      // Fetch leads (handle pagination if needed)
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`Facebook API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as {
-        data?: Array<{
-          id: string;
-          created_time: string;
-          field_data?: Array<{
-            name: string;
-            values: string[];
-          }>;
-          ad_id?: string;
-          ad_name?: string;
-          adset_id?: string;
-          adset_name?: string;
-          campaign_id?: string;
-          campaign_name?: string;
-        }>;
-        paging?: {
-          next?: string;
-        };
-      };
-
-      if (!data.data) {
-        return leads;
-      }
-
-      // Transform Facebook leads to LeadData
-      for (const fbLead of data.data) {
-        const fieldData: Record<string, string> = {};
-        if (fbLead.field_data) {
-          for (const field of fbLead.field_data) {
-            if (field.values && field.values.length > 0) {
-              fieldData[field.name] = field.values[0];
-            }
-          }
+        if (since) {
+          const sinceTimestamp = Math.floor(since.getTime() / 1000);
+          url += `&since=${sinceTimestamp}`;
         }
 
-        const name = fieldData.full_name || fieldData.first_name || fieldData.name || '';
-        const email = fieldData.email || '';
-        const phone = fieldData.phone_number || fieldData.phone || '';
-        const company = fieldData.company_name || fieldData.company || '';
+        // Meta paginates leads; follow paging.next to retrieve older leads as well.
+        for (let page = 0; page < 50 && url; page++) {
+          // eslint-disable-next-line no-await-in-loop
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Facebook API error: ${response.statusText}`);
+          }
 
-        leads.push({
-          name: name.trim() || 'Unknown',
-          email: this.normalizeEmail(email) || undefined,
-          phone: this.normalizePhone(phone) || undefined,
-          company: company || undefined,
-          external_id: fbLead.id,
-          campaign_data: {
-            campaign_id: fbLead.campaign_id || fbLead.adset_id || '',
-            campaign_name: fbLead.campaign_name || fbLead.adset_name || '',
-            ad_set_id: fbLead.adset_id || '',
-            ad_id: fbLead.ad_id || '',
-          },
-          metadata: {
-            ad_name: fbLead.ad_name,
-            form_id: formId,
-            field_data: fieldData,
-          },
-          created_at: fbLead.created_time,
-        });
+          // eslint-disable-next-line no-await-in-loop
+          const data = await response.json() as {
+            data?: Array<{
+              id: string;
+              created_time: string;
+              field_data?: Array<{ name: string; values: string[] }>;
+              ad_id?: string;
+              ad_name?: string;
+              adset_id?: string;
+              adset_name?: string;
+              campaign_id?: string;
+              campaign_name?: string;
+            }>;
+            paging?: { next?: string };
+          };
+
+          const rows = data.data || [];
+          for (const fbLead of rows) {
+            const fieldData: Record<string, string> = {};
+            if (fbLead.field_data) {
+              for (const field of fbLead.field_data) {
+                if (field.values && field.values.length > 0) {
+                  fieldData[field.name] = field.values[0];
+                }
+              }
+            }
+
+            const name = fieldData.full_name || fieldData.first_name || fieldData.name || '';
+            const email = fieldData.email || '';
+            const phone = fieldData.phone_number || fieldData.phone || '';
+            const company = fieldData.company_name || fieldData.company || '';
+
+            leads.push({
+              name: name.trim() || 'Unknown',
+              email: this.normalizeEmail(email) || undefined,
+              phone: this.normalizePhone(phone) || undefined,
+              company: company || undefined,
+              external_id: fbLead.id,
+              campaign_data: {
+                campaign_id: fbLead.campaign_id || '',
+                campaign_name: fbLead.campaign_name || '',
+                ad_set_id: fbLead.adset_id || '',
+                ad_id: fbLead.ad_id || '',
+              },
+              metadata: {
+                ad_name: fbLead.ad_name,
+                form_id: formId,
+                field_data: fieldData,
+              },
+              created_at: fbLead.created_time,
+            });
+          }
+
+          url = data.paging?.next || '';
+        }
+      };
+
+      for (const formId of formIds) {
+        await fetchLeadsForForm(formId);
       }
 
       return leads;

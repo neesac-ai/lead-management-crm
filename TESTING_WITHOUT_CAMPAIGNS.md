@@ -82,11 +82,18 @@ You can test the API directly without campaigns:
 4. Select permissions:
    - `leads_retrieval`
    - `ads_read`
+   - `pages_show_list`
+   - `pages_read_engagement`
+   - `pages_manage_ads` (required for `/{page_id}/leadgen_forms` on many pages)
 5. Click **"Generate Access Token"**
 6. Test queries:
    - `me/adaccounts` - Get your ad accounts
-   - `{ad_account_id}/leadgen_forms` - Get Lead Gen Forms
+   - `{page_id}/leadgen_forms` - Get Lead Gen Forms (forms are Page-owned)
    - `{form_id}/leads` - Get leads from a form
+
+Note on UX vs API reality:
+- Humans remember **Business Portfolio / Ad Account / Campaign**.
+- Meta Lead Forms are **Page-owned**. In BharatCRM we fetch forms from Pages, and can optionally filter to “forms used by ads in a selected Ad Account” by scanning ad creatives for `lead_gen_form_id`.
 
 ---
 

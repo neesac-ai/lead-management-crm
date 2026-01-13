@@ -22,6 +22,7 @@ type Lead = {
   id: string
   name: string
   email: string | null
+  phone: string | null
   status: string
   assigned_to: string | null
   created_by: string | null
@@ -102,7 +103,7 @@ export default function AssignmentPage() {
       // Admin: fetch all unassigned leads directly
       const { data: leads } = await supabase
         .from('leads')
-        .select('id, name, email, status, assigned_to, created_by, custom_fields, created_at')
+        .select('id, name, email, phone, status, assigned_to, created_by, custom_fields, created_at')
         .eq('org_id', org.id)
         .is('assigned_to', null)
         .order('created_at', { ascending: false })
@@ -127,7 +128,7 @@ export default function AssignmentPage() {
           // Fallback: try direct query (might be blocked by RLS)
           const { data: leads } = await supabase
             .from('leads')
-            .select('id, name, email, status, assigned_to, created_by, custom_fields, created_at')
+            .select('id, name, email, phone, status, assigned_to, created_by, custom_fields, created_at')
             .eq('org_id', org.id)
             .is('assigned_to', null)
             .eq('created_by', currentProfile.id)
@@ -139,7 +140,7 @@ export default function AssignmentPage() {
         // Fallback: try direct query
         const { data: leads } = await supabase
           .from('leads')
-          .select('id, name, email, status, assigned_to, created_by, custom_fields, created_at')
+          .select('id, name, email, phone, status, assigned_to, created_by, custom_fields, created_at')
           .eq('org_id', org.id)
           .is('assigned_to', null)
           .eq('created_by', currentProfile.id)
@@ -150,7 +151,7 @@ export default function AssignmentPage() {
       // Regular sales rep: only unassigned leads created by self
       const { data: leads } = await supabase
         .from('leads')
-        .select('id, name, email, status, assigned_to, created_by, custom_fields, created_at')
+        .select('id, name, email, phone, status, assigned_to, created_by, custom_fields, created_at')
         .eq('org_id', org.id)
         .is('assigned_to', null)
         .eq('created_by', currentProfile.id)
@@ -535,11 +536,14 @@ export default function AssignmentPage() {
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-2">
                             <div className="min-w-0 flex-1">
-                              <p className="font-medium text-sm sm:text-base truncate">{lead.name}</p>
+                              <p className="font-medium text-sm sm:text-base truncate">{lead.phone || 'No phone'}</p>
                               {lead.custom_fields?.company && (
                                 <p className="text-xs sm:text-sm text-muted-foreground truncate">
                                   {lead.custom_fields.company}
                                 </p>
+                              )}
+                              {lead.name && (
+                                <p className="text-xs sm:text-sm text-muted-foreground truncate">{lead.name}</p>
                               )}
                             </div>
                             <Badge variant="outline" className="shrink-0 text-xs w-fit">{lead.status}</Badge>

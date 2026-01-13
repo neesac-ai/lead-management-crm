@@ -101,21 +101,6 @@ class NativeBridge(
         locationBridge.stopTracking()
     }
 
-    @JavascriptInterface
-    fun checkIn(leadId: String, notes: String) {
-        locationBridge.checkIn(leadId, notes)
-    }
-
-    @JavascriptInterface
-    fun addGeofence(leadId: String, lat: Double, lng: Double, radius: Double) {
-        locationBridge.addGeofence(leadId, lat, lng, radius)
-    }
-
-    @JavascriptInterface
-    fun removeGeofence(leadId: String) {
-        locationBridge.removeGeofence(leadId)
-    }
-
     // ========== Permission Handling ==========
 
     fun onPermissionGranted(permission: String) {

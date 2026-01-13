@@ -12,7 +12,7 @@ type User = Database['public']['Tables']['users']['Row'];
 export interface AssignmentResult {
   assigned_to: string | null;
   created_by: string | null;
-  assignment_method: 'campaign' | 'sales_auto' | 'percentage' | 'round_robin' | 'unassigned';
+  assignment_method: 'form' | 'campaign' | 'sales_auto' | 'percentage' | 'round_robin' | 'unassigned';
 }
 
 /**
@@ -25,17 +25,43 @@ export async function assignLead(
 ): Promise<AssignmentResult> {
   const supabase = await createClient();
 
-  // Priority 1: Campaign-based assignment (only for integration leads)
+  // Priority 1: Form-based assignment (only for integration leads)
+  // For Meta Instant Forms, form_id is the most reliable routing key.
+  if (lead.integration_id && lead.integration_metadata) {
+    const formId = (lead.integration_metadata as { form_id?: string })?.form_id;
+
+    // IMPORTANT BUSINESS RULE:
+    // If this is an integration lead with a form_id but there is NO active form assignment,
+    // we intentionally keep the lead UNASSIGNED (do NOT fall back to round-robin/percentage/campaign).
+    if (formId) {
+      const formAssignment = await getLeadFormAssignment(orgId, lead.integration_id, formId);
+      if (formAssignment) {
+        return {
+          assigned_to: formAssignment.assigned_to,
+          created_by: formAssignment.assigned_to,
+          assignment_method: 'form',
+        };
+      }
+
+      return {
+        assigned_to: null,
+        created_by: createdByUserId || null,
+        assignment_method: 'unassigned',
+      };
+    }
+  }
+
+  // Priority 2: Campaign-based assignment (only for integration leads)
   if (lead.integration_id && lead.integration_metadata) {
     const campaignId = (lead.integration_metadata as { campaign_id?: string })?.campaign_id;
-    
+
     if (campaignId) {
       const campaignAssignment = await getCampaignAssignment(
         orgId,
         lead.integration_id,
         campaignId
       );
-      
+
       if (campaignAssignment) {
         return {
           assigned_to: campaignAssignment.assigned_to,
@@ -46,7 +72,7 @@ export async function assignLead(
     }
   }
 
-  // Priority 2: Sales auto-assign (only for manual creation by sales users)
+  // Priority 3: Sales auto-assign (only for manual creation by sales users)
   if (createdByUserId) {
     const creator = await getUserById(createdByUserId);
     if (creator && creator.role === 'sales' && creator.org_id === orgId) {
@@ -58,7 +84,7 @@ export async function assignLead(
     }
   }
 
-  // Priority 3: Percentage-based assignment
+  // Priority 4: Percentage-based assignment
   const percentageAssignment = await getPercentageBasedAssignment(orgId);
   if (percentageAssignment) {
     return {
@@ -68,7 +94,7 @@ export async function assignLead(
     };
   }
 
-  // Priority 4: Round-robin assignment
+  // Priority 5: Round-robin assignment
   const roundRobinAssignment = await getRoundRobinAssignment(orgId);
   if (roundRobinAssignment) {
     return {
@@ -78,12 +104,38 @@ export async function assignLead(
     };
   }
 
-  // Priority 5: Unassigned (fallback)
+  // Priority 6: Unassigned (fallback)
   return {
     assigned_to: null,
     created_by: createdByUserId || null,
     assignment_method: 'unassigned',
   };
+}
+
+/**
+ * Get lead form assignment for a specific form_id
+ */
+async function getLeadFormAssignment(
+  orgId: string,
+  integrationId: string,
+  formId: string
+): Promise<{ assigned_to: string } | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('lead_form_assignments')
+    .select('assigned_to')
+    .eq('org_id', orgId)
+    .eq('integration_id', integrationId)
+    .eq('form_id', formId)
+    .eq('is_active', true)
+    .single();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return { assigned_to: data.assigned_to };
 }
 
 /**
@@ -180,7 +232,7 @@ async function getPercentageBasedAssignment(
   // Calculate which sales rep should get this lead based on current distribution
   // This is a simplified version - in production, you might want more sophisticated logic
   const assignedCounts = await getAssignedLeadCounts(orgId, salesTeam.map(u => u.id));
-  
+
   // Find the sales rep who is furthest below their target allocation
   let minRatio = Infinity;
   let selectedUserId: string | null = null;

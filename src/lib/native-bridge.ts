@@ -22,9 +22,6 @@ export interface NativeBridge {
   getCurrentLocation?: () => string
   startTracking?: (intervalSeconds: number) => void
   stopTracking?: () => void
-  checkIn?: (leadId: string, notes: string) => void
-  addGeofence?: (leadId: string, lat: number, lng: number, radius: number) => void
-  removeGeofence?: (leadId: string) => void
 }
 
 export interface NativeEvent {
@@ -40,7 +37,22 @@ export function isNativeApp(): boolean {
 
   // Check if NativeBridge is available
   const bridge = (window as any).NativeBridge
-  return bridge !== undefined && bridge.isAvailable === true
+  if (!bridge) {
+    return false
+  }
+
+  // Check if isAvailable is a function or property
+  if (typeof bridge.isAvailable === 'function') {
+    try {
+      return bridge.isAvailable() === true
+    } catch (e) {
+      console.warn('[NATIVE_BRIDGE] Error calling isAvailable():', e)
+      return false
+    }
+  }
+
+  // Fallback: if bridge exists, assume it's available
+  return bridge !== undefined
 }
 
 /**
@@ -67,32 +79,60 @@ export function getNativeBridge(): NativeBridge | null {
     getCurrentLocation: bridge.getCurrentLocation?.bind(bridge),
     startTracking: bridge.startTracking?.bind(bridge),
     stopTracking: bridge.stopTracking?.bind(bridge),
-    checkIn: bridge.checkIn?.bind(bridge),
-    addGeofence: bridge.addGeofence?.bind(bridge),
-    removeGeofence: bridge.removeGeofence?.bind(bridge),
   }
+}
+
+// Import global listener (will be initialized when module loads)
+let globalListener: ReturnType<typeof import('./global-native-events')['globalNativeEventListener']> | null = null
+
+if (typeof window !== 'undefined') {
+  // Dynamic import to avoid SSR issues
+  import('./global-native-events').then((module) => {
+    globalListener = module.globalNativeEventListener
+    globalListener.setup()
+  })
 }
 
 /**
  * Setup native event listener
+ * Uses global event listener to persist across component mounts/unmounts
  */
 export function setupNativeEventListener(
   callback: (event: NativeEvent) => void
 ): () => void {
   if (typeof window === 'undefined') {
-    return () => {}
+    return () => { }
   }
 
   const handler = (event: NativeEvent) => {
     callback(event)
   }
 
-  // Set up the event handler
-  ;(window as any).onNativeEvent = handler
+  // Use global listener if available, otherwise fallback to direct assignment
+  if (globalListener) {
+    return globalListener.addHandler(handler)
+  } else {
+    // Fallback: set up directly (will be replaced when global listener loads)
+    // Also ensure global listener is initialized
+    import('./global-native-events').then((module) => {
+      globalListener = module.globalNativeEventListener
+      globalListener.setup()
+      globalListener.addHandler(handler)
+    })
 
-  // Return cleanup function
-  return () => {
-    delete (window as any).onNativeEvent
+    // Temporary direct assignment
+    const existingHandler = (window as any).onNativeEvent
+      ; (window as any).onNativeEvent = (event: NativeEvent) => {
+        if (existingHandler) existingHandler(event)
+        handler(event)
+      }
+
+    return () => {
+      // Cleanup
+      if ((window as any).onNativeEvent === handler) {
+        delete (window as any).onNativeEvent
+      }
+    }
   }
 }
 

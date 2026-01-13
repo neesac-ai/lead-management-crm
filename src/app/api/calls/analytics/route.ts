@@ -24,11 +24,7 @@ export async function GET(request: NextRequest) {
     if (!profile) {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
     }
-
-    // Only admins can view analytics
-    if (profile.role !== 'admin' && profile.role !== 'super_admin') {
-      return NextResponse.json({ error: 'Unauthorized - Admin access required' }, { status: 403 })
-    }
+    const orgId = (profile as any).org_id as string
 
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('start_date')
@@ -38,8 +34,26 @@ export async function GET(request: NextRequest) {
     // Build query
     let query = supabase
       .from('call_logs')
-      .select('*')
-      .eq('org_id', profile.org_id)
+      .select(`
+        id,
+        org_id,
+        lead_id,
+        user_id,
+        phone_number,
+        call_direction,
+        call_status,
+        call_started_at,
+        call_ended_at,
+        duration_seconds,
+        ring_duration_seconds,
+        talk_time_seconds,
+        device_info,
+        network_type,
+        created_at,
+        users:users ( id, name, email ),
+        leads:leads ( id, name, phone )
+      `)
+      .eq('org_id', orgId)
 
     if (startDate) {
       query = query.gte('call_started_at', startDate)
@@ -64,11 +78,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate analytics
-    const totalCalls = callLogs?.length || 0
-    const completedCalls = callLogs?.filter(c => c.call_status === 'completed').length || 0
-    const missedCalls = callLogs?.filter(c => c.call_status === 'missed').length || 0
-    const totalDuration = callLogs?.reduce((sum, c) => sum + (c.duration_seconds || 0), 0) || 0
-    const totalTalkTime = callLogs?.reduce((sum, c) => sum + (c.talk_time_seconds || 0), 0) || 0
+    const logs = (callLogs || []) as any[]
+    const totalCalls = logs.length
+    const completedCalls = logs.filter(c => c.call_status === 'completed').length
+    const missedCalls = logs.filter(c => c.call_status === 'missed').length
+    const totalDuration = logs.reduce((sum, c) => sum + (c.duration_seconds || 0), 0)
+    const totalTalkTime = logs.reduce((sum, c) => sum + (c.talk_time_seconds || 0), 0)
     const avgDuration = totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0
     const avgTalkTime = completedCalls > 0 ? Math.round(totalTalkTime / completedCalls) : 0
 

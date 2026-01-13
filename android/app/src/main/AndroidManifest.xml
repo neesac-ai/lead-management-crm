@@ -55,16 +55,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Location tracking service -->
-        <service
-            android:name=".LocationTrackingService"
-            android:foregroundServiceType="location"
-            android:exported="false" />
-
-        <!-- Geofence broadcast receiver -->
-        <receiver
-            android:name=".GeofenceBroadcastReceiver"
-            android:exported="false" />
+        <!-- Note: Background location service and geofencing removed (foreground-only tracking) -->
     </application>
 
 </manifest>

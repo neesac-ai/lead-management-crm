@@ -1,10 +1,6 @@
 package com.neesac.bharatcrm
 
 import android.Manifest
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.util.Log
 import android.webkit.WebView
 import com.google.gson.Gson
@@ -21,44 +17,14 @@ class LocationBridge(
 ) {
     private val tag = "LocationBridge"
     private lateinit var locationManager: LocationManager
-    private lateinit var geofencingService: GeofencingService
     private lateinit var apiClient: ApiClient
     private val gson = Gson()
     private var isTracking = false
     private var trackingSessionId: String? = null
 
-    private val geofenceReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            val eventType = intent?.getStringExtra("eventType")
-            val geofenceId = intent?.getStringExtra("geofenceId")
-            val leadId = intent?.getStringExtra("leadId")
-
-            Log.d(tag, "Geofence event: $eventType for lead: $leadId")
-
-            if (eventType == "GEOFENCE_ENTER" || eventType == "GEOFENCE_DWELL") {
-                leadId?.let { id ->
-                    // Auto check-in
-                    checkIn(id, "Automatic check-in via geofence")
-                }
-            }
-
-            // Send event to JavaScript
-            sendGeofenceEventToJS(eventType ?: "", geofenceId ?: "", leadId ?: "")
-        }
-    }
-
     init {
         locationManager = LocationManager(activity)
-        geofencingService = GeofencingService(activity)
         apiClient = ApiClient(activity)
-
-        // Register geofence receiver
-        val filter = IntentFilter("com.neesac.bharatcrm.GEOFENCE_EVENT")
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            activity.registerReceiver(geofenceReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            activity.registerReceiver(geofenceReceiver, filter)
-        }
     }
 
     fun getCurrentLocation(): String {
@@ -143,100 +109,6 @@ class LocationBridge(
         trackingSessionId = null
     }
 
-    fun checkIn(leadId: String, notes: String) {
-        Log.d(tag, "Manual check-in for lead: $leadId, notes: $notes")
-
-        locationManager.getCurrentLocation { locationData ->
-            if (locationData != null) {
-                // Reverse geocode if needed
-                val finalLocationData = if (locationData.address == null) {
-                    var geocodedLocation: LocationManager.LocationData? = null
-                    locationManager.reverseGeocode(locationData.latitude, locationData.longitude) { address ->
-                        geocodedLocation = locationData.copy(address = address)
-                    }
-
-                    // Wait for geocoding
-                    var attempts = 0
-                    while (geocodedLocation == null && attempts < 20) {
-                        Thread.sleep(100)
-                        attempts++
-                    }
-                    geocodedLocation ?: locationData
-                } else {
-                    locationData
-                }
-
-                // Log check-in to backend using check-in endpoint
-                apiClient.checkIn(
-                    leadId = leadId,
-                    latitude = finalLocationData.latitude,
-                    longitude = finalLocationData.longitude,
-                    accuracy = finalLocationData.accuracy,
-                    address = finalLocationData.address,
-                    notes = notes,
-                    authToken = null, // TODO: Get auth token from WebView
-                    callback = { success, error ->
-                        if (success) {
-                            Log.d(tag, "Check-in logged successfully")
-                        } else {
-                            Log.e(tag, "Failed to log check-in: $error")
-                        }
-                    }
-                )
-
-                // Send event to JavaScript
-                sendLocationEventToJS("CHECKIN_COMPLETE", finalLocationData)
-            } else {
-                sendErrorToJS("Failed to get location for check-in")
-            }
-        }
-    }
-
-    fun addGeofence(leadId: String, lat: Double, lng: Double, radius: Double) {
-        Log.d(tag, "Adding geofence for lead: $leadId, lat: $lat, lng: $lng, radius: $radius")
-
-        val geofenceId = "lead_${leadId}"
-
-        geofencingService.addGeofence(
-            geofenceId = geofenceId,
-            leadId = leadId,
-            latitude = lat,
-            longitude = lng,
-            radius = radius,
-            autoCheckIn = true
-        ) { success, error ->
-            if (success) {
-                Log.d(tag, "Geofence added successfully")
-                sendEventToJS("GEOFENCE_ADDED", mapOf(
-                    "geofenceId" to geofenceId,
-                    "leadId" to leadId
-                ))
-            } else {
-                Log.e(tag, "Failed to add geofence: $error")
-                sendErrorToJS("Failed to add geofence: $error")
-            }
-        }
-    }
-
-    fun removeGeofence(leadId: String) {
-        Log.d(tag, "Removing geofence for lead: $leadId")
-
-        val geofenceId = "lead_${leadId}"
-
-        geofencingService.removeGeofence(geofenceId) { success, error ->
-            if (success) {
-                Log.d(tag, "Geofence removed successfully")
-                sendEventToJS("GEOFENCE_REMOVED", mapOf(
-                    "geofenceId" to geofenceId,
-                    "leadId" to leadId
-                ))
-            } else {
-                Log.e(tag, "Failed to remove geofence: $error")
-                sendErrorToJS("Failed to remove geofence: $error")
-            }
-        }
-    }
-
     private fun logLocationToBackend(
         leadId: String?,
         locationData: LocationManager.LocationData,
@@ -279,13 +151,6 @@ class LocationBridge(
             )
         )
         sendEventToJS(eventType, eventData["data"] as Map<String, Any>)
-    }
-
-    private fun sendGeofenceEventToJS(eventType: String, geofenceId: String, leadId: String) {
-        sendEventToJS(eventType, mapOf(
-            "geofenceId" to geofenceId,
-            "leadId" to leadId
-        ))
     }
 
     private fun sendEventToJS(eventType: String, data: Map<String, Any>) {

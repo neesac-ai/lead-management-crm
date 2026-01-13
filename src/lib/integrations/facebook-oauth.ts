@@ -17,7 +17,12 @@ export function getFacebookAuthUrl(
     'leads_retrieval',
     'ads_read',
     'ads_management',
-    'business_management'
+    'business_management',
+    // Needed to list Pages and their Leadgen Forms (Instant Forms)
+    'pages_show_list',
+    'pages_read_engagement',
+    // Required by Meta to access /{page_id}/leadgen_forms for many pages
+    'pages_manage_ads'
   ].join(',');
 
   const params = new URLSearchParams({
@@ -94,19 +99,58 @@ export async function getUserAdAccounts(accessToken: string): Promise<Array<{
   id: string;
   name: string;
   account_id: string;
+  business?: { id: string; name: string } | null;
 }>> {
-  const response = await fetch(
-    `https://graph.facebook.com/v18.0/me/adaccounts?` +
-    `fields=id,name,account_id&` +
-    `access_token=${accessToken}`
-  );
+  // Meta paginates /me/adaccounts. If we only fetch the first page,
+  // CRM may show only a subset of accounts the user can access.
+  const results: Array<{
+    id: string;
+    name: string;
+    account_id: string;
+    business?: { id: string; name: string } | null;
+  }> = [];
+  const seen = new Set<string>();
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error?.message || 'Failed to fetch ad accounts');
+  let nextUrl =
+    `https://graph.facebook.com/v18.0/me/adaccounts?` +
+    // Include owning business (when available) so we can show portfolio context in the UI.
+    `fields=id,name,account_id,business{id,name}&` +
+    `limit=200&` +
+    `access_token=${accessToken}`;
+
+  // Safety cap to avoid infinite loops if Meta returns a bad paging cursor.
+  const maxPages = 50;
+  let pageCount = 0;
+
+  while (nextUrl && pageCount < maxPages) {
+    pageCount += 1;
+
+    const response = await fetch(nextUrl);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(
+        (error as any)?.error?.message || 'Failed to fetch ad accounts'
+      );
+    }
+
+    const data = await response.json();
+    const items = (data?.data || []) as Array<{
+      id: string;
+      name: string;
+      account_id: string;
+      business?: { id: string; name: string } | null;
+    }>;
+
+    for (const item of items) {
+      if (!item?.id) continue;
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      results.push(item);
+    }
+
+    nextUrl = (data?.paging?.next as string) || '';
   }
 
-  const data = await response.json();
-  return data.data || [];
+  return results;
 }
 

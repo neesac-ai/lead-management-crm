@@ -98,6 +98,11 @@ export default function SettingsPage({ params }: PageProps) {
   const [loadingFolders, setLoadingFolders] = useState(false)
   const [savingFolder, setSavingFolder] = useState(false)
 
+  // Location tracking (team member only)
+  const [isLocationTrackingEnabled, setIsLocationTrackingEnabled] = useState(false)
+  const [isLoadingLocationTracking, setIsLoadingLocationTracking] = useState(true)
+  const [isSavingLocationTracking, setIsSavingLocationTracking] = useState(false)
+
   useEffect(() => {
     fetchData()
   }, [orgSlug])
@@ -108,7 +113,7 @@ export default function SettingsPage({ params }: PageProps) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const { data: profile } = await supabase
+    const { data: profile } = await (supabase as any)
       .from('users')
       .select('id, name, email, role, org_id, google_refresh_token')
       .eq('auth_id', user.id)
@@ -144,7 +149,7 @@ export default function SettingsPage({ params }: PageProps) {
       }
 
       // Get drive sync settings
-      const { data: sync } = await supabase
+      const { data: sync } = await (supabase as any)
         .from('drive_sync_settings')
         .select('id, folder_id, folder_name, last_sync_at')
         .eq('user_id', profile.id)
@@ -155,7 +160,44 @@ export default function SettingsPage({ params }: PageProps) {
       }
     }
 
+    // Fetch location tracking setting (team member only)
+    try {
+      const res = await fetch('/api/locations/settings')
+      if (res.ok) {
+        const data = await res.json()
+        setIsLocationTrackingEnabled(!!data?.is_tracking_enabled)
+      }
+    } catch (e) {
+      console.error('Error fetching location tracking settings:', e)
+    } finally {
+      setIsLoadingLocationTracking(false)
+    }
+
     setIsLoading(false)
+  }
+
+  const handleToggleLocationTracking = async (enabled: boolean) => {
+    setIsSavingLocationTracking(true)
+    try {
+      const res = await fetch('/api/locations/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_tracking_enabled: enabled }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data?.error || 'Failed to update location tracking setting')
+      }
+      setIsLocationTrackingEnabled(enabled)
+      toast.success(enabled ? 'Live location tracking enabled' : 'Live location tracking disabled')
+      // Notify global tracker to refresh
+      window.dispatchEvent(new CustomEvent('location-tracking-changed', { detail: { enabled } }))
+    } catch (e) {
+      console.error('Error updating location tracking settings:', e)
+      toast.error(e instanceof Error ? e.message : 'Failed to update setting')
+    } finally {
+      setIsSavingLocationTracking(false)
+    }
   }
 
   const handleSaveProfile = async () => {
@@ -164,7 +206,7 @@ export default function SettingsPage({ params }: PageProps) {
     setIsSavingProfile(true)
     const supabase = createClient()
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('users')
       .update({ name: profileName })
       .eq('id', userProfile.id)
@@ -207,7 +249,6 @@ export default function SettingsPage({ params }: PageProps) {
       toast.error(error.message || 'Failed to change password')
     } else {
       toast.success('Password changed successfully')
-      setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
     }
@@ -231,7 +272,7 @@ export default function SettingsPage({ params }: PageProps) {
           const supabase = createClient()
           const { data: { user } } = await supabase.auth.getUser()
           if (user) {
-            const { data: profile } = await supabase
+            const { data: profile } = await (supabase as any)
               .from('users')
               .select('google_refresh_token')
               .eq('auth_id', user.id)
@@ -263,7 +304,7 @@ export default function SettingsPage({ params }: PageProps) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('users')
       .update({
         google_access_token: null,
@@ -286,7 +327,7 @@ export default function SettingsPage({ params }: PageProps) {
     setIsSavingOrg(true)
     const supabase = createClient()
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('organizations')
       .update({
         name: orgName,
@@ -331,7 +372,7 @@ export default function SettingsPage({ params }: PageProps) {
     const supabase = createClient()
 
     if (syncSettings?.id) {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('drive_sync_settings')
         .update({
           folder_id: folder.id,
@@ -349,7 +390,7 @@ export default function SettingsPage({ params }: PageProps) {
         triggerSync()
       }
     } else {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('drive_sync_settings')
         .insert({
           user_id: userProfile.id,
@@ -385,7 +426,7 @@ export default function SettingsPage({ params }: PageProps) {
     if (!syncSettings?.id) return
 
     const supabase = createClient()
-    const { error } = await supabase
+    const { error } = await (supabase as any)
       .from('drive_sync_settings')
       .delete()
       .eq('id', syncSettings.id)
@@ -605,6 +646,59 @@ export default function SettingsPage({ params }: PageProps) {
                   </Button>
                 </>
               )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Live Location Tracking (team member only) */}
+        <Card>
+          <CardHeader className="px-4 lg:px-6">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-purple-500" />
+              <CardTitle>Live Location Tracking</CardTitle>
+            </div>
+            <CardDescription>
+              When enabled, your location is tracked while the app is open. Admins can view team locations in real time.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 lg:px-6">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                {isLoadingLocationTracking ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <div>
+                      <p className="font-medium">Loading…</p>
+                      <p className="text-sm text-muted-foreground">Fetching your tracking setting</p>
+                    </div>
+                  </>
+                ) : isLocationTrackingEnabled ? (
+                  <>
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    <div>
+                      <p className="font-medium">Enabled</p>
+                      <p className="text-sm text-muted-foreground">Your location will update while the app is open</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <p className="font-medium">Disabled</p>
+                      <p className="text-sm text-muted-foreground">Enable to share your live location (app open)</p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <Button
+                variant={isLocationTrackingEnabled ? 'outline' : 'default'}
+                disabled={isLoadingLocationTracking || isSavingLocationTracking}
+                onClick={() => handleToggleLocationTracking(!isLocationTrackingEnabled)}
+              >
+                {isSavingLocationTracking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isLocationTrackingEnabled ? 'Disable' : 'Enable'}
+              </Button>
             </div>
           </CardContent>
         </Card>

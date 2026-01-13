@@ -58,8 +58,8 @@ export async function GET(
 
     const integrationData = integration as Integration;
 
-    if (integrationData.platform !== 'facebook') {
-      return NextResponse.json({ error: 'OAuth only available for Facebook' }, { status: 400 });
+    if (integrationData.platform !== 'facebook' && integrationData.platform !== 'instagram') {
+      return NextResponse.json({ error: 'OAuth only available for Facebook/Instagram' }, { status: 400 });
     }
 
     // Get Facebook App ID and App Secret from integration config
@@ -75,11 +75,11 @@ export async function GET(
     }
 
     // Generate OAuth URL
-    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL ||
                    process.env.NEXT_PUBLIC_WEBHOOK_BASE_URL ||
                    request.nextUrl.origin;
     const redirectUri = `${baseUrl}/api/integrations/${id}/oauth/callback`;
-    
+
     const authUrl = getFacebookAuthUrl(id, redirectUri, appId);
 
     return NextResponse.redirect(authUrl);

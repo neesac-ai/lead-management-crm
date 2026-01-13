@@ -66,6 +66,45 @@ export async function POST(request: NextRequest) {
             )
         }
 
+        // Check for duplicate call log (same user, phone, start time within 10 seconds, and similar duration)
+        const callStartTime = new Date(call_started_at)
+        const tenSecondsBefore = new Date(callStartTime.getTime() - 10000)
+        const tenSecondsAfter = new Date(callStartTime.getTime() + 10000)
+        const durationSeconds = duration_seconds || 0
+        const durationTolerance = 5 // Allow ±5 seconds difference in duration
+
+        const { data: existingLogs } = await supabase
+            .from('call_logs')
+            .select('id, duration_seconds')
+            .eq('user_id', profile.id)
+            .eq('phone_number', phone_number)
+            .gte('call_started_at', tenSecondsBefore.toISOString())
+            .lte('call_started_at', tenSecondsAfter.toISOString())
+            .limit(10) // Get multiple to check duration
+
+        // Filter by duration similarity
+        const duplicateLog = existingLogs?.find(log => {
+            const existingDuration = log.duration_seconds || 0
+            const durationDiff = Math.abs(existingDuration - durationSeconds)
+            return durationDiff <= durationTolerance
+        })
+
+        if (duplicateLog) {
+            console.log('Duplicate call log detected, skipping insert:', {
+                user_id: profile.id,
+                phone_number,
+                call_started_at,
+                duration_seconds,
+                existing_id: duplicateLog.id,
+                existing_duration: duplicateLog.duration_seconds
+            })
+            return NextResponse.json({
+                call_log: duplicateLog,
+                message: 'Call already logged (duplicate prevented)',
+                duplicate: true
+            })
+        }
+
         // Insert call log
         const { data: callLog, error } = await supabase
             .from('call_logs')

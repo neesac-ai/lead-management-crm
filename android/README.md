@@ -3,7 +3,7 @@
 Native Android wrapper app that loads the PWA (bharatcrm.neesac.ai) in a WebView and provides JavaScript bridges for:
 - Call tracking (exact duration and status)
 - Call recording with automatic upload
-- Geo location tracking (check-in, continuous, geofencing)
+- Geo location tracking (foreground-only)
 
 ## Project Structure
 
@@ -22,7 +22,7 @@ android/
 │   │   │   │   ├── CallRecordingManager.kt  # Recording manager
 │   │   │   │   ├── LocationBridge.kt        # Location bridge
 │   │   │   │   ├── LocationManager.kt        # Location manager
-│   │   │   │   └── LocationTrackingService.kt # Background service
+│   │   │   │   └── (no background tracking service in Phase 1)
 │   │   │   ├── res/
 │   │   │   │   ├── layout/
 │   │   │   │   │   └── activity_main.xml

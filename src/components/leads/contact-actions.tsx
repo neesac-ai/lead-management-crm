@@ -10,6 +10,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { isNativeApp, getNativeBridge, setupNativeEventListener, parseNativeResponse } from '@/lib/native-bridge'
+import { globalNativeEventListener } from '@/lib/global-native-events'
 import type { CallStatus } from '@/types/native-bridge.types'
 import { toast } from 'sonner'
 
@@ -51,6 +52,7 @@ export function ContactActions({
 }: ContactActionsProps) {
   const [isNative, setIsNative] = useState(false)
   const [callStatus, setCallStatus] = useState<CallStatus | null>(null)
+  const [callStartTime, setCallStartTime] = useState<number | null>(null)
   const hasPhone = phone && phone.trim() !== ''
   const hasEmail = email && email.trim() !== ''
 
@@ -61,7 +63,9 @@ export function ContactActions({
     if (isNativeApp()) {
       // Setup native event listener
       const cleanup = setupNativeEventListener((event) => {
-        if (event.type === 'CALL_ENDED' || event.type === 'CALL_CONNECTED' || event.type === 'CALL_RINGING') {
+        if (event.type === 'CALL_CONNECTED') {
+          // Store call start time when connected
+          setCallStartTime(Date.now())
           // Update call status
           const bridge = getNativeBridge()
           if (bridge?.getLastCallStatus) {
@@ -71,12 +75,34 @@ export function ContactActions({
               setCallStatus(status)
             }
           }
+        } else if (event.type === 'CALL_RINGING') {
+          // Update call status
+          const bridge = getNativeBridge()
+          if (bridge?.getLastCallStatus) {
+            const statusStr = bridge.getLastCallStatus()
+            const status = parseNativeResponse<CallStatus>(statusStr)
+            if (status) {
+              setCallStatus(status)
+            }
+          }
+        } else if (event.type === 'CALL_ENDED') {
+          // Note: Call logging is now handled by GlobalCallTracker component
+          // This component only updates UI state
+          console.log('[CALL_TRACKING] CALL_ENDED event received (UI update only):', {
+            leadId: event.data?.leadId || leadId,
+            phoneNumber: event.data?.phoneNumber,
+            status: event.data?.status
+          })
+
+          // Reset call status
+          setCallStatus(null)
+          setCallStartTime(null)
         }
       })
 
       return cleanup
     }
-  }, [])
+  }, [leadId, callStartTime])
 
   const handleCall = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -88,10 +114,14 @@ export function ContactActions({
       const bridge = getNativeBridge()
       if (bridge?.initiateCall) {
         try {
+          console.log('[CALL_TRACKING] Initiating call via native bridge:', { leadId, phone })
+          // Reset call start time when initiating
+          setCallStartTime(null)
+          setCallStatus(null)
           bridge.initiateCall(leadId, phone)
           toast.info('Opening dialer and starting call tracking...')
         } catch (error) {
-          console.error('Error initiating call via native bridge:', error)
+          console.error('[CALL_TRACKING] Error initiating call via native bridge:', error)
           toast.error('Failed to initiate call tracking')
           // Fallback to tel: link
           window.location.href = `tel:${formatPhoneForLink(phone)}`

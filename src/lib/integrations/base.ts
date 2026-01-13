@@ -3,7 +3,7 @@
  * All platform integrations must implement this interface
  */
 
-export type Platform = 'facebook' | 'whatsapp' | 'linkedin' | 'instagram';
+export type Platform = 'facebook' | 'whatsapp' | 'linkedin' | 'instagram' | 'google_sheets';
 
 export type SyncType = 'webhook' | 'manual' | 'scheduled';
 
@@ -34,12 +34,12 @@ export interface LeadData {
   email?: string;
   phone?: string;
   company?: string;
-  
+
   // Integration-specific fields
   external_id: string; // Platform-specific lead ID
   campaign_data?: CampaignData;
   metadata?: Record<string, unknown>; // Additional platform-specific data
-  
+
   // Timestamps
   created_at?: string;
 }

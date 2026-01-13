@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 
 /**
  * POST /api/locations/track
- * Log continuous tracking point or geofence event
+ * Log a team member tracking point (team member only).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -27,7 +27,6 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const {
-      lead_id,
       latitude,
       longitude,
       accuracy,
@@ -38,38 +37,21 @@ export async function POST(request: NextRequest) {
     } = body
 
     // Validate required fields
-    if (latitude === undefined || longitude === undefined || !location_type) {
+    if (latitude === undefined || longitude === undefined) {
       return NextResponse.json(
-        { error: 'Missing required fields: latitude, longitude, location_type' },
+        { error: 'Missing required fields: latitude, longitude' },
         { status: 400 }
       )
     }
 
     // Validate location_type
-    const validTypes = ['checkin', 'tracking', 'geofence']
-    if (!validTypes.includes(location_type)) {
+    const normalizedType = typeof location_type === 'string' ? location_type : 'tracking'
+    const validTypes = ['tracking']
+    if (!validTypes.includes(normalizedType)) {
       return NextResponse.json(
-        { error: `Invalid location_type. Must be one of: ${validTypes.join(', ')}` },
+        { error: `Invalid location_type. Must be: tracking` },
         { status: 400 }
       )
-    }
-
-    // Verify lead if provided
-    if (lead_id) {
-      const { data: lead, error: leadError } = await supabase
-        .from('leads')
-        .select('id, org_id')
-        .eq('id', lead_id)
-        .single()
-
-      if (leadError || !lead) {
-        return NextResponse.json({ error: 'Lead not found' }, { status: 404 })
-      }
-
-      // Verify lead is in user's org
-      if (lead.org_id !== profile.org_id && profile.role !== 'super_admin') {
-        return NextResponse.json({ error: 'Lead not in your organization' }, { status: 403 })
-      }
     }
 
     // Insert location entry
@@ -78,12 +60,12 @@ export async function POST(request: NextRequest) {
       .insert({
         org_id: profile.org_id,
         user_id: profile.id,
-        lead_id: lead_id || null,
+        lead_id: null,
         latitude: latitude,
         longitude: longitude,
         accuracy: accuracy || null,
         address: address || null,
-        location_type: location_type,
+        location_type: 'tracking',
         tracking_session_id: tracking_session_id || null,
         notes: notes || null,
       })

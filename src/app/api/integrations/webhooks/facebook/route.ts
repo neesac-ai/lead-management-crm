@@ -11,13 +11,48 @@ import { assignLead } from '@/lib/integrations/assignment';
 
 const facebookIntegration = new FacebookIntegration();
 
+function extractLeadgenIdFromWebhook(payload: unknown): {
+  leadgen_id: string;
+  form_id?: string;
+  page_id?: string;
+  created_time?: number;
+} | null {
+  try {
+    const webhook = payload as {
+      entry?: Array<{
+        changes?: Array<{
+          value?: {
+            leadgen_id?: string;
+            form_id?: string;
+            page_id?: string;
+            created_time?: number;
+          };
+        }>;
+      }>;
+    };
+
+    const leadgen_id = webhook.entry?.[0]?.changes?.[0]?.value?.leadgen_id;
+    if (!leadgen_id) return null;
+
+    const value = webhook.entry?.[0]?.changes?.[0]?.value;
+    return {
+      leadgen_id,
+      form_id: value?.form_id,
+      page_id: value?.page_id,
+      created_time: value?.created_time,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const payload = await request.text();
     const signature = request.headers.get('x-hub-signature-256') || '';
 
     // Get webhook secret from query params or headers
-    const webhookSecret = request.nextUrl.searchParams.get('secret') || 
+    const webhookSecret = request.nextUrl.searchParams.get('secret') ||
                          request.headers.get('x-webhook-secret') || '';
 
     if (!webhookSecret) {
@@ -41,32 +76,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid verification' }, { status: 403 });
     }
 
-    // Verify webhook signature for POST requests
-    if (!facebookIntegration.verifyWebhookSignature(payload, signature, webhookSecret)) {
-      return NextResponse.json(
-        { error: 'Invalid signature' },
-        { status: 401 }
-      );
-    }
-
     // Parse payload
     const webhookData = JSON.parse(payload);
-
-    // Extract lead data from webhook
-    const leadData = facebookIntegration.extractLeadFromWebhook(webhookData);
-    if (!leadData) {
-      return NextResponse.json(
-        { error: 'No lead data found in webhook' },
-        { status: 400 }
-      );
-    }
 
     const supabase = await createClient();
 
     // Find integration by webhook secret
     const { data: integration, error: integrationError } = await supabase
       .from('platform_integrations')
-      .select('id, org_id, platform, webhook_secret')
+      .select('id, org_id, platform, webhook_secret, credentials, config')
       .eq('webhook_secret', webhookSecret)
       .eq('is_active', true)
       .single();
@@ -77,6 +95,112 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    // Verify webhook signature for POST requests using Meta App Secret (not webhook token)
+    const appSecret = (integration.config as Record<string, unknown> | null)?.facebook_app_secret as string | undefined;
+    if (!appSecret) {
+      return NextResponse.json(
+        { error: 'Integration missing Meta App Secret (facebook_app_secret)' },
+        { status: 400 }
+      );
+    }
+
+    if (!facebookIntegration.verifyWebhookSignature(payload, signature, appSecret)) {
+      return NextResponse.json(
+        { error: 'Invalid signature' },
+        { status: 401 }
+      );
+    }
+
+    const leadgen = extractLeadgenIdFromWebhook(webhookData);
+    if (!leadgen) {
+      return NextResponse.json(
+        { error: 'No leadgen_id found in webhook payload' },
+        { status: 400 }
+      );
+    }
+
+    const accessToken = (integration.credentials as Record<string, unknown> | null)?.access_token as string | undefined;
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: 'Integration not connected (missing access token)' },
+        { status: 400 }
+      );
+    }
+
+    // Fetch full lead details from Graph API (webhook payload does not include field_data reliably)
+    const leadRes = await fetch(
+      `https://graph.facebook.com/v18.0/${leadgen.leadgen_id}?` +
+      `fields=id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,page_id&` +
+      `access_token=${accessToken}`
+    );
+    if (!leadRes.ok) {
+      const err = await leadRes.json().catch(() => ({}));
+      await logSyncOperation(
+        supabase,
+        integration.id,
+        'webhook',
+        'error',
+        0,
+        0,
+        `Failed to fetch lead details: ${JSON.stringify(err)}`
+      );
+      return NextResponse.json(
+        { error: 'Failed to fetch lead details from Meta', details: err },
+        { status: 502 }
+      );
+    }
+
+    const leadJson = await leadRes.json() as {
+      id: string;
+      created_time?: string;
+      field_data?: Array<{ name: string; values: string[] }>;
+      ad_id?: string;
+      ad_name?: string;
+      adset_id?: string;
+      adset_name?: string;
+      campaign_id?: string;
+      campaign_name?: string;
+      form_id?: string;
+      page_id?: string;
+    };
+
+    const fieldData: Record<string, string> = {};
+    if (leadJson.field_data) {
+      for (const field of leadJson.field_data) {
+        if (field.name && field.values && field.values.length > 0) {
+          fieldData[field.name] = field.values[0];
+        }
+      }
+    }
+
+    const name = fieldData.full_name || fieldData.first_name || fieldData.name || 'Unknown';
+    const email = fieldData.email || '';
+    const phone = fieldData.phone_number || fieldData.phone || '';
+    const company = fieldData.company_name || fieldData.company || '';
+
+    const leadData = {
+      name: name.trim() || 'Unknown',
+      email: email || undefined,
+      phone: phone || undefined,
+      company: company || undefined,
+      external_id: leadJson.id,
+      campaign_data: {
+        campaign_id: leadJson.campaign_id || '',
+        campaign_name: leadJson.campaign_name || '',
+        ad_set_id: leadJson.adset_id || '',
+        ad_id: leadJson.ad_id || '',
+        form_id: leadJson.form_id || leadgen.form_id || '',
+        page_id: leadJson.page_id || leadgen.page_id || '',
+      },
+      metadata: {
+        ad_name: leadJson.ad_name,
+        form_id: leadJson.form_id || leadgen.form_id,
+        page_id: leadJson.page_id || leadgen.page_id,
+        field_data: fieldData,
+      },
+      created_at: leadJson.created_time,
+    };
 
     // Check for duplicate lead (by external_id)
     const { data: existingLead } = await supabase
@@ -208,7 +332,6 @@ async function logSyncOperation(
   });
 }
 
-// Handle GET for webhook verification
 export async function GET(request: NextRequest) {
   return POST(request);
 }

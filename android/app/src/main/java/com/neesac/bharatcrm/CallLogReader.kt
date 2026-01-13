@@ -44,7 +44,10 @@ class CallLogReader(private val context: Context) {
                 null
             }
 
-            val sortOrder = "${CallLog.Calls.DATE} DESC LIMIT $limit"
+            // IMPORTANT: Many OEM call log providers do NOT support "LIMIT" in sortOrder.
+            // Using it can return 0 rows or throw on some devices.
+            // We'll sort by DATE and apply limit in code.
+            val sortOrder = "${CallLog.Calls.DATE} DESC"
 
             // Query call log
             cursor = context.contentResolver.query(
@@ -62,7 +65,7 @@ class CallLogReader(private val context: Context) {
                 val dateIndex = it.getColumnIndex(CallLog.Calls.DATE)
                 val nameIndex = it.getColumnIndex(CallLog.Calls.CACHED_NAME)
 
-                while (it.moveToNext()) {
+                while (it.moveToNext() && callLogs.size < limit) {
                     val number = it.getString(numberIndex) ?: ""
                     val type = it.getInt(typeIndex)
                     val duration = it.getLong(durationIndex)

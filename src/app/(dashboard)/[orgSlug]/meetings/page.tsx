@@ -171,8 +171,8 @@ export default function MeetingsPage() {
     if (newStatus !== 'demo_booked') {
       // Mark meeting as completed or cancelled based on new status
       const meetingStatus = newStatus === 'demo_completed' ? 'completed' :
-                           newStatus === 'deal_won' ? 'completed' :
-                           newStatus === 'deal_lost' ? 'cancelled' : 'completed'
+        newStatus === 'deal_won' ? 'completed' :
+          newStatus === 'deal_lost' ? 'cancelled' : 'completed'
 
       await supabase
         .from('demos')
@@ -563,10 +563,9 @@ export default function MeetingsPage() {
                 {filteredMeetings.map((meeting, index) => (
                   <div
                     key={meeting.id}
-                    className={`p-3 sm:p-4 rounded-lg border bg-card ${
-                      isToday(meeting.scheduled_at) && meeting.status === 'scheduled'
+                    className={`p-3 sm:p-4 rounded-lg border bg-card ${isToday(meeting.scheduled_at) && meeting.status === 'scheduled'
                         ? 'border-purple-500/50 bg-purple-500/5' : ''
-                    }`}
+                      }`}
                   >
                     {/* Top row: Serial + Phone (primary) + Meeting Status */}
                     <div className="flex items-start justify-between gap-2 mb-2 sm:mb-3">
@@ -707,34 +706,34 @@ export default function MeetingsPage() {
 
       {/* Delete Confirmation Dialog */}
       {mounted && (
-      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Meeting</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this meeting? This action cannot be undone.
-              The Google Calendar event will remain (you&apos;ll need to delete it manually from your calendar).
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteMeeting}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                'Delete'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Meeting</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete this meeting? This action cannot be undone.
+                The Google Calendar event will remain (you&apos;ll need to delete it manually from your calendar).
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteMeeting}
+                disabled={isDeleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </div>
   )

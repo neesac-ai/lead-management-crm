@@ -9,14 +9,14 @@ export type Json =
 // Enums
 export type UserRole = 'super_admin' | 'admin' | 'sales' | 'accountant'
 export type OrgStatus = 'pending' | 'active' | 'suspended' | 'deleted'
-export type LeadStatus = 
-  | 'new' 
-  | 'call_not_picked' 
-  | 'not_interested' 
-  | 'follow_up_again' 
-  | 'demo_booked' 
-  | 'demo_completed' 
-  | 'deal_won' 
+export type LeadStatus =
+  | 'new'
+  | 'call_not_picked'
+  | 'not_interested'
+  | 'follow_up_again'
+  | 'demo_booked'
+  | 'demo_completed'
+  | 'deal_won'
   | 'deal_lost'
 export type DemoStatus = 'scheduled' | 'completed' | 'cancelled' | 'rescheduled'
 export type SubscriptionStatus = 'active' | 'expiring_soon' | 'expired' | 'cancelled'
@@ -166,6 +166,8 @@ export interface Database {
           is_active: boolean
           approved_by: string | null
           approved_at: string | null
+          google_access_token: string | null
+          google_refresh_token: string | null
           created_at: string
           updated_at: string
         }
@@ -182,6 +184,8 @@ export interface Database {
           is_active?: boolean
           approved_by?: string | null
           approved_at?: string | null
+          google_access_token?: string | null
+          google_refresh_token?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -198,6 +202,49 @@ export interface Database {
           is_active?: boolean
           approved_by?: string | null
           approved_at?: string | null
+          google_access_token?: string | null
+          google_refresh_token?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      drive_sync_settings: {
+        Row: {
+          id: string
+          user_id: string
+          org_id: string
+          folder_id: string | null
+          folder_name: string | null
+          is_enabled: boolean
+          last_sync_at: string | null
+          last_sync_file_count: number
+          sync_error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          org_id: string
+          folder_id?: string | null
+          folder_name?: string | null
+          is_enabled?: boolean
+          last_sync_at?: string | null
+          last_sync_file_count?: number
+          sync_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          org_id?: string
+          folder_id?: string | null
+          folder_name?: string | null
+          is_enabled?: boolean
+          last_sync_at?: string | null
+          last_sync_file_count?: number
+          sync_error?: string | null
           created_at?: string
           updated_at?: string
         }

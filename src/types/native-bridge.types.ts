@@ -36,15 +36,6 @@ export interface RecordingStatus {
   error?: string
 }
 
-export interface GeofenceData {
-  geofenceId: string
-  leadId: string
-  latitude: number
-  longitude: number
-  radius: number
-  autoCheckIn: boolean
-}
-
 export type NativeEventType =
   | 'CALL_RINGING'
   | 'CALL_CONNECTED'
@@ -54,13 +45,7 @@ export type NativeEventType =
   | 'RECORDING_STOPPED'
   | 'RECORDING_ERROR'
   | 'LOCATION_UPDATE'
-  | 'CHECKIN_COMPLETE'
   | 'LOCATION_ERROR'
-  | 'GEOFENCE_ENTER'
-  | 'GEOFENCE_EXIT'
-  | 'GEOFENCE_DWELL'
-  | 'GEOFENCE_ADDED'
-  | 'GEOFENCE_REMOVED'
 
 export interface NativeEvent {
   type: NativeEventType

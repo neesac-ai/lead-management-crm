@@ -52,13 +52,11 @@ import {
   FileText,
   Trash2,
   AlertTriangle,
-  MapPin,
   ArrowUpRight,
   ArrowDownLeft,
 } from 'lucide-react'
 import { ContactActions } from './contact-actions'
-import { CheckInButton } from '@/components/locations/check-in-button'
-import { isNativeApp } from '@/lib/native-bridge'
+// Location tracking (lead-linked check-ins/history) removed - team member tracking only
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
 import { Product } from '@/types/database.types'
@@ -140,18 +138,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   const [existingSubscriptionId, setExistingSubscriptionId] = useState<string | null>(null)
 
   // Call recordings
-  type CallRecording = {
-    id: string
-    phone_number: string
-    duration_seconds: number | null
-    recording_date: string
-    summary: string | null
-    sentiment: 'positive' | 'neutral' | 'negative' | null
-    processing_status: string
-    drive_file_url: string | null
-  }
-  const [callRecordings, setCallRecordings] = useState<CallRecording[]>([])
-  const [isLoadingCalls, setIsLoadingCalls] = useState(false)
+  // Note: Call recordings (Google Drive sync) removed - using native call tracking only
 
   // Call logs (from native tracking)
   type CallLog = {
@@ -169,20 +156,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   const [callLogs, setCallLogs] = useState<CallLog[]>([])
   const [isLoadingCallLogs, setIsLoadingCallLogs] = useState(false)
 
-  // Location history
-  type LocationEntry = {
-    id: string
-    latitude: number
-    longitude: number
-    accuracy: number | null
-    address: string | null
-    location_type: 'checkin' | 'tracking' | 'geofence'
-    recorded_at: string
-    notes: string | null
-    users?: { name: string; email: string } | null
-  }
-  const [locationHistory, setLocationHistory] = useState<LocationEntry[]>([])
-  const [isLoadingLocations, setIsLoadingLocations] = useState(false)
+  // Note: Lead-linked location history removed (team member tracking only)
 
   // Delete state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -258,9 +232,8 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     if (updatedLead) {
       setCurrentLead(updatedLead)
     }
-    // Refresh call logs and location history
+    // Refresh call logs
     await fetchCallLogs(lead.id)
-    await fetchLocationHistory(lead.id)
   }
 
   const checkGoogleConnection = async () => {
@@ -332,24 +305,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     }
   }
 
-  // Fetch call recordings for this lead
-  const fetchCallRecordings = async (leadId: string) => {
-    setIsLoadingCalls(true)
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from('call_recordings')
-      .select('id, phone_number, duration_seconds, recording_date, summary, sentiment, processing_status, drive_file_url')
-      .eq('lead_id', leadId)
-      .order('recording_date', { ascending: false })
-      .limit(10)
-
-    if (error) {
-      console.error('Error fetching call recordings:', error)
-    } else {
-      setCallRecordings(data || [])
-    }
-    setIsLoadingCalls(false)
-  }
+  // Note: fetchCallRecordings removed - using native call tracking only
 
   const fetchCallLogs = async (leadId: string) => {
     setIsLoadingCallLogs(true)
@@ -561,11 +517,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       setIsEditMode(false)
 
       fetchActivities(lead.id)
-      fetchCallRecordings(lead.id)
       fetchCallLogs(lead.id)
-      fetchLocationHistory(lead.id)
-      fetchCallLogs(lead.id)
-      fetchLocationHistory(lead.id)
       checkGoogleConnection()
       // Fetch last product used for this lead
       fetchLastProduct(lead.id)
@@ -577,6 +529,28 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, lead?.id])
+
+  // Listen for call logged events to refresh call logs
+  useEffect(() => {
+    const handleCallLogged = (event: CustomEvent<{ leadId: string }>) => {
+      if (lead?.id && event.detail.leadId === lead.id) {
+        console.log('[LEAD_DETAIL] Refreshing call logs after call logged event')
+        fetchCallLogs(lead.id)
+      }
+    }
+
+    window.addEventListener('callLogged', handleCallLogged as EventListener)
+
+    // Also refresh call logs when dialog opens (in case event was missed)
+    if (open && lead?.id) {
+      console.log('[LEAD_DETAIL] Dialog opened, fetching call logs for lead:', lead.id)
+      fetchCallLogs(lead.id)
+    }
+
+    return () => {
+      window.removeEventListener('callLogged', handleCallLogged as EventListener)
+    }
+  }, [lead?.id, open])
 
   const handleUnassign = async () => {
     if (!lead) return
@@ -1155,13 +1129,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                       name={currentLead.name}
                       leadId={currentLead.id}
                     />
-                    {isNativeApp() && (
-                      <CheckInButton
-                        leadId={currentLead.id}
-                        leadName={currentLead.name}
-                        onCheckInComplete={refreshLeadData}
-                      />
-                    )}
+                    {/* Lead-linked check-in removed (team member tracking only) */}
                   </div>
                 </div>
               </div>
@@ -1601,9 +1569,24 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                     const getStatusColor = () => {
                       switch (log.call_status) {
                         case 'completed': return 'bg-green-500/10 text-green-600 border-green-500/20'
-                        case 'missed': return 'bg-red-500/10 text-red-600 border-red-500/20'
+                        case 'missed': return 'bg-orange-500/10 text-orange-600 border-orange-500/20'
                         case 'rejected': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
+                        case 'failed': return 'bg-red-500/10 text-red-600 border-red-500/20'
+                        case 'busy': return 'bg-purple-500/10 text-purple-600 border-purple-500/20'
+                        case 'blocked': return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
                         default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
+                      }
+                    }
+
+                    const getStatusLabel = () => {
+                      switch (log.call_status) {
+                        case 'completed': return 'Completed'
+                        case 'missed': return 'Not Picked'
+                        case 'rejected': return 'Rejected'
+                        case 'failed': return 'Failed'
+                        case 'busy': return 'Busy'
+                        case 'blocked': return 'Blocked'
+                        default: return log.call_status
                       }
                     }
 
@@ -1617,7 +1600,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                             {getDirectionIcon()}
                             <span className="font-medium text-sm">{log.phone_number}</span>
                             <Badge variant="outline" className={`text-xs ${getStatusColor()}`}>
-                              {log.call_status}
+                              {getStatusLabel()}
                             </Badge>
                           </div>
                           <span className="text-xs text-muted-foreground">
@@ -1650,169 +1633,9 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
               )}
             </div>
 
-            {/* Call Recordings (Google Drive) */}
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold mb-2 sm:mb-3 flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Call Recordings
-              </h3>
-              {isLoadingCalls ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : callRecordings.length > 0 ? (
-                <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                  {callRecordings.map((call) => {
-                    const formatDuration = (seconds: number | null) => {
-                      if (!seconds) return '--:--'
-                      const mins = Math.floor(seconds / 60)
-                      const secs = seconds % 60
-                      return `${mins}:${secs.toString().padStart(2, '0')}`
-                    }
-
-                    const getSentimentIcon = () => {
-                      switch (call.sentiment) {
-                        case 'positive': return <TrendingUp className="w-4 h-4 text-green-500" />
-                        case 'negative': return <TrendingDown className="w-4 h-4 text-red-500" />
-                        default: return <Minus className="w-4 h-4 text-yellow-500" />
-                      }
-                    }
-
-                    return (
-                      <div
-                        key={call.id}
-                        className="p-3 border rounded-lg bg-card"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <Phone className="w-4 h-4 text-muted-foreground" />
-                            <span className="font-medium text-sm">
-                              {new Date(call.recording_date).toLocaleDateString()}
-                            </span>
-                            {call.processing_status === 'completed' && getSentimentIcon()}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">
-                              {formatDuration(call.duration_seconds)}
-                            </span>
-                            {call.drive_file_url && (
-                              <a
-                                href={call.drive_file_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-primary hover:underline"
-                              >
-                                <ExternalLink className="w-3 h-3" />
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                        {call.summary ? (
-                          <p className="text-sm text-muted-foreground line-clamp-2">{call.summary}</p>
-                        ) : (
-                          <p className="text-xs text-muted-foreground italic">
-                            {call.processing_status === 'pending' ? 'Pending analysis' :
-                              call.processing_status === 'processing' ? 'Analyzing...' :
-                                call.processing_status === 'failed' ? 'Analysis failed' : 'No summary'}
-                          </p>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-4 text-muted-foreground border rounded-lg bg-muted/30">
-                  <FileText className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                  <p className="text-xs">No call recordings found</p>
-                  <p className="text-xs mt-1">Sync call recordings from Google Drive</p>
-                </div>
-              )}
-            </div>
           </TabsContent>
 
           <TabsContent value="history" className="mt-4 space-y-4 sm:space-y-6">
-            {/* Location History */}
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold mb-2 sm:mb-3 flex items-center gap-2">
-                <MapPin className="h-4 w-4" />
-                Location History
-              </h3>
-              {isLoadingLocations ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                </div>
-              ) : locationHistory.length > 0 ? (
-                <div className="space-y-2 sm:space-y-3 max-h-[300px] overflow-y-auto">
-                  {locationHistory.map((location) => {
-                    const getLocationTypeLabel = () => {
-                      switch (location.location_type) {
-                        case 'checkin': return 'Check-in'
-                        case 'tracking': return 'Tracking'
-                        case 'geofence': return 'Geofence'
-                        default: return location.location_type
-                      }
-                    }
-
-                    const getLocationTypeColor = () => {
-                      switch (location.location_type) {
-                        case 'checkin': return 'bg-blue-500/10 text-blue-600 border-blue-500/20'
-                        case 'tracking': return 'bg-purple-500/10 text-purple-600 border-purple-500/20'
-                        case 'geofence': return 'bg-green-500/10 text-green-600 border-green-500/20'
-                        default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
-                      }
-                    }
-
-                    return (
-                      <div
-                        key={location.id}
-                        className="p-3 sm:p-4 border rounded-lg bg-card space-y-1"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <MapPin className="w-4 h-4 text-muted-foreground" />
-                            <Badge variant="outline" className={`text-xs ${getLocationTypeColor()}`}>
-                              {getLocationTypeLabel()}
-                            </Badge>
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDistanceToNow(new Date(location.recorded_at), { addSuffix: true })}
-                          </span>
-                        </div>
-                        {location.address ? (
-                          <p className="text-sm text-muted-foreground mb-1">{location.address}</p>
-                        ) : (
-                          <p className="text-sm text-muted-foreground mb-1">
-                            {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
-                          </p>
-                        )}
-                        {location.accuracy && (
-                          <p className="text-xs text-muted-foreground">
-                            Accuracy: ±{Math.round(location.accuracy)}m
-                          </p>
-                        )}
-                        {location.notes && (
-                          <p className="text-xs text-muted-foreground mt-1 italic">
-                            {location.notes}
-                          </p>
-                        )}
-                        {location.users && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            By {location.users.name}
-                          </p>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-4 text-muted-foreground border rounded-lg bg-muted/30">
-                  <MapPin className="h-6 w-6 mx-auto mb-2 opacity-50" />
-                  <p className="text-xs">No location history yet</p>
-                  <p className="text-xs mt-1">Check-ins and location tracking will appear here</p>
-                </div>
-              )}
-            </div>
-
             {/* Activity History */}
             <div className="space-y-2">
               <h3 className="text-sm font-semibold mb-2 sm:mb-3 flex items-center gap-2">

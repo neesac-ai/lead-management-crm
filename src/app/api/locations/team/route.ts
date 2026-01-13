@@ -43,11 +43,6 @@ export async function GET(request: NextRequest) {
           id,
           name,
           email
-        ),
-        leads:lead_id (
-          id,
-          name,
-          phone
         )
       `)
       .eq('org_id', profile.org_id)
@@ -73,7 +68,7 @@ export async function GET(request: NextRequest) {
     locations?.forEach((location: any) => {
       const userId = location.user_id
       if (!latestLocations.has(userId) ||
-          new Date(location.recorded_at) > new Date(latestLocations.get(userId).recorded_at)) {
+        new Date(location.recorded_at) > new Date(latestLocations.get(userId).recorded_at)) {
         latestLocations.set(userId, location)
       }
     })

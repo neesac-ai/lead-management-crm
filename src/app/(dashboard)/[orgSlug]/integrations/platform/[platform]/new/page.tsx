@@ -7,18 +7,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Loader2, Plug } from 'lucide-react'
-import { FaFacebook, FaWhatsapp, FaLinkedin, FaInstagram } from 'react-icons/fa'
-import { SiGoogleads } from 'react-icons/si'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { ArrowLeft, Loader2, Plug, FileSpreadsheet } from 'lucide-react'
+import { MetaLogo } from '@/components/icons/meta-logo'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
 const PLATFORM_INFO: Record<string, { label: string; icon: React.ComponentType<{ className?: string }>; iconColor: string }> = {
-  facebook: { label: 'Facebook Lead Ads', icon: FaFacebook, iconColor: 'text-blue-600' },
-  instagram: { label: 'Instagram Lead Ads', icon: FaInstagram, iconColor: 'text-pink-600' },
-  linkedin: { label: 'LinkedIn Lead Gen Forms', icon: FaLinkedin, iconColor: 'text-blue-700' },
-  whatsapp: { label: 'WhatsApp Business API', icon: FaWhatsapp, iconColor: 'text-green-500' },
-  google: { label: 'Google Ads Lead Forms', icon: SiGoogleads, iconColor: 'text-blue-500' },
+  facebook: { label: 'Meta Lead Ads', icon: MetaLogo, iconColor: 'text-[#0866FF]' },
+  google_sheets: { label: 'Google Sheets', icon: FileSpreadsheet, iconColor: 'text-emerald-600' },
 }
 
 export default function NewPlatformIntegrationPage() {
@@ -28,14 +31,11 @@ export default function NewPlatformIntegrationPage() {
   const platform = params.platform as string
 
   const [name, setName] = useState('')
+  const [channel, setChannel] = useState<'facebook' | 'instagram'>('facebook')
   const [webhookSecret, setWebhookSecret] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
-  const platformInfo = PLATFORM_INFO[platform] || { 
-    label: platform, 
-    icon: () => null, 
-    iconColor: 'text-gray-500' 
-  }
+  const platformInfo = PLATFORM_INFO[platform] || PLATFORM_INFO.facebook
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -45,8 +45,8 @@ export default function NewPlatformIntegrationPage() {
       return
     }
 
-    if (!['facebook', 'whatsapp', 'linkedin', 'instagram', 'google'].includes(platform)) {
-      toast.error('Invalid platform')
+    if (!['facebook', 'google_sheets'].includes(platform)) {
+      toast.error('Platform disabled')
       return
     }
 
@@ -56,7 +56,7 @@ export default function NewPlatformIntegrationPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          platform,
+          platform: platform === 'facebook' ? channel : 'google_sheets',
           name,
           credentials: {}, // Will be configured later via OAuth
           config: {},
@@ -66,7 +66,7 @@ export default function NewPlatformIntegrationPage() {
 
       if (!response.ok) {
         const data = await response.json()
-        const errorMessage = data.details 
+        const errorMessage = data.details
           ? `${data.error}: ${data.details}${data.hint ? ` (${data.hint})` : ''}`
           : data.error || 'Failed to create integration'
         throw new Error(errorMessage)
@@ -111,11 +111,29 @@ export default function NewPlatformIntegrationPage() {
             <CardHeader>
               <CardTitle>Integration Details</CardTitle>
               <CardDescription>
-                Create the integration first. You'll configure OAuth and API credentials in the next step.
+                Create the integration first. You&apos;ll configure OAuth and API credentials in the next step.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
+                {platform === 'facebook' ? (
+                  <div className="space-y-2">
+                    <Label>Channel</Label>
+                    <Select value={channel} onValueChange={(v) => setChannel(v as typeof channel)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="facebook">Facebook</SelectItem>
+                        <SelectItem value="instagram">Instagram</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Manage Facebook and Instagram lead channels under one Meta app.
+                    </p>
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <Label htmlFor="name">Integration Name *</Label>
                   <Input
@@ -144,7 +162,7 @@ export default function NewPlatformIntegrationPage() {
                       Used to verify webhook requests from {platformInfo.label}. This is different from OAuth credentials.
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      <strong>Recommended:</strong> Leave empty to auto-generate a secure random secret. 
+                      <strong>Recommended:</strong> Leave empty to auto-generate a secure random secret.
                       Or enter a custom secret if you want to use a specific value.
                     </p>
                   </div>

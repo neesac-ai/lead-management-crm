@@ -3,6 +3,8 @@ import { Outfit } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
+import { GlobalCallTracker } from "@/components/global-call-tracker";
+import { GlobalLocationTracker } from "@/components/global-location-tracker";
 import "./globals.css";
 
 const outfit = Outfit({
@@ -68,6 +70,8 @@ export default function RootLayout({
         <Toaster position="top-right" richColors />
         <ServiceWorkerRegistration />
         <InstallPrompt />
+        <GlobalCallTracker />
+        <GlobalLocationTracker />
       </body>
     </html>
   );

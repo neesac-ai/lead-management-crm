@@ -200,61 +200,7 @@ class ApiClient(private val context: Context) {
     }
 
     /**
-     * POST request for manual check-in
+     * NOTE: Lead-linked check-in removed (team member tracking only).
      */
-    fun checkIn(
-        leadId: String,
-        latitude: Double,
-        longitude: Double,
-        accuracy: Float,
-        address: String?,
-        notes: String?,
-        authToken: String? = null,
-        callback: (Boolean, String?) -> Unit
-    ) {
-        val url = "$baseUrl/api/locations/checkin"
-
-        val requestBody = mapOf(
-            "lead_id" to leadId,
-            "latitude" to latitude,
-            "longitude" to longitude,
-            "accuracy" to accuracy,
-            "address" to (address ?: ""),
-            "notes" to (notes ?: "")
-        )
-
-        val json = gson.toJson(requestBody)
-        val mediaType = "application/json; charset=utf-8".toMediaType()
-        val body = json.toRequestBody(mediaType)
-
-        val requestBuilder = Request.Builder()
-            .url(url)
-            .post(body)
-            .addHeader("Content-Type", "application/json")
-
-        authToken?.let {
-            requestBuilder.addHeader("Authorization", "Bearer $it")
-        }
-
-        val request = requestBuilder.build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e(tag, "Failed to check in", e)
-                callback(false, e.message)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                val responseBody = response.body?.string()
-                if (response.isSuccessful) {
-                    Log.d(tag, "Check-in successful: $responseBody")
-                    callback(true, null)
-                } else {
-                    Log.e(tag, "Failed to check in: ${response.code} - $responseBody")
-                    callback(false, responseBody)
-                }
-            }
-        })
-    }
 }
 

@@ -82,7 +82,7 @@ type DuplicateLead = {
 }
 
 type ParsedLead = {
-  name: string
+  name?: string
   company?: string
   email?: string
   phone?: string
@@ -1148,8 +1148,8 @@ export default function LeadsPage() {
     const phoneIndex = headers.findIndex(h => h.includes('phone') || h.includes('mobile'))
     const sourceIndex = headers.findIndex(h => h.includes('source'))
 
-    if (nameIndex === -1) {
-      toast.error('CSV must have a "name" column')
+    if (phoneIndex === -1) {
+      toast.error('CSV must have a "phone" column')
       return []
     }
 
@@ -1157,17 +1157,17 @@ export default function LeadsPage() {
 
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''))
-      const name = values[nameIndex]
+      const phone = values[phoneIndex]
+      if (!phone) continue
 
-      if (name) {
-        parsedLeads.push({
-          name,
-          company: companyIndex >= 0 ? values[companyIndex] : undefined,
-          email: emailIndex >= 0 ? values[emailIndex] : undefined,
-          phone: phoneIndex >= 0 ? values[phoneIndex] : undefined,
-          source: sourceIndex >= 0 ? values[sourceIndex] : undefined,
-        })
-      }
+      const name = nameIndex >= 0 ? values[nameIndex] : ''
+      parsedLeads.push({
+        name: name || undefined,
+        company: companyIndex >= 0 ? values[companyIndex] : undefined,
+        email: emailIndex >= 0 ? values[emailIndex] : undefined,
+        phone,
+        source: sourceIndex >= 0 ? values[sourceIndex] : undefined,
+      })
     }
 
     return parsedLeads
@@ -1307,7 +1307,7 @@ export default function LeadsPage() {
         .from('leads')
         .insert({
           org_id: orgId,
-          name: lead.name,
+          name: (lead.name || 'Unknown').trim() || 'Unknown',
           email: lead.email || null,
           phone: lead.phone || null,
           source: lead.source || 'import',
@@ -1604,13 +1604,13 @@ export default function LeadsPage() {
                         <SelectTrigger className="w-full sm:w-[90px] h-8 sm:h-9 text-xs sm:text-sm">
                           <SelectValue placeholder="Any" />
                         </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Any</SelectItem>
-                        <SelectItem value="lt">&lt; Less than</SelectItem>
-                        <SelectItem value="eq">= Equal to</SelectItem>
-                        <SelectItem value="gt">&gt; Greater than</SelectItem>
-                      </SelectContent>
-                    </Select>
+                        <SelectContent>
+                          <SelectItem value="all">Any</SelectItem>
+                          <SelectItem value="lt">&lt; Less than</SelectItem>
+                          <SelectItem value="eq">= Equal to</SelectItem>
+                          <SelectItem value="gt">&gt; Greater than</SelectItem>
+                        </SelectContent>
+                      </Select>
                       {leadAgeOperator !== 'all' && (
                         <>
                           <Input
@@ -1792,12 +1792,11 @@ export default function LeadsPage() {
                               </Badge>
                             ) : null}
                             {lead.subscription.status && (
-                              <Badge variant="outline" className={`text-xs w-fit ${
-                                lead.subscription.status === 'active' ? 'border-green-500 text-green-600' :
+                              <Badge variant="outline" className={`text-xs w-fit ${lead.subscription.status === 'active' ? 'border-green-500 text-green-600' :
                                   lead.subscription.status === 'paused' ? 'border-yellow-500 text-yellow-600' :
                                     lead.subscription.status === 'expired' ? 'border-red-500 text-red-600' :
                                       'border-gray-500 text-gray-600'
-                              }`}>
+                                }`}>
                                 {lead.subscription.status.charAt(0).toUpperCase() + lead.subscription.status.slice(1)}
                               </Badge>
                             )}
@@ -2300,7 +2299,7 @@ export default function LeadsPage() {
                   CSV Format
                 </h4>
                 <p className="text-xs text-muted-foreground">
-                  Columns: name (required), company, email, phone, source
+                  Columns: phone (required), name, company, email, source
                 </p>
               </div>
             </DialogContent>

@@ -22,10 +22,10 @@ export function mapLeadData(
 ): MappedLead {
   // Extract campaign data
   const campaignData = leadData.campaign_data;
-  
+
   // Build integration metadata
   const integrationMetadata: IntegrationMetadata = {};
-  
+
   if (campaignData) {
     if (campaignData.campaign_id) {
       integrationMetadata.campaign_id = campaignData.campaign_id;
@@ -43,7 +43,7 @@ export function mapLeadData(
       integrationMetadata.creative_id = campaignData.creative_id;
     }
   }
-  
+
   // Add any additional metadata from leadData.metadata
   if (leadData.metadata) {
     Object.assign(integrationMetadata, leadData.metadata);
@@ -83,8 +83,9 @@ export function getSourceFromPlatform(platform: string): string {
     whatsapp: 'whatsapp',
     linkedin: 'linkedin',
     instagram: 'instagram',
+    google_sheets: 'google_sheets',
   };
-  
+
   return sourceMap[platform.toLowerCase()] || 'manual';
 }
 

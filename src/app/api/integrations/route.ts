@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate platform
-    const validPlatforms = ['facebook', 'whatsapp', 'linkedin', 'instagram'];
+    const validPlatforms = ['facebook', 'instagram', 'google_sheets'];
     if (!validPlatforms.includes(platform)) {
       return NextResponse.json(
         { error: `Invalid platform. Must be one of: ${validPlatforms.join(', ')}` },
@@ -127,15 +127,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Auto-generate webhook secret if not provided
-    // This ensures webhooks work immediately without requiring user input
-    const finalWebhookSecret = webhook_secret || generateSecureSecret();
+    // Webhooks are used for Meta, not for Google Sheets (polling-based).
+    const needsWebhook = platform === 'facebook' || platform === 'instagram';
+    const finalWebhookSecret = needsWebhook ? (webhook_secret || generateSecureSecret()) : null;
 
-    // Generate webhook URL
-    const baseUrl = process.env.NEXT_PUBLIC_WEBHOOK_BASE_URL || 
-                   process.env.NEXT_PUBLIC_SITE_URL || 
-                   'https://yourdomain.com';
-    const webhookUrl = `${baseUrl}/api/integrations/webhooks/${platform}?secret=${finalWebhookSecret}`;
+    // Generate webhook URL (only if needed)
+    let webhookUrl: string | null = null;
+    if (needsWebhook && finalWebhookSecret) {
+      const baseUrl =
+        process.env.NEXT_PUBLIC_WEBHOOK_BASE_URL ||
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        request.nextUrl.origin;
+      webhookUrl = `${baseUrl}/api/integrations/webhooks/${platform}?secret=${finalWebhookSecret}`;
+    }
 
     // Create integration
     const { data: integration, error } = await supabase
@@ -157,8 +162,8 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error('Database error creating integration:', error);
       return NextResponse.json(
-        { 
-          error: 'Failed to create integration', 
+        {
+          error: 'Failed to create integration',
           details: error.message || error,
           code: error.code,
           hint: error.hint
@@ -171,7 +176,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error creating integration:', error);
     return NextResponse.json(
-      { 
+      {
         error: 'Internal server error',
         details: error instanceof Error ? error.message : String(error),
         hint: 'Make sure migration 028_platform_integrations.sql has been run'

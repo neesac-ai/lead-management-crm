@@ -5,12 +5,11 @@ import { useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Plug, Loader2, AlertCircle, ChevronRight } from 'lucide-react'
-import { FaFacebook, FaWhatsapp, FaLinkedin, FaInstagram } from 'react-icons/fa'
+import { FileSpreadsheet, Loader2, AlertCircle, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import { MetaLogo } from '@/components/icons/meta-logo'
 
 type PlatformStats = {
   platform: string
@@ -20,37 +19,21 @@ type PlatformStats = {
 }
 
 const PLATFORMS = [
-  { 
-    value: 'facebook', 
-    label: 'Facebook Lead Ads', 
-    icon: FaFacebook,
-    iconColor: 'text-blue-600',
-    description: 'Connect Facebook Lead Ads to automatically capture leads',
-    color: 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
+  {
+    value: 'facebook',
+    label: 'Meta Lead Ads',
+    icon: MetaLogo,
+    iconColor: 'text-[#0866FF]',
+    description: 'Connect Meta Lead Ads (Facebook + Instagram) to automatically capture leads',
+    color: 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800',
   },
-  { 
-    value: 'whatsapp', 
-    label: 'WhatsApp Business API', 
-    icon: FaWhatsapp,
-    iconColor: 'text-green-500',
-    description: 'Connect WhatsApp Business API to capture leads from conversations',
-    color: 'bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800'
-  },
-  { 
-    value: 'linkedin', 
-    label: 'LinkedIn Lead Gen Forms', 
-    icon: FaLinkedin,
-    iconColor: 'text-blue-700',
-    description: 'Connect LinkedIn Lead Gen Forms to capture professional leads',
-    color: 'bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800'
-  },
-  { 
-    value: 'instagram', 
-    label: 'Instagram Lead Ads', 
-    icon: FaInstagram,
-    iconColor: 'text-pink-600',
-    description: 'Connect Instagram Lead Ads to capture leads from visual campaigns',
-    color: 'bg-pink-50 dark:bg-pink-950 border-pink-200 dark:border-pink-800'
+  {
+    value: 'google_sheets',
+    label: 'Google Sheets',
+    icon: FileSpreadsheet,
+    iconColor: 'text-emerald-600',
+    description: 'Capture leads from any platform via Google Sheets (Google login + polling)',
+    color: 'bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800',
   },
 ] as const
 
@@ -65,6 +48,7 @@ export default function IntegrationsPage() {
   useEffect(() => {
     fetchPlatformStats()
     fetchUserRole()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug])
 
   const fetchUserRole = async () => {
@@ -92,11 +76,13 @@ export default function IntegrationsPage() {
       const data = await response.json()
       const integrations = data.integrations || []
 
-      // Calculate stats per platform
-      const stats: PlatformStats[] = PLATFORMS.map(platform => {
-        const platformIntegrations = integrations.filter(
-          (i: { platform: string }) => i.platform === platform.value
-        )
+      const stats: PlatformStats[] = PLATFORMS.map((platform) => {
+        const platformIntegrations = integrations.filter((i: { platform: string }) => {
+          if (platform.value === 'facebook') return i.platform === 'facebook' || i.platform === 'instagram'
+          if (platform.value === 'google_sheets') return i.platform === 'google_sheets'
+          return i.platform === platform.value
+        })
+
         return {
           platform: platform.value,
           total: platformIntegrations.length,
@@ -154,15 +140,15 @@ export default function IntegrationsPage() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
               {PLATFORMS.map((platform) => {
-                const stats = platformStats.find(s => s.platform === platform.value) || {
+                const stats = platformStats.find((s) => s.platform === platform.value) || {
                   total: 0,
                   active: 0,
                   error: 0,
                 }
 
                 return (
-                  <Link 
-                    key={platform.value} 
+                  <Link
+                    key={platform.value}
                     href={`/${orgSlug}/integrations/platform/${platform.value}`}
                     className="block"
                   >
@@ -214,3 +200,4 @@ export default function IntegrationsPage() {
     </div>
   )
 }
+

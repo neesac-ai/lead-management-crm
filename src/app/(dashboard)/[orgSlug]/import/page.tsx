@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { toast } from 'sonner'
 
 type ParsedLead = {
-  name: string
+  name?: string
   company?: string
   email?: string
   phone?: string
@@ -42,13 +42,13 @@ export default function ImportPage() {
   const params = useParams()
   const orgSlug = params.orgSlug as string
   const fileInputRef = useRef<HTMLInputElement>(null)
-  
+
   const [isDragging, setIsDragging] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [importResult, setImportResult] = useState<{ success: number; failed: number; skipped: number } | null>(null)
   const [orgId, setOrgId] = useState<string | null>(null)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-  
+
   // Import preview state (for admin)
   const [importPreview, setImportPreview] = useState<ImportPreview | null>(null)
   const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(new Set())
@@ -56,16 +56,16 @@ export default function ImportPage() {
   useEffect(() => {
     const fetchData = async () => {
       const supabase = createClient()
-      
+
       // Get org
       const { data: org } = await supabase
         .from('organizations')
         .select('id')
         .eq('slug', orgSlug)
         .single()
-      
+
       if (org) setOrgId(org.id)
-      
+
       // Get user profile
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
@@ -74,7 +74,7 @@ export default function ImportPage() {
           .select('id, role, org_id')
           .eq('auth_id', user.id)
           .single()
-        
+
         if (profile) {
           setUserProfile(profile as UserProfile)
         }
@@ -146,13 +146,13 @@ export default function ImportPage() {
       }
 
       const supabase = createClient()
-      
+
       // Fetch existing leads to check for duplicates
       const { data: existingLeads } = await supabase
         .from('leads')
         .select('id, name, phone, assigned_to')
         .eq('org_id', orgId)
-      
+
       // Get user names for assigned leads
       const assignedUserIds = new Set(existingLeads?.filter(l => l.assigned_to).map(l => l.assigned_to) || [])
       let userNames: Record<string, string> = {}
@@ -231,7 +231,7 @@ export default function ImportPage() {
         .from('leads')
         .insert({
           org_id: orgId,
-          name: lead.name,
+          name: (lead.name || 'Unknown').trim() || 'Unknown',
           email: lead.email || null,
           phone: lead.phone || null,
           source: lead.source || 'import',
@@ -251,7 +251,7 @@ export default function ImportPage() {
     setImportResult({ success, failed, skipped: skippedCount })
     setImportPreview(null)
     setSelectedDuplicates(new Set())
-    
+
     if (success > 0) {
       toast.success(`Imported ${success} leads successfully`)
     }
@@ -270,7 +270,7 @@ export default function ImportPage() {
 
   const handleImportWithDuplicates = async () => {
     if (!importPreview) return
-    
+
     // Get selected duplicates to add anyway
     const leadsToImport = [
       ...importPreview.newLeads,
@@ -278,7 +278,7 @@ export default function ImportPage() {
         .filter(d => selectedDuplicates.has(d.existingId))
         .map(d => d.lead)
     ]
-    
+
     const skipped = importPreview.duplicates.length - selectedDuplicates.size
     await importLeads(leadsToImport, skipped)
   }
@@ -306,8 +306,8 @@ export default function ImportPage() {
     const phoneIndex = headers.findIndex(h => h.includes('phone') || h.includes('mobile'))
     const sourceIndex = headers.findIndex(h => h.includes('source'))
 
-    if (nameIndex === -1) {
-      toast.error('CSV must have a "name" column')
+    if (phoneIndex === -1) {
+      toast.error('CSV must have a "phone" column')
       return []
     }
 
@@ -315,17 +315,17 @@ export default function ImportPage() {
 
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''))
-      const name = values[nameIndex]
-      
-      if (name) {
-        leads.push({
-          name,
-          company: companyIndex >= 0 ? values[companyIndex] : undefined,
-          email: emailIndex >= 0 ? values[emailIndex] : undefined,
-          phone: phoneIndex >= 0 ? values[phoneIndex] : undefined,
-          source: sourceIndex >= 0 ? values[sourceIndex] : undefined,
-        })
-      }
+      const phone = values[phoneIndex]
+      if (!phone) continue
+
+      const name = nameIndex >= 0 ? values[nameIndex] : ''
+      leads.push({
+        name: name || undefined,
+        company: companyIndex >= 0 ? values[companyIndex] : undefined,
+        email: emailIndex >= 0 ? values[emailIndex] : undefined,
+        phone,
+        source: sourceIndex >= 0 ? values[sourceIndex] : undefined,
+      })
     }
 
     return leads
@@ -333,11 +333,11 @@ export default function ImportPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header 
-        title="Import Leads" 
+      <Header
+        title="Import Leads"
         description="Import leads from CSV, Excel, or integrations"
       />
-      
+
       <div className="flex-1 p-4 lg:p-6 space-y-4 lg:space-y-6">
         <Card>
           <CardHeader className="px-4 lg:px-6">
@@ -345,7 +345,7 @@ export default function ImportPage() {
             <CardDescription>Import leads from CSV or Excel files</CardDescription>
           </CardHeader>
           <CardContent className="px-4 lg:px-6">
-            <div 
+            <div
               className={`border-2 border-dashed rounded-lg p-6 lg:p-12 text-center transition-colors ${
                 isDragging ? 'border-primary bg-primary/5' : 'border-muted-foreground/25'
               }`}
@@ -367,7 +367,7 @@ export default function ImportPage() {
                     <AlertTriangle className="h-6 w-6 text-amber-500" />
                     <h3 className="text-lg font-medium">Import Preview</h3>
                   </div>
-                  
+
                   {/* Summary */}
                   <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="p-4 bg-green-50 rounded-lg border border-green-200">
@@ -395,11 +395,11 @@ export default function ImportPage() {
                       </h4>
                       <div className="max-h-[200px] overflow-y-auto space-y-2 border rounded-lg p-2">
                         {importPreview.duplicates.map((dup, idx) => (
-                          <div 
+                          <div
                             key={idx}
                             className={`p-3 rounded-lg border ${
-                              selectedDuplicates.has(dup.existingId) 
-                                ? 'bg-primary/5 border-primary' 
+                              selectedDuplicates.has(dup.existingId)
+                                ? 'bg-primary/5 border-primary'
                                 : 'bg-muted/50'
                             }`}
                           >
@@ -436,8 +436,8 @@ export default function ImportPage() {
 
                   {/* Action Buttons */}
                   <div className="flex gap-3 justify-end">
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => {
                         setImportPreview(null)
                         setSelectedDuplicates(new Set())
@@ -474,7 +474,7 @@ export default function ImportPage() {
                   <FileSpreadsheet className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
                   <p className="text-lg font-medium mb-2">Drop your file here</p>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Supports CSV and XLSX files. Must have a &quot;name&quot; column.
+                    Supports CSV and XLSX files. Must have a &quot;phone&quot; column.
                   </p>
                   <input
                     ref={fileInputRef}
@@ -497,13 +497,13 @@ export default function ImportPage() {
                 CSV Format Guide
               </h4>
               <p className="text-sm text-muted-foreground mb-2">
-                Your CSV should have the following columns (name is required):
+                Your CSV should have the following columns (phone is required):
               </p>
               <code className="text-xs bg-background px-2 py-1 rounded">
-                name, company, email, phone, source
+                phone, name, company, email, source
               </code>
               <p className="text-xs text-muted-foreground mt-2">
-                Example: John Doe, Acme Inc., john@example.com, +1234567890, website
+                Example: +1234567890, John Doe, Acme Inc., john@example.com, website
               </p>
             </div>
           </CardContent>
@@ -517,7 +517,7 @@ export default function ImportPage() {
           <CardContent className="px-4 lg:px-6">
             <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
               {['Facebook', 'Instagram', 'LinkedIn', 'WhatsApp'].map((platform) => (
-                <div 
+                <div
                   key={platform}
                   className="p-4 border rounded-lg text-center opacity-50"
                 >

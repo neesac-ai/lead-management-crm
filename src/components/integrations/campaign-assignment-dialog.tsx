@@ -31,11 +31,20 @@ type User = {
   role: string
 }
 
+type Integration = {
+  id: string
+  config?: Record<string, unknown> | null
+}
+
+type Campaign = {
+  id: string
+  name: string
+}
+
 interface CampaignAssignmentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   integrationId: string
-  orgSlug: string
   assignment?: {
     id: string
     campaign_id: string
@@ -50,7 +59,6 @@ export function CampaignAssignmentDialog({
   open,
   onOpenChange,
   integrationId,
-  orgSlug,
   assignment,
   onSuccess,
 }: CampaignAssignmentDialogProps) {
@@ -61,20 +69,26 @@ export function CampaignAssignmentDialog({
   const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [availableCampaigns, setAvailableCampaigns] = useState<Campaign[]>([])
+  const [isLoadingCampaigns, setIsLoadingCampaigns] = useState(false)
+  const [selectedCampaignOption, setSelectedCampaignOption] = useState<string>('')
 
   useEffect(() => {
     if (open) {
       fetchUsers()
+      fetchAvailableCampaigns()
       if (assignment) {
         setCampaignId(assignment.campaign_id)
         setCampaignName(assignment.campaign_name)
         setAssignedTo(assignment.assigned_to)
         setIsActive(assignment.is_active)
+        setSelectedCampaignOption(assignment.campaign_id)
       } else {
         setCampaignId('')
         setCampaignName('')
         setAssignedTo('')
         setIsActive(true)
+        setSelectedCampaignOption('')
       }
     }
   }, [open, assignment])
@@ -110,6 +124,40 @@ export function CampaignAssignmentDialog({
       toast.error('Failed to load sales team')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const fetchAvailableCampaigns = async () => {
+    setIsLoadingCampaigns(true)
+    try {
+      const response = await fetch(`/api/integrations/${integrationId}`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch integration')
+      }
+      const data = (await response.json()) as { integration?: Integration }
+      const config = (data.integration?.config || {}) as Record<string, unknown>
+      const campaigns = (config.available_campaigns || []) as Campaign[]
+      setAvailableCampaigns(Array.isArray(campaigns) ? campaigns : [])
+    } catch (error) {
+      console.error('Error fetching available campaigns:', error)
+      // Non-blocking: user can still type manually
+      setAvailableCampaigns([])
+    } finally {
+      setIsLoadingCampaigns(false)
+    }
+  }
+
+  const handleCampaignSelect = (value: string) => {
+    setSelectedCampaignOption(value)
+    if (!value || value === '__custom__') {
+      setCampaignId('')
+      setCampaignName('')
+      return
+    }
+    const selected = availableCampaigns.find((c) => c.id === value)
+    if (selected) {
+      setCampaignId(selected.id)
+      setCampaignName(selected.name)
     }
   }
 
@@ -175,6 +223,34 @@ export function CampaignAssignmentDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
+            {!assignment && (
+              <div className="space-y-2">
+                <Label>Campaign</Label>
+                {isLoadingCampaigns ? (
+                  <div className="flex items-center justify-center py-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  </div>
+                ) : availableCampaigns.length > 0 ? (
+                  <Select value={selectedCampaignOption} onValueChange={handleCampaignSelect}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a fetched campaign (recommended)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableCampaigns.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__custom__">Custom (enter manually)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    No campaigns found. Go to Integration → Settings and click <strong>Fetch Campaigns</strong>, then come back here.
+                  </div>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="campaignId">Campaign ID *</Label>
               <Input

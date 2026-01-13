@@ -2,36 +2,41 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { 
-  ArrowLeft, 
-  Loader2, 
-  Settings, 
-  Users, 
-  RefreshCw, 
-  CheckCircle2, 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  ArrowLeft,
+  Loader2,
+  RefreshCw,
+  CheckCircle2,
   XCircle,
   Copy,
-  ExternalLink,
   Trash2,
   AlertCircle,
+  FileSpreadsheet,
 } from 'lucide-react'
-import { FaFacebook, FaWhatsapp, FaLinkedin, FaInstagram } from 'react-icons/fa'
+import { FaInstagram } from 'react-icons/fa'
+import { MetaLogo } from '@/components/icons/meta-logo'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { CampaignAssignmentTable } from '@/components/integrations/campaign-assignment-table'
 import { IntegrationSettings } from '@/components/integrations/integration-settings'
+import { GoogleSheetsSettings } from '@/components/integrations/google-sheets-settings'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 type Integration = {
   id: string
   name: string
-  platform: 'facebook' | 'whatsapp' | 'linkedin' | 'instagram'
+  platform: 'facebook' | 'instagram' | 'google_sheets'
   is_active: boolean
   sync_status: 'idle' | 'syncing' | 'error'
   last_sync_at: string | null
@@ -53,19 +58,18 @@ export default function IntegrationDetailPage() {
   const [isTesting, setIsTesting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [activeTab, setActiveTab] = useState('overview')
+  const [showAdvancedCampaigns, setShowAdvancedCampaigns] = useState(false)
+  const [syncWindow, setSyncWindow] = useState<'24h' | '7d' | '30d' | '90d'>('24h')
 
   const getPlatformIcon = () => {
     const iconProps = { className: 'w-8 h-8' }
     switch (integration?.platform) {
       case 'facebook':
-        return <FaFacebook className="w-8 h-8 text-blue-600" />
-      case 'whatsapp':
-        return <FaWhatsapp className="w-8 h-8 text-green-500" />
-      case 'linkedin':
-        return <FaLinkedin className="w-8 h-8 text-blue-700" />
+        return <MetaLogo className="h-8 w-8 text-[#0866FF]" />
       case 'instagram':
         return <FaInstagram className="w-8 h-8 text-pink-600" />
+      case 'google_sheets':
+        return <FileSpreadsheet className="w-8 h-8 text-emerald-600" />
       default:
         return null
     }
@@ -96,15 +100,15 @@ export default function IntegrationDetailPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const oauthStatus = params.get('oauth')
-    
+
     if (oauthStatus === 'success') {
-      toast.success('Facebook connected successfully!')
+      toast.success('Account connected successfully!')
       fetchIntegration()
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname)
     } else if (oauthStatus === 'error') {
       const message = params.get('message') || 'Connection failed'
-      toast.error(`Facebook connection failed: ${message}`)
+      toast.error(`Connection failed: ${message}`)
       // Clean URL
       window.history.replaceState({}, '', window.location.pathname)
     }
@@ -134,11 +138,22 @@ export default function IntegrationDetailPage() {
   const handleSync = async () => {
     setIsSyncing(true)
     try {
+      const backfillDays =
+        syncWindow === '7d' ? 7 :
+        syncWindow === '30d' ? 30 :
+        syncWindow === '90d' ? 90 :
+        undefined
+
       const response = await fetch(`/api/integrations/${integrationId}/sync`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(backfillDays ? { backfill_days: backfillDays } : {}),
+        }),
       })
       if (!response.ok) {
-        throw new Error('Failed to sync')
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err?.details || err?.error || 'Failed to sync')
       }
       const data = await response.json()
       toast.success(`Sync completed: ${data.leads_created} leads created`)
@@ -156,6 +171,52 @@ export default function IntegrationDetailPage() {
       navigator.clipboard.writeText(integration.webhook_url)
       toast.success('Webhook URL copied to clipboard')
     }
+  }
+
+  const webhookExplanation = () => {
+    const isMeta = integration.platform === 'facebook' || integration.platform === 'instagram'
+    if (!isMeta) return null
+
+    return (
+      <div className="text-xs text-muted-foreground mt-2 space-y-2">
+        <p>
+          <strong>What it does:</strong> Meta webhooks enable <strong>real-time lead delivery</strong>. When someone submits your
+          Instant Form, Meta calls this URL and BharatCRM immediately fetches the full lead details and creates a Lead in CRM.
+        </p>
+        <p>
+          <strong>Why you haven&apos;t “used it” yet:</strong> Until you paste this URL into Meta App Webhooks and subscribe to
+          <code className="mx-1">leadgen</code>, Meta won&apos;t send events. In the meantime, you can still pull leads using
+          <strong className="mx-1">Sync Now</strong> (manual / scheduled sync).
+        </p>
+        <div className="rounded-md border bg-muted/30 p-3">
+          <div className="font-medium text-foreground">Webhook setup checklist (Meta Developer)</div>
+          <ol className="mt-2 list-decimal list-inside space-y-1">
+            <li>
+              Go to <strong>Meta Developers</strong> → open your app → <strong>Products</strong> → <strong>Webhooks</strong>.
+            </li>
+            <li>
+              In <strong>Webhooks</strong>, choose the object <strong>Page</strong> and click <strong>Subscribe to this object</strong>.
+            </li>
+            <li>
+              Set <strong>Callback URL</strong> to the exact URL above (including the <code>?secret=...</code>).
+            </li>
+            <li>
+              Set <strong>Verify Token</strong> to the same secret value (the part after <code>secret=</code>).
+            </li>
+            <li>
+              Subscribe to the field: <strong>leadgen</strong> (Lead Ads / Instant Forms).
+            </li>
+            <li>
+              Click <strong>Verify and Save</strong>. Meta will send a verification request and BharatCRM should respond OK.
+            </li>
+          </ol>
+          <div className="mt-2">
+            <strong>Localhost note:</strong> Meta can’t call <code className="mx-1">localhost</code>. Use a tunnel (e.g. ngrok) and set
+            your <code className="mx-1">NEXT_PUBLIC_SITE_URL</code> so the webhook URL is public.
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const handleDelete = async () => {
@@ -203,18 +264,18 @@ export default function IntegrationDetailPage() {
   // Check if credentials are configured
   const isCredentialsConfigured = () => {
     if (!integration) return false
-    
-    if (integration.platform === 'facebook') {
+
+    if (integration.platform === 'facebook' || integration.platform === 'instagram') {
       const config = integration.config || {}
       const credentials = integration.credentials || {}
-      
-      // For Facebook, need App ID, App Secret, and Access Token
+
+      // For Meta (Facebook/Instagram), need App ID, App Secret, and Access Token
       const hasAppCredentials = !!(config.facebook_app_id && config.facebook_app_secret)
       const hasAccessToken = !!(credentials.access_token)
-      
+
       return hasAppCredentials && hasAccessToken
     }
-    
+
     // For other platforms, check if credentials exist
     return !!(integration.credentials && Object.keys(integration.credentials).length > 0)
   }
@@ -276,94 +337,95 @@ export default function IntegrationDetailPage() {
             {getStatusBadge()}
           </div>
 
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList>
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="campaigns">Campaign Assignments</TabsTrigger>
-              <TabsTrigger value="settings">Settings</TabsTrigger>
-            </TabsList>
+          <div className="space-y-6">
+            {!credentialsConfigured && (
+              <Alert className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Setup Required</AlertTitle>
+                <AlertDescription className="mt-2">
+                  <p>
+                    Complete the steps below to start receiving{' '}
+                    {integration.platform === 'google_sheets' ? 'Google Sheet' : 'Meta'} leads into CRM.
+                  </p>
+                </AlertDescription>
+              </Alert>
+            )}
 
-            <TabsContent value="overview" className="space-y-4">
-              {!credentialsConfigured && (
-                <Alert className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertTitle>Setup Required</AlertTitle>
-                  <AlertDescription className="mt-2">
-                    <p>Before you can test the connection or sync leads, you need to configure your integration credentials.</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => setActiveTab('settings')}
-                    >
-                      Go to Settings →
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              )}
-              
-              <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
+              {(integration.platform === 'facebook' || integration.platform === 'instagram') && (
                 <Card>
                   <CardHeader>
-                    <CardTitle>Status</CardTitle>
+                    <CardTitle>Step 1: Webhook (Real-time leads)</CardTitle>
+                    <CardDescription>
+                      Connect Meta Webhooks to receive leads instantly (recommended).
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Facebook Connected</span>
-                      {credentialsConfigured && integration.credentials?.access_token ? (
+                  <CardContent>
+                    {integration.webhook_url ? (
+                      <>
                         <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-5 h-5 text-green-500" />
-                          <span className="text-sm text-green-600 dark:text-green-400">Connected</span>
+                          <code className="flex-1 p-2 bg-muted rounded text-sm break-all">
+                            {integration.webhook_url}
+                          </code>
+                          <Button variant="outline" size="icon" onClick={copyWebhookUrl}>
+                            <Copy className="w-4 h-4" />
+                          </Button>
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <XCircle className="w-5 h-5 text-red-500" />
-                          <span className="text-sm text-red-600 dark:text-red-400">Not Connected</span>
-                        </div>
-                      )}
-                    </div>
-                    {integration.credentials?.token_expires_at && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Token Expires</span>
-                        <span className="text-sm">
-                          {new Date(integration.credentials.token_expires_at as string).toLocaleDateString()}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Integration Active</span>
-                      {integration.is_active ? (
-                        <CheckCircle2 className="w-5 h-5 text-green-500" />
-                      ) : (
-                        <XCircle className="w-5 h-5 text-red-500" />
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Sync Status</span>
-                      <Badge variant="outline">{integration.sync_status}</Badge>
-                    </div>
-                    {integration.last_sync_at && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Last Sync</span>
-                        <span className="text-sm">
-                          {new Date(integration.last_sync_at).toLocaleString()}
-                        </span>
-                      </div>
+                        {webhookExplanation()}
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Webhook URL not available yet.
+                      </p>
                     )}
                   </CardContent>
                 </Card>
+              )}
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Actions</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Status & Actions</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      {integration.platform === 'instagram'
+                        ? 'Instagram Connected'
+                        : integration.platform === 'facebook'
+                          ? 'Facebook Connected'
+                          : 'Google Connected'}
+                    </span>
+                    {credentialsConfigured && integration.credentials?.access_token ? (
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-5 h-5 text-green-500" />
+                        <span className="text-sm text-green-600 dark:text-green-400">Connected</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <XCircle className="w-5 h-5 text-red-500" />
+                        <span className="text-sm text-red-600 dark:text-red-400">Not Connected</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Sync Status</span>
+                    <Badge variant="outline">{integration.sync_status}</Badge>
+                  </div>
+                  {integration.last_sync_at && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">Last Sync</span>
+                      <span className="text-sm">
+                        {new Date(integration.last_sync_at).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
+                  <div className="grid gap-2">
                     <Button
                       onClick={handleTest}
                       disabled={isTesting || !credentialsConfigured}
                       variant="outline"
                       className="w-full"
-                      title={!credentialsConfigured ? 'Configure credentials in Settings tab first' : 'Test the connection to Facebook'}
+                      title={!credentialsConfigured ? 'Configure connection below first' : 'Test the connection'}
                     >
                       {isTesting ? (
                         <>
@@ -377,12 +439,32 @@ export default function IntegrationDetailPage() {
                         </>
                       )}
                     </Button>
+                    <div className="space-y-2">
+                      {integration.platform !== 'google_sheets' && (
+                        <>
+                          <div className="text-xs text-muted-foreground">
+                            Backfill window (Meta typically retains ~90 days of leads)
+                          </div>
+                          <Select value={syncWindow} onValueChange={(v) => setSyncWindow(v as typeof syncWindow)}>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select time window" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="24h">Last 24 hours</SelectItem>
+                              <SelectItem value="7d">Last 7 days</SelectItem>
+                              <SelectItem value="30d">Last 30 days</SelectItem>
+                              <SelectItem value="90d">Last 90 days (max recommended)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </>
+                      )}
+                    </div>
                     <Button
                       onClick={handleSync}
                       disabled={isSyncing || !integration.is_active || !credentialsConfigured}
                       variant="outline"
                       className="w-full"
-                      title={!credentialsConfigured ? 'Configure credentials in Settings tab first' : 'Manually sync leads from Facebook'}
+                      title={!credentialsConfigured ? 'Configure connection below first' : 'Manually sync leads'}
                     >
                       {isSyncing ? (
                         <>
@@ -414,81 +496,53 @@ export default function IntegrationDetailPage() {
                         </>
                       )}
                     </Button>
-                  </CardContent>
-                </Card>
-              </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
-              {integration.webhook_url && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Webhook URL</CardTitle>
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  {integration.platform === 'google_sheets'
+                    ? 'Step 2: Connect Google Sheet & Map Columns'
+                    : 'Step 2: Connect Meta & Choose Lead Forms'}
+                </CardTitle>
+                <CardDescription>
+                  {integration.platform === 'google_sheets'
+                    ? 'Connect Google, paste Sheet URL + Tab name, map columns (phone required), then sync.'
+                    : 'Save App ID/Secret, connect your Meta account, select an Ad Account, then fetch Lead Forms and assign to reps.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {integration.platform === 'google_sheets' ? (
+                  <GoogleSheetsSettings integration={integration as any} onUpdate={fetchIntegration} />
+                ) : (
+                  <IntegrationSettings integration={integration as any} onUpdate={fetchIntegration} />
+                )}
+              </CardContent>
+            </Card>
+
+            {integration.platform !== 'google_sheets' && (
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Campaign Assignments (Advanced)</CardTitle>
                     <CardDescription>
-                      Use this URL to configure webhooks in your platform settings. Configure this in Facebook App → Webhooks → Add Callback URL
+                      Optional. Keep for legacy routing/reporting; Phase 1 is form-based.
                     </CardDescription>
-                  </CardHeader>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => setShowAdvancedCampaigns((v) => !v)}>
+                    {showAdvancedCampaigns ? 'Hide' : 'Show'}
+                  </Button>
+                </CardHeader>
+                {showAdvancedCampaigns && (
                   <CardContent>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 p-2 bg-muted rounded text-sm break-all">
-                        {integration.webhook_url}
-                      </code>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={copyWebhookUrl}
-                      >
-                        <Copy className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      <strong>Note:</strong> For localhost testing, you'll need to use a tunneling service like ngrok to expose your local server to Facebook.
-                    </p>
+                    <CampaignAssignmentTable integrationId={integrationId} />
                   </CardContent>
-                </Card>
-              )}
-
-              {/* Connection Info Card */}
-              {credentialsConfigured && integration.credentials?.access_token && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Connection Details</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <div>
-                      <p className="text-sm font-medium mb-1">Ad Account</p>
-                      <p className="text-sm text-muted-foreground">
-                        {integration.config?.ad_account_id 
-                          ? `${integration.config.ad_account_id}` 
-                          : 'Not configured'}
-                      </p>
-                    </div>
-                    {integration.config?.selected_campaigns && 
-                     Array.isArray(integration.config.selected_campaigns) &&
-                     integration.config.selected_campaigns.length > 0 ? (
-                      <div>
-                        <p className="text-sm font-medium mb-1">Selected Campaigns</p>
-                        <p className="text-sm text-muted-foreground">
-                          {integration.config.selected_campaigns.length} campaign(s) selected
-                        </p>
-                      </div>
-                    ) : (
-                      <Alert className="bg-yellow-50 dark:bg-yellow-950 border-yellow-200 dark:border-yellow-800">
-                        <AlertCircle className="h-4 w-4" />
-                        <AlertTitle>No Campaigns Selected</AlertTitle>
-                        <AlertDescription className="mt-2">
-                          <p className="text-sm">
-                            You don't have any campaigns selected. Go to <strong>Settings</strong> tab to:
-                          </p>
-                          <ul className="text-sm list-disc list-inside mt-2 space-y-1">
-                            <li>Select an Ad Account</li>
-                            <li>Fetch and select campaigns</li>
-                            <li>Or create a test Lead Gen Form in Facebook Ads Manager</li>
-                          </ul>
-                        </AlertDescription>
-                      </Alert>
-                    )}
-                  </CardContent>
-                </Card>
-              )}
+                )}
+              </Card>
+            )}
 
               {integration.error_message && (
                 <Card className="border-destructive">
@@ -500,16 +554,7 @@ export default function IntegrationDetailPage() {
                   </CardContent>
                 </Card>
               )}
-            </TabsContent>
-
-            <TabsContent value="campaigns">
-              <CampaignAssignmentTable integrationId={integrationId} orgSlug={orgSlug} />
-            </TabsContent>
-
-            <TabsContent value="settings">
-              <IntegrationSettings integration={integration} onUpdate={fetchIntegration} />
-            </TabsContent>
-          </Tabs>
+          </div>
         </div>
       </div>
     </div>

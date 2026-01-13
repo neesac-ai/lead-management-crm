@@ -6,6 +6,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { FacebookIntegration } from '@/lib/integrations/facebook';
+import { InstagramIntegration } from '@/lib/integrations/instagram';
+import { GoogleSheetsIntegration } from '@/lib/integrations/google-sheets';
 
 export async function POST(
   request: NextRequest,
@@ -58,6 +60,12 @@ export async function POST(
     switch (integration.platform) {
       case 'facebook':
         integrationInstance = new FacebookIntegration();
+        break;
+      case 'instagram':
+        integrationInstance = new InstagramIntegration();
+        break;
+      case 'google_sheets':
+        integrationInstance = new GoogleSheetsIntegration();
         break;
       // Add other platforms as they're implemented
       default:

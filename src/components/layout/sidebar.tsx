@@ -43,6 +43,7 @@ import {
   Package,
   Plug,
   CheckCircle2,
+  MapPin,
 } from 'lucide-react'
 import type { AuthUser, UserRole } from '@/types'
 
@@ -205,6 +206,11 @@ export function Sidebar({ orgSlug }: SidebarProps) {
     // Team is visible to everyone
     items.push(
       { title: 'Team', href: `${baseUrl}/team`, icon: <Users className="w-5 h-5" /> },
+    )
+
+    // Locations visible to everyone (admins see team; members see self)
+    items.push(
+      { title: 'Locations', href: `${baseUrl}/locations`, icon: <MapPin className="w-5 h-5" /> },
     )
 
     // Lead Assignment for admin, super_admin, and sales (managers will see it, pages handle filtering)

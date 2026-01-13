@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { FacebookIntegration } from '@/lib/integrations/facebook';
+import { InstagramIntegration } from '@/lib/integrations/instagram';
 
 export async function GET(
   request: NextRequest,
@@ -13,6 +14,7 @@ export async function GET(
   try {
     const { id } = await params;
     const supabase = await createClient();
+    const adAccountIdOverride = request.nextUrl.searchParams.get('ad_account_id') || undefined;
 
     // Get current user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -58,6 +60,9 @@ export async function GET(
       case 'facebook':
         integrationInstance = new FacebookIntegration();
         break;
+      case 'instagram':
+        integrationInstance = new InstagramIntegration();
+        break;
       // Add other platforms as they're implemented
       default:
         return NextResponse.json(
@@ -69,7 +74,10 @@ export async function GET(
     // Fetch campaigns from platform
     const campaigns = await integrationInstance.fetchCampaigns(
       integration.credentials as Record<string, unknown>,
-      integration.config as Record<string, unknown>
+      {
+        ...(integration.config as Record<string, unknown>),
+        ...(adAccountIdOverride ? { ad_account_id: adAccountIdOverride } : {}),
+      }
     );
 
     return NextResponse.json({ campaigns });

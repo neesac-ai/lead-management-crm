@@ -6,15 +6,15 @@ import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, Plus, Loader2, RefreshCw, Settings, Trash2, AlertCircle } from 'lucide-react'
-import { FaFacebook, FaWhatsapp, FaLinkedin, FaInstagram } from 'react-icons/fa'
+import { ArrowLeft, Plus, Loader2, RefreshCw, Settings, Trash2, AlertCircle, FileSpreadsheet } from 'lucide-react'
+import { MetaLogo } from '@/components/icons/meta-logo'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
 type Integration = {
   id: string
   name: string
-  platform: 'facebook' | 'whatsapp' | 'linkedin' | 'instagram'
+  platform: 'facebook' | 'instagram' | 'google_sheets'
   is_active: boolean
   sync_status: 'idle' | 'syncing' | 'error'
   last_sync_at: string | null
@@ -24,28 +24,16 @@ type Integration = {
 
 const PLATFORM_INFO: Record<string, { label: string; icon: React.ComponentType<{ className?: string }>; iconColor: string; description: string }> = {
   facebook: {
-    label: 'Facebook Lead Ads',
-    icon: FaFacebook,
-    iconColor: 'text-blue-600',
-    description: 'Manage your Facebook Lead Ads integrations',
+    label: 'Meta Lead Ads',
+    icon: MetaLogo,
+    iconColor: 'text-[#0866FF]',
+    description: 'Manage your Meta Lead Ads integrations (Facebook + Instagram)',
   },
-  whatsapp: {
-    label: 'WhatsApp Business API',
-    icon: FaWhatsapp,
-    iconColor: 'text-green-500',
-    description: 'Manage your WhatsApp Business integrations',
-  },
-  linkedin: {
-    label: 'LinkedIn Lead Gen Forms',
-    icon: FaLinkedin,
-    iconColor: 'text-blue-700',
-    description: 'Manage your LinkedIn Lead Gen integrations',
-  },
-  instagram: {
-    label: 'Instagram Lead Ads',
-    icon: FaInstagram,
-    iconColor: 'text-pink-600',
-    description: 'Manage your Instagram Lead Ads integrations',
+  google_sheets: {
+    label: 'Google Sheets',
+    icon: FileSpreadsheet,
+    iconColor: 'text-emerald-600',
+    description: 'Manage your Google Sheets integrations (Google login + polling)',
   },
 }
 
@@ -67,16 +55,21 @@ export default function PlatformIntegrationsPage() {
   const fetchIntegrations = async () => {
     setIsLoading(true)
     try {
-      const response = await fetch(`/api/integrations?org_id=${orgSlug}&platform=${platform}`)
+      // We intentionally fetch all and filter client-side so Meta Lead Ads can include both facebook + instagram.
+      const response = await fetch(`/api/integrations?org_id=${orgSlug}`)
       if (!response.ok) {
         throw new Error('Failed to fetch integrations')
       }
       const data = await response.json()
-      // Filter by platform on client side as well (in case API doesn't filter)
-      const platformIntegrations = (data.integrations || []).filter(
-        (i: Integration) => i.platform === platform
-      )
-      setIntegrations(platformIntegrations)
+      const all = (data.integrations || []) as Integration[]
+      if (platform === 'facebook') {
+        // Meta Lead Ads section: group facebook + instagram together
+        setIntegrations(all.filter((i) => i.platform === 'facebook' || i.platform === 'instagram'))
+      } else if (platform === 'google_sheets') {
+        setIntegrations(all.filter((i) => i.platform === 'google_sheets'))
+      } else {
+        setIntegrations([])
+      }
     } catch (error) {
       console.error('Error fetching integrations:', error)
       toast.error('Failed to load integrations')
@@ -142,14 +135,10 @@ export default function PlatformIntegrationsPage() {
     }
   }
 
-  const platformInfo = PLATFORM_INFO[platform] || {
-    label: platform,
-    icon: () => null,
-    iconColor: 'text-gray-500',
-    description: `Manage your ${platform} integrations`,
-  }
+  const platformInfo = PLATFORM_INFO[platform] || PLATFORM_INFO.facebook
 
-  if (!['facebook', 'whatsapp', 'linkedin', 'instagram'].includes(platform)) {
+  // Expose Meta Lead Ads + Google Sheets
+  if (!['facebook', 'google_sheets'].includes(platform)) {
     return (
       <div className="flex h-screen flex-col">
         <Header />
@@ -158,9 +147,9 @@ export default function PlatformIntegrationsPage() {
             <CardContent className="pt-6">
               <div className="text-center">
                 <AlertCircle className="w-12 h-12 mx-auto text-destructive mb-4" />
-                <h2 className="text-xl font-semibold mb-2">Invalid Platform</h2>
+                <h2 className="text-xl font-semibold mb-2">Platform Disabled</h2>
                 <p className="text-muted-foreground mb-4">
-                  The platform "{platform}" is not supported.
+                  This platform is not available. Use <strong>Meta Lead Ads</strong> or <strong>Google Sheets</strong> instead.
                 </p>
                 <Link href={`/${orgSlug}/integrations`}>
                   <Button variant="outline">Back to Integrations</Button>
