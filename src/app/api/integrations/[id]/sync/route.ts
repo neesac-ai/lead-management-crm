@@ -281,7 +281,10 @@ export async function POST(
         if (integration.platform === 'google_sheets') {
           if (sheetAssignedTo) {
             mappedLead.assigned_to = sheetAssignedTo;
-            mappedLead.created_by = sheetAssignedTo;
+            // IMPORTANT: Keep created_by as the importing admin.
+            // Some org RLS policies may reject inserts/updates when created_by is set to a different user.
+            // Sales visibility is driven by assigned_to anyway.
+            mappedLead.created_by = profile.id;
           } else {
             mappedLead.assigned_to = null;
             mappedLead.created_by = profile.id;
