@@ -1,0 +1,10 @@
+Place your APK here as:
+
+  public/downloads/bharatcrm.apk
+
+Then it will be downloadable at:
+
+  https://bharatcrm.neesac.ai/downloads/bharatcrm.apk
+
+Optional:
+- Set NEXT_PUBLIC_ANDROID_APK_URL to host the APK elsewhere (S3, Drive, etc.)

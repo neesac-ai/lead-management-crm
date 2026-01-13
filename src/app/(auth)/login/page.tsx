@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useEffect, useMemo, useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -20,9 +20,25 @@ function LoginForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [isAndroid, setIsAndroid] = useState(false)
+
+  const apkUrl = useMemo(() => {
+    // Configurable so you can host the APK anywhere (same domain, S3, Drive, etc.)
+    // Fallback assumes you host it at /public/downloads/bharatcrm.apk
+    return process.env.NEXT_PUBLIC_ANDROID_APK_URL || '/downloads/bharatcrm.apk'
+  }, [])
 
   // Show deactivated message if redirected from middleware
   const showDeactivatedError = errorParam === 'account_deactivated'
+
+  useEffect(() => {
+    try {
+      const ua = navigator.userAgent || ''
+      setIsAndroid(/Android/i.test(ua))
+    } catch {
+      setIsAndroid(false)
+    }
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -179,6 +195,20 @@ function LoginForm() {
           )}
         </Button>
       </form>
+
+      {isAndroid && (
+        <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+          <div className="font-medium">Using Android?</div>
+          <div className="text-sm text-muted-foreground">
+            Download the BharatCRM Android app (APK). You may need to allow “Install unknown apps” for your browser.
+          </div>
+          <a href={apkUrl} target="_blank" rel="noreferrer">
+            <Button variant="outline" className="w-full h-11">
+              Download Android App (APK)
+            </Button>
+          </a>
+        </div>
+      )}
 
       <div className="relative">
         <div className="absolute inset-0 flex items-center">
