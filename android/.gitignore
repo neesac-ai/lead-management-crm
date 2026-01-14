@@ -14,8 +14,7 @@
 bin/
 gen/
 out/
-app/release/*
-!/app/release/BharatCRM.apk
+app/release/
 
 # Gradle files
 .gradle/

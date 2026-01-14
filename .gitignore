@@ -48,6 +48,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Allow checking in the signed Android APK while keeping other release artifacts ignored
-/android/app/release/*
-!/android/app/release/BharatCRM.apk
+# Keep Android release builds ignored since the APK now lives in `public/downloads`
+android/app/release/
