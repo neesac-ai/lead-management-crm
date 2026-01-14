@@ -1,0 +1,19 @@
+name: Poll Google Sheets Integrations
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+env:
+  POLLING_SECRET: ${{ secrets.POLLING_SECRET }}
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger polling endpoint
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer $POLLING_SECRET" \
+            https://bharat.neesac.ai/api/integrations/poll
