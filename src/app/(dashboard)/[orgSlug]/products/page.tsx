@@ -30,12 +30,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
-import { 
-  Plus, 
-  Package, 
-  Loader2, 
-  ExternalLink, 
-  Pencil, 
+import {
+  Plus,
+  Package,
+  Loader2,
+  ExternalLink,
+  Pencil,
   Trash2,
   Image as ImageIcon,
   Video,
@@ -44,6 +44,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Product, User } from '@/types/database.types'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 
 interface ProductFormData {
   name: string
@@ -79,7 +80,29 @@ export default function ProductsPage() {
 
   useEffect(() => {
     fetchData()
+    fetchMenuNames()
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
 
   async function fetchData() {
     try {
@@ -266,11 +289,11 @@ export default function ProductsPage() {
 
   return (
     <>
-      <Header 
-        title="Products & Services" 
+      <Header
+        title="Products & Services"
         description={isAdmin ? "Manage your product catalog" : "View available products"}
       />
-      
+
       <div className="flex-1 p-4 lg:p-6">
         <Card>
           <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -280,7 +303,7 @@ export default function ProductsPage() {
                 Products
               </CardTitle>
               <CardDescription>
-                {isAdmin 
+                {isAdmin
                   ? 'Add products with descriptions, pitch points, and demo links'
                   : 'Browse products to discuss with leads'
                 }
@@ -342,9 +365,9 @@ export default function ProductsPage() {
                               value={point}
                               onChange={(e) => updatePitchPoint(index, e.target.value)}
                             />
-                            <Button 
-                              type="button" 
-                              variant="ghost" 
+                            <Button
+                              type="button"
+                              variant="ghost"
                               size="icon"
                               onClick={() => removePitchPoint(index)}
                               disabled={formData.pitch_points.length === 1}
@@ -387,9 +410,9 @@ export default function ProductsPage() {
                               value={image}
                               onChange={(e) => updateImage(index, e.target.value)}
                             />
-                            <Button 
-                              type="button" 
-                              variant="ghost" 
+                            <Button
+                              type="button"
+                              variant="ghost"
                               size="icon"
                               onClick={() => removeImage(index)}
                               disabled={formData.images.length === 1}
@@ -431,8 +454,8 @@ export default function ProductsPage() {
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {products.map((product) => (
-                  <Card 
-                    key={product.id} 
+                  <Card
+                    key={product.id}
                     className="cursor-pointer hover:shadow-md transition-shadow"
                     onClick={() => setSelectedProduct(product)}
                   >
@@ -440,8 +463,8 @@ export default function ProductsPage() {
                       {/* Product Image */}
                       {product.images && product.images[0] && (
                         <div className="aspect-video mb-3 rounded-lg overflow-hidden bg-muted">
-                          <img 
-                            src={product.images[0]} 
+                          <img
+                            src={product.images[0]}
                             alt={product.name}
                             className="w-full h-full object-cover"
                             onError={(e) => {
@@ -450,9 +473,9 @@ export default function ProductsPage() {
                           />
                         </div>
                       )}
-                      
+
                       <h3 className="font-semibold text-lg mb-1">{product.name}</h3>
-                      
+
                       {product.description && (
                         <p className="text-sm text-muted-foreground line-clamp-2 mb-2">
                           {product.description}
@@ -469,9 +492,9 @@ export default function ProductsPage() {
 
                       <div className="flex items-center justify-between mt-3 pt-3 border-t">
                         {product.demo_link ? (
-                          <a 
-                            href={product.demo_link} 
-                            target="_blank" 
+                          <a
+                            href={product.demo_link}
+                            target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
                             className="text-sm text-primary hover:underline flex items-center gap-1"
@@ -486,9 +509,9 @@ export default function ProductsPage() {
 
                         {isAdmin && (
                           <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                            <Button 
-                              size="icon" 
-                              variant="ghost" 
+                            <Button
+                              size="icon"
+                              variant="ghost"
                               className="h-8 w-8"
                               onClick={() => openEditDialog(product)}
                             >
@@ -541,14 +564,14 @@ export default function ProductsPage() {
                   {selectedProduct.name}
                 </DialogTitle>
               </DialogHeader>
-              
+
               <div className="space-y-4">
                 {/* Images Gallery */}
                 {selectedProduct.images && selectedProduct.images.length > 0 && (
                   <div className="space-y-2">
                     <div className="aspect-video rounded-lg overflow-hidden bg-muted">
-                      <img 
-                        src={selectedProduct.images[0]} 
+                      <img
+                        src={selectedProduct.images[0]}
                         alt={selectedProduct.name}
                         className="w-full h-full object-cover"
                         onError={(e) => {
@@ -559,9 +582,9 @@ export default function ProductsPage() {
                     {selectedProduct.images.length > 1 && (
                       <div className="flex gap-2 overflow-x-auto">
                         {selectedProduct.images.slice(1).map((img, idx) => (
-                          <img 
+                          <img
                             key={idx}
-                            src={img} 
+                            src={img}
                             alt={`${selectedProduct.name} ${idx + 2}`}
                             className="w-20 h-20 rounded object-cover"
                             onError={(e) => {
@@ -607,7 +630,7 @@ export default function ProductsPage() {
                       <Video className="h-4 w-4" />
                       Demo
                     </h4>
-                    <a 
+                    <a
                       href={selectedProduct.demo_link}
                       target="_blank"
                       rel="noopener noreferrer"

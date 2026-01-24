@@ -12,11 +12,11 @@ export interface NativeBridge {
   initiateCall?: (leadId: string, phoneNumber: string) => void
   getCallLogs?: (phoneNumber: string | null, limit: number) => string
   getLastCallStatus?: () => string
+  setupCallTracking?: () => void
+  getCallTrackingStatus?: () => string
 
   // Recording methods
-  startRecording?: (leadId: string, phoneNumber: string) => void
-  stopRecording?: () => void
-  getRecordingStatus?: () => string
+  // (Call recording disabled for now)
 
   // Location methods
   getCurrentLocation?: () => string
@@ -73,9 +73,8 @@ export function getNativeBridge(): NativeBridge | null {
     initiateCall: bridge.initiateCall?.bind(bridge),
     getCallLogs: bridge.getCallLogs?.bind(bridge),
     getLastCallStatus: bridge.getLastCallStatus?.bind(bridge),
-    startRecording: bridge.startRecording?.bind(bridge),
-    stopRecording: bridge.stopRecording?.bind(bridge),
-    getRecordingStatus: bridge.getRecordingStatus?.bind(bridge),
+    setupCallTracking: bridge.setupCallTracking?.bind(bridge),
+    getCallTrackingStatus: bridge.getCallTrackingStatus?.bind(bridge),
     getCurrentLocation: bridge.getCurrentLocation?.bind(bridge),
     startTracking: bridge.startTracking?.bind(bridge),
     stopTracking: bridge.stopTracking?.bind(bridge),

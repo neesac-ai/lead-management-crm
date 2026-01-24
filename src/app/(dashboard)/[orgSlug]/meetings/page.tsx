@@ -21,6 +21,7 @@ import { Label } from '@/components/ui/label'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { formatInTimeZone } from 'date-fns-tz'
 import { toast } from 'sonner'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -121,11 +122,34 @@ export default function MeetingsPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [phoneSearch, setPhoneSearch] = useState<string>('')
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     setMounted(true)
     fetchMeetings()
+    fetchMenuNames()
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
 
   const handleDeleteMeeting = async () => {
     if (!deleteId) return
@@ -428,7 +452,7 @@ export default function MeetingsPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header
-        title="Meetings"
+        title={getMenuLabel(menuNames, 'meetings', 'Meetings')}
         description="Manage scheduled meetings"
       />
 

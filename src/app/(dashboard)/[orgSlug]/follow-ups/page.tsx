@@ -22,6 +22,7 @@ import { ContactActions } from '@/components/leads/contact-actions'
 import { formatDistanceToNow } from 'date-fns'
 import { formatInTimeZone } from 'date-fns-tz'
 import { toast } from 'sonner'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -114,11 +115,34 @@ export default function FollowUpsPage() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [phoneSearch, setPhoneSearch] = useState<string>('')
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     setMounted(true)
     fetchFollowUps()
+    fetchMenuNames()
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
 
   const handleDeleteFollowUp = async () => {
     if (!deleteId) return
@@ -443,7 +467,7 @@ export default function FollowUpsPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header
-        title="Follow-ups"
+        title={getMenuLabel(menuNames, 'follow-ups', 'Follow-ups')}
         description="Track leads that need follow-up"
       />
 

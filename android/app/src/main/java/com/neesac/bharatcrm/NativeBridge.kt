@@ -16,13 +16,12 @@ class NativeBridge(
 
     // Initialize sub-bridges
     private lateinit var callTrackingBridge: CallTrackingBridge
-    private lateinit var recordingBridge: RecordingBridge
     private lateinit var locationBridge: LocationBridge
+    private val simSelectionManager: SimSelectionManager = SimSelectionManager(activity)
 
     init {
         // Initialize sub-bridges
         callTrackingBridge = CallTrackingBridge(activity, webView)
-        recordingBridge = RecordingBridge(activity, webView)
         locationBridge = LocationBridge(activity, webView)
     }
 
@@ -67,21 +66,27 @@ class NativeBridge(
         return callTrackingBridge.getLastCallStatus()
     }
 
-    // ========== Recording Methods ==========
-
+    /**
+     * Open the native SIM selection + permission flow for call tracking.
+     * This is invoked from the PWA Settings page.
+     */
     @JavascriptInterface
-    fun startRecording(leadId: String, phoneNumber: String) {
-        recordingBridge.startRecording(leadId, phoneNumber)
+    fun setupCallTracking() {
+        activity.runOnUiThread {
+            activity.showCallTrackingSetupDialog()
+        }
     }
 
+    /**
+     * Get current call tracking status (enabled + selected SIMs).
+     */
     @JavascriptInterface
-    fun stopRecording() {
-        recordingBridge.stopRecording()
-    }
-
-    @JavascriptInterface
-    fun getRecordingStatus(): String {
-        return recordingBridge.getRecordingStatus()
+    fun getCallTrackingStatus(): String {
+        val allowed = simSelectionManager.getAllowedPhoneAccountIds().toList()
+        val enabled = simSelectionManager.isEnabled()
+        val configured = simSelectionManager.isConfigured()
+        val allowedJson = allowed.joinToString(prefix = "[", postfix = "]") { "\"${it.replace("\"", "\\\"")}\"" }
+        return """{"enabled": $enabled, "configured": $configured, "allowed_phone_account_ids": $allowedJson}"""
     }
 
     // ========== Location Methods ==========
@@ -107,7 +112,6 @@ class NativeBridge(
         Log.d(tag, "Permission granted: $permission")
         // Notify sub-bridges
         callTrackingBridge.onPermissionGranted(permission)
-        recordingBridge.onPermissionGranted(permission)
         locationBridge.onPermissionGranted(permission)
     }
 
@@ -115,7 +119,6 @@ class NativeBridge(
         Log.d(tag, "Permission denied: $permission")
         // Notify sub-bridges
         callTrackingBridge.onPermissionDenied(permission)
-        recordingBridge.onPermissionDenied(permission)
         locationBridge.onPermissionDenied(permission)
     }
 

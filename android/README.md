@@ -2,7 +2,6 @@
 
 Native Android wrapper app that loads the PWA (bharatcrm.neesac.ai) in a WebView and provides JavaScript bridges for:
 - Call tracking (exact duration and status)
-- Call recording with automatic upload
 - Geo location tracking (foreground-only)
 
 ## Project Structure
@@ -18,8 +17,6 @@ android/
 │   │   │   │   ├── CallTrackingBridge.kt     # Call tracking bridge
 │   │   │   │   ├── CallLogReader.kt         # Call log reader
 │   │   │   │   ├── CallStateMonitor.kt       # Call state monitor
-│   │   │   │   ├── RecordingBridge.kt       # Recording bridge
-│   │   │   │   ├── CallRecordingManager.kt  # Recording manager
 │   │   │   │   ├── LocationBridge.kt        # Location bridge
 │   │   │   │   ├── LocationManager.kt        # Location manager
 │   │   │   │   └── (no background tracking service in Phase 1)
@@ -70,9 +67,7 @@ The APK will be generated at: `app/build/outputs/apk/release/app-release.apk`
 The app requires the following permissions:
 - `READ_CALL_LOG` - For call tracking
 - `READ_PHONE_STATE` - For call state monitoring
-- `RECORD_AUDIO` - For call recording
 - `ACCESS_FINE_LOCATION` - For location tracking
-- `ACCESS_BACKGROUND_LOCATION` - For background tracking (Android 10+)
 - `INTERNET` - For API calls
 
 ## JavaScript Bridge API
@@ -93,14 +88,7 @@ const status = JSON.parse(window.NativeBridge.getLastCallStatus())
 
 ### Recording
 ```javascript
-// Start recording
-window.NativeBridge.startRecording(leadId, phoneNumber)
-
-// Stop recording
-window.NativeBridge.stopRecording()
-
-// Get recording status
-const status = JSON.parse(window.NativeBridge.getRecordingStatus())
+// Call recording is disabled for now
 ```
 
 ### Location
@@ -154,8 +142,7 @@ window.onNativeEvent = (event) => {
 ## Next Steps
 
 1. Implement Phase 2: Call tracking (CallLogReader, CallStateMonitor)
-2. Implement Phase 3: Call recording (CallRecordingManager)
-3. Implement Phase 4: Location tracking (LocationManager, GeofencingService)
+2. Implement Phase 3: Location tracking (LocationManager)
 4. Create backend API endpoints
 5. Create database migrations
 6. Build and test APK

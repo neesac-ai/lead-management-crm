@@ -54,6 +54,8 @@ import { User, Lead, LeadStatus } from '@/types/database.types'
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns'
 // Note: CallRecording type removed - using native call tracking only
 import Link from 'next/link'
+import { getLeadStatuses } from '@/lib/lead-statuses'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 
 type DateFilter = 'today' | 'last_7_days' | 'last_30_days' | 'all_time' | 'custom'
 
@@ -66,15 +68,16 @@ interface SalesPerformance {
   conversionRate: number
 }
 
-const STATUS_LABELS: Record<LeadStatus, string> = {
-  new: 'New',
-  call_not_picked: 'Call Not Picked',
-  not_interested: 'Not Interested',
-  follow_up_again: 'Follow Up Again',
-  demo_booked: 'Meeting Booked',
-  demo_completed: 'Meeting Completed',
-  deal_won: 'Deal Won',
-  deal_lost: 'Deal Lost'
+// Helper function to get status label
+const getStatusLabel = (status: string, leadStatuses: Array<{ status_value: string; label: string }>): string => {
+  const statusObj = leadStatuses.find(s => s.status_value === status)
+  return statusObj?.label || status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
+// Helper function to get status color
+const getStatusColor = (status: string, leadStatuses: Array<{ status_value: string; color: string }>): string => {
+  const statusObj = leadStatuses.find(s => s.status_value === status)
+  return statusObj?.color || 'bg-gray-500'
 }
 
 const STATUS_COLORS: Record<LeadStatus, string> = {
@@ -121,6 +124,8 @@ export default function AnalyticsPage() {
   const [dateFilter, setDateFilter] = useState<DateFilter>('all_time')
   const [customDateFrom, setCustomDateFrom] = useState<string>('')
   const [customDateTo, setCustomDateTo] = useState<string>('')
+  const [leadStatuses, setLeadStatuses] = useState<Array<{ status_value: string; label: string; color: string }>>([])
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   // Call analytics state (using native call tracking)
   type CallLog = {
@@ -171,7 +176,51 @@ export default function AnalyticsPage() {
 
   useEffect(() => {
     fetchData()
+    fetchLeadStatuses()
+    fetchMenuNames()
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
+
+  // Fetch custom lead statuses
+  async function fetchLeadStatuses() {
+    try {
+      const statuses = await getLeadStatuses()
+      setLeadStatuses(statuses)
+    } catch (error) {
+      console.error('Error fetching lead statuses:', error)
+    }
+  }
+
+  // Listen for lead status updates
+  useEffect(() => {
+    const handleStatusUpdate = () => {
+      fetchLeadStatuses()
+    }
+    window.addEventListener('lead-statuses-updated', handleStatusUpdate)
+    return () => {
+      window.removeEventListener('lead-statuses-updated', handleStatusUpdate)
+    }
+  }, [])
 
   // Refresh call logs when tab changes to calls
   useEffect(() => {
@@ -887,7 +936,7 @@ export default function AnalyticsPage() {
   return (
     <>
       <Header
-        title="Analytics"
+        title={getMenuLabel(menuNames, 'analytics', 'Analytics')}
         description={canViewTeam ? "Team performance and insights" : "Your performance metrics"}
       />
 
@@ -1083,23 +1132,26 @@ export default function AnalyticsPage() {
                   </p>
                 ) : (
                   <div className="space-y-3">
-                    {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((status) => {
-                      const count = statusBreakdown[status]
+                    {Object.keys(statusBreakdown).map((status) => {
+                      const count = statusBreakdown[status as LeadStatus]
                       const percentage = totalLeads > 0 ? (count / totalLeads) * 100 : 0
 
                       if (count === 0) return null
 
+                      const statusLabel = getStatusLabel(status, leadStatuses)
+                      const statusColor = getStatusColor(status, leadStatuses)
+
                       return (
                         <div key={status} className="space-y-1">
                           <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium">{STATUS_LABELS[status]}</span>
+                            <span className="font-medium">{statusLabel}</span>
                             <span className="text-muted-foreground">
                               {count} ({percentage.toFixed(1)}%)
                             </span>
                           </div>
                           <div className="h-2 bg-muted rounded-full overflow-hidden">
                             <div
-                              className={`h-full ${STATUS_COLORS[status]} transition-all duration-500`}
+                              className={`h-full ${statusColor} transition-all duration-500`}
                               style={{ width: `${percentage}%` }}
                             />
                           </div>
@@ -1846,13 +1898,15 @@ export default function AnalyticsPage() {
               <div className="border rounded-lg p-4 space-y-2">
                 <h4 className="text-sm font-medium text-muted-foreground mb-3">Lead Status Breakdown</h4>
                 <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs sm:text-sm">
-                  {(Object.keys(STATUS_LABELS) as LeadStatus[]).map((status) => {
-                    const count = selectedRepForDetail.statusBreakdown[status]
+                  {Object.keys(selectedRepForDetail.statusBreakdown).map((status) => {
+                    const count = selectedRepForDetail.statusBreakdown[status as LeadStatus]
                     if (count === 0) return null
+                    const statusLabel = getStatusLabel(status, leadStatuses)
+                    const statusColor = getStatusColor(status, leadStatuses)
                     return (
                       <div key={status} className="flex items-center gap-2">
-                        <div className={`w-2 h-2 rounded-full shrink-0 ${STATUS_COLORS[status]}`} />
-                        <span className="text-muted-foreground truncate">{STATUS_LABELS[status]}:</span>
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
+                        <span className="text-muted-foreground truncate">{statusLabel}:</span>
                         <span className="font-medium">{count}</span>
                       </div>
                     )
@@ -1900,7 +1954,7 @@ export default function AnalyticsPage() {
                                 )}
                                 {activity.lead_status && (
                                   <Badge variant="outline" className="text-xs">
-                                    {STATUS_LABELS[activity.lead_status as LeadStatus] || activity.lead_status}
+                                    {getStatusLabel(activity.lead_status, leadStatuses)}
                                   </Badge>
                                 )}
                               </div>

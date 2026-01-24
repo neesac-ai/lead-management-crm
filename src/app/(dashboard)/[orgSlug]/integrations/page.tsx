@@ -10,6 +10,7 @@ import { FileSpreadsheet, Loader2, AlertCircle, ChevronRight } from 'lucide-reac
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { MetaLogo } from '@/components/icons/meta-logo'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 
 type PlatformStats = {
   platform: string
@@ -44,12 +45,35 @@ export default function IntegrationsPage() {
   const [platformStats, setPlatformStats] = useState<PlatformStats[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [userRole, setUserRole] = useState<string | null>(null)
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetchPlatformStats()
     fetchUserRole()
+    fetchMenuNames()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
 
   const fetchUserRole = async () => {
     const supabase = createClient()
@@ -103,7 +127,7 @@ export default function IntegrationsPage() {
   if (userRole && userRole !== 'admin' && userRole !== 'super_admin') {
     return (
       <div className="flex h-screen flex-col">
-        <Header />
+        <Header title={getMenuLabel(menuNames, 'integrations', 'Integrations')} />
         <div className="flex-1 flex items-center justify-center">
           <Card className="w-full max-w-md">
             <CardContent className="pt-6">

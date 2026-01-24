@@ -1,6 +1,7 @@
 import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { Header } from '@/components/layout/header'
+import { getMenuNamesServer, getMenuLabelServer } from '@/lib/menu-names-server'
 
 // Force dynamic rendering to prevent caching
 export const dynamic = 'force-dynamic'
@@ -48,6 +49,7 @@ export default async function TeamPage({
 }) {
   const { orgSlug } = await params
   const supabase = await createClient()
+  const menuNames = await getMenuNamesServer()
 
   // Get current user
   const { data: { user } } = await supabase.auth.getUser()
@@ -134,7 +136,7 @@ export default async function TeamPage({
     <TeamManagerWrapper orgId={org.id}>
       <div className="flex flex-col min-h-screen">
         <Header
-          title="Team Management"
+          title={getMenuLabelServer(menuNames, 'team', 'Team Management')}
           description="Manage your team members and approval requests"
         />
 

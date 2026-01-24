@@ -5,7 +5,6 @@
 # Keep native bridge classes
 -keep class com.neesac.bharatcrm.NativeBridge { *; }
 -keep class com.neesac.bharatcrm.CallTrackingBridge { *; }
--keep class com.neesac.bharatcrm.RecordingBridge { *; }
 -keep class com.neesac.bharatcrm.LocationBridge { *; }
 
 # Keep JavaScript interface methods

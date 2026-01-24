@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Loader2, MapPin, Users as UsersIcon } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 
 const TeamLocationMap = dynamic(() => import('@/components/locations/team-location-map'), { ssr: false })
 
@@ -36,6 +37,7 @@ export default function LocationsPage() {
   const [isLoadingLocations, setIsLoadingLocations] = useState(true)
   const [isRefreshingLocations, setIsRefreshingLocations] = useState(false)
   const [locations, setLocations] = useState<TeamLocation[]>([])
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
   const hasLoadedOnceRef = useRef(false)
 
   const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
@@ -59,6 +61,28 @@ export default function LocationsPage() {
       setIsLoadingProfile(false)
     }
     run()
+    fetchMenuNames()
+  }, [])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
   }, [])
 
   useEffect(() => {
@@ -122,7 +146,7 @@ export default function LocationsPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header
-        title="Locations"
+        title={getMenuLabel(menuNames, 'locations', 'Locations')}
         description={isAdmin ? 'Live team locations (updates every 5 seconds)' : 'Your live location (updates every 5 seconds)'}
       />
 

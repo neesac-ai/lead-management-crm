@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select'
 import { UserPlus, User, Loader2, Users, Target } from 'lucide-react'
 import { toast } from 'sonner'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 
 type Lead = {
   id: string
@@ -51,10 +52,33 @@ export default function AssignmentPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isAssigning, setIsAssigning] = useState(false)
   const [orgId, setOrgId] = useState<string | null>(null)
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetchData()
+    fetchMenuNames()
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
 
   const fetchData = async () => {
     const supabase = createClient()
@@ -386,7 +410,7 @@ export default function AssignmentPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header
-        title="Lead Assignment"
+        title={getMenuLabel(menuNames, 'assignment', 'Lead Assignment')}
         description="Assign leads to your sales team"
       />
 

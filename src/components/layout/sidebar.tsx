@@ -34,6 +34,7 @@ import {
   Building2,
   BarChart3,
   Zap,
+  Phone,
   LogOut,
   ChevronDown,
   Bell,
@@ -65,6 +66,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
   const [mounted, setMounted] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     setMounted(true)
@@ -162,6 +164,39 @@ export function Sidebar({ orgSlug }: SidebarProps) {
     }
   }, [])
 
+  // Fetch menu names separately
+  useEffect(() => {
+    if (!orgSlug) return
+
+    const fetchMenuNames = async () => {
+      try {
+        const response = await fetch('/api/menu-names')
+        if (response.ok) {
+          const data = await response.json()
+          const namesMap: Record<string, string> = {}
+          Object.keys(data.menuNames || {}).forEach(key => {
+            namesMap[key] = data.menuNames[key].label
+          })
+          setMenuNames(namesMap)
+        }
+      } catch (error) {
+        console.error('Error fetching menu names:', error)
+      }
+    }
+
+    fetchMenuNames()
+
+    // Listen for menu name updates
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [orgSlug])
+
   // Close mobile menu on route change
   useEffect(() => {
     setMobileOpen(false)
@@ -177,6 +212,11 @@ export function Sidebar({ orgSlug }: SidebarProps) {
 
   // Navigation items based on role
   const getNavItems = (): NavItem[] => {
+    // Helper function to get menu label (custom or default)
+    const getMenuLabel = (key: string, defaultLabel: string): string => {
+      return menuNames[key] || defaultLabel
+    }
+
     if (user?.role === 'super_admin' && !orgSlug) {
       return [
         { title: 'Dashboard', href: '/super-admin', icon: <LayoutDashboard className="w-5 h-5" /> },
@@ -188,67 +228,106 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       ]
     }
 
-    // Default org-level navigation
+    // Default org-level navigation - ordered as per requirements
     const items: NavItem[] = [
-      { title: 'Dashboard', href: `${baseUrl}/dashboard`, icon: <LayoutDashboard className="w-5 h-5" /> },
+      { title: getMenuLabel('dashboard', 'Dashboard'), href: `${baseUrl}/dashboard`, icon: <LayoutDashboard className="w-5 h-5" /> },
     ]
 
+    // 2. Leads
     if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
       items.push(
-        { title: 'Leads', href: `${baseUrl}/leads`, icon: <Target className="w-5 h-5" /> },
-        { title: 'Follow-ups', href: `${baseUrl}/follow-ups`, icon: <CalendarDays className="w-5 h-5" /> },
-        { title: 'Meetings', href: `${baseUrl}/meetings`, icon: <Zap className="w-5 h-5" /> },
-        { title: 'Products', href: `${baseUrl}/products`, icon: <Package className="w-5 h-5" /> },
-        { title: 'Analytics', href: `${baseUrl}/analytics`, icon: <BarChart3 className="w-5 h-5" /> },
+        { title: getMenuLabel('leads', 'Leads'), href: `${baseUrl}/leads`, icon: <Target className="w-5 h-5" /> },
       )
     }
 
-    // Team is visible to everyone
+    // 3. Follow-ups
+    if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('follow-ups', 'Follow-ups'), href: `${baseUrl}/follow-ups`, icon: <CalendarDays className="w-5 h-5" /> },
+      )
+    }
+
+    // 4. Meetings
+    if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('meetings', 'Meetings'), href: `${baseUrl}/meetings`, icon: <Zap className="w-5 h-5" /> },
+      )
+    }
+
+    // 5. Subscriptions
     items.push(
-      { title: 'Team', href: `${baseUrl}/team`, icon: <Users className="w-5 h-5" /> },
+      { title: getMenuLabel('subscriptions', 'Subscriptions'), href: `${baseUrl}/subscriptions`, icon: <CreditCard className="w-5 h-5" /> },
     )
 
-    // Locations visible to everyone (admins see team; members see self)
+    // 6. Analytics
+    if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('analytics', 'Analytics'), href: `${baseUrl}/analytics`, icon: <BarChart3 className="w-5 h-5" /> },
+      )
+    }
+
+    // 7. Call Tracking
+    if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('call-tracking', 'Call Tracking'), href: `${baseUrl}/call-tracking`, icon: <Phone className="w-5 h-5" /> },
+      )
+    }
+
+    // 8. Locations - visible to everyone
     items.push(
-      { title: 'Locations', href: `${baseUrl}/locations`, icon: <MapPin className="w-5 h-5" /> },
+      { title: getMenuLabel('locations', 'Locations'), href: `${baseUrl}/locations`, icon: <MapPin className="w-5 h-5" /> },
     )
 
-    // Lead Assignment for admin, super_admin, and sales (managers will see it, pages handle filtering)
+    // 9. Lead Assignment
     if (user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'sales') {
       items.push(
-        { title: 'Lead Assignment', href: `${baseUrl}/assignment`, icon: <UserPlus className="w-5 h-5" /> },
+        { title: getMenuLabel('assignment', 'Lead Assignment'), href: `${baseUrl}/assignment`, icon: <UserPlus className="w-5 h-5" /> },
       )
     }
 
-    // Integrations only for admin and super_admin
+    // 10. Integrations
     if (user?.role === 'admin' || user?.role === 'super_admin') {
       items.push(
-        { title: 'Integrations', href: `${baseUrl}/integrations`, icon: <Plug className="w-5 h-5" /> },
+        { title: getMenuLabel('integrations', 'Integrations'), href: `${baseUrl}/integrations`, icon: <Plug className="w-5 h-5" /> },
       )
     }
 
+    // 11. Products
+    if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('products', 'Products'), href: `${baseUrl}/products`, icon: <Package className="w-5 h-5" /> },
+      )
+    }
+
+    // 12. Team - visible to everyone
     items.push(
-      { title: 'Subscriptions', href: `${baseUrl}/subscriptions`, icon: <CreditCard className="w-5 h-5" /> },
+      { title: getMenuLabel('team', 'Team'), href: `${baseUrl}/team`, icon: <Users className="w-5 h-5" /> },
     )
 
-    // Approvals only for accountants
+    // 13. Payments
+    if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('payments', 'Payments'), href: `${baseUrl}/payments`, icon: <CreditCard className="w-5 h-5" /> },
+      )
+    }
+
+    // 14. Invoices
+    if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('invoices', 'Invoices'), href: `${baseUrl}/invoices`, icon: <FileText className="w-5 h-5" /> },
+      )
+    }
+
+    // Approvals only for accountants (keep this for now, not in the requested list)
     if (user?.role === 'accountant') {
       items.push(
         { title: 'Approvals', href: `${baseUrl}/approvals`, icon: <CheckCircle2 className="w-5 h-5" /> },
       )
     }
 
-    // Payments and Invoices for accountant, admin, and super_admin
-    if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
-      items.push(
-        { title: 'Payments', href: `${baseUrl}/payments`, icon: <CreditCard className="w-5 h-5" /> },
-        { title: 'Invoices', href: `${baseUrl}/invoices`, icon: <FileText className="w-5 h-5" /> },
-      )
-    }
-
-    // Settings available for all users (admin, sales)
+    // 15. Settings - available for all users
     items.push(
-      { title: 'Settings', href: `${baseUrl}/settings`, icon: <Settings className="w-5 h-5" /> },
+      { title: getMenuLabel('settings', 'Settings'), href: `${baseUrl}/settings`, icon: <Settings className="w-5 h-5" /> },
     )
 
     return items

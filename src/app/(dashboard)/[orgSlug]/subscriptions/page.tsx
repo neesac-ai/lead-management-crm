@@ -15,6 +15,31 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Textarea } from '@/components/ui/textarea'
+import {
   CreditCard,
   Loader2,
   Calendar,
@@ -30,13 +55,18 @@ import {
   Package,
   DollarSign,
   CheckCircle2,
-  XCircle
+  XCircle,
+  MoreVertical,
+  Pencil,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ContactActions } from '@/components/leads/contact-actions'
 import { toast } from 'sonner'
 import { differenceInDays, format, parseISO } from 'date-fns'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 
 type SalesUser = {
   id: string
@@ -90,6 +120,7 @@ export default function SubscriptionsPage() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
   const [filter, setFilter] = useState<string>('all')
   const [salesTeam, setSalesTeam] = useState<SalesUser[]>([])
   const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
@@ -112,12 +143,52 @@ export default function SubscriptionsPage() {
   // Hydration fix - only render Radix UI components after mount
   const [mounted, setMounted] = useState(false)
 
+  // Edit/Delete state
+  const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [deleteSubscriptionId, setDeleteSubscriptionId] = useState<string | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState<string>('')
+  const [subscriptionToDelete, setSubscriptionToDelete] = useState<Subscription | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [editFormData, setEditFormData] = useState({
+    deal_value: '',
+    start_date: '',
+    validity_days: '',
+    validity_type: 'days' as 'days' | 'months' | 'years' | 'non_recurring',
+    product_id: '',
+    notes: '',
+    amount_credited: '',
+  })
+
   const isAdmin = userProfile?.role === 'admin' || userProfile?.role === 'super_admin'
 
   useEffect(() => {
     setMounted(true)
     fetchData()
+    fetchMenuNames()
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
 
   async function fetchData() {
     try {
@@ -198,7 +269,7 @@ export default function SubscriptionsPage() {
       setProducts(productsData || [])
 
       // Fetch subscriptions with lead info and assignee name
-      // Note: product_id will only work after running migration 020
+      // Note: product_id will only work after running migrations 020 and 041
       const { data: subsData, error } = await supabase
         .from('customer_subscriptions')
         .select(`
@@ -278,41 +349,43 @@ export default function SubscriptionsPage() {
           ...pendingApprovalsData.map(a => a.lead_id).filter(Boolean)
         ] as string[]
 
-        // Fetch the most recent product_id for each lead from lead_activities
-        let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
-        if (allLeadIds.length > 0) {
-          const { data: activitiesWithProducts } = await supabase
-            .from('lead_activities')
-            .select('lead_id, product_id, products(id, name)')
-            .in('lead_id', allLeadIds)
-            .not('product_id', 'is', null)
-            .order('created_at', { ascending: false })
+        // Fetch products for subscriptions and approvals that have product_id
+        // Get unique product IDs from subscriptions and approvals
+        const productIds = new Set<string>()
+        if (subsData) {
+          subsData.forEach(sub => {
+            if (sub.product_id) productIds.add(sub.product_id)
+          })
+        }
+        if (pendingApprovalsData) {
+          pendingApprovalsData.forEach(approval => {
+            if (approval.product_id) productIds.add(approval.product_id)
+          })
+        }
 
-          // Build map of lead_id -> most recent product
-          if (activitiesWithProducts) {
-            for (const activity of activitiesWithProducts) {
-              if (activity.product_id && !leadProductMap[activity.lead_id]) {
-                const productData = (activity as any).products as { id: string; name: string } | null
-                if (productData) {
-                  leadProductMap[activity.lead_id] = {
-                    product_id: activity.product_id,
-                    product_name: productData.name
-                  }
-                }
-              }
-            }
+        // Fetch product details
+        let productsMap: Record<string, { id: string; name: string }> = {}
+        if (productIds.size > 0) {
+          const { data: productsData } = await supabase
+            .from('products')
+            .select('id, name')
+            .in('id', Array.from(productIds))
+
+          if (productsData) {
+            productsData.forEach(product => {
+              productsMap[product.id] = { id: product.id, name: product.name }
+            })
           }
         }
 
-        // Map approved subscriptions - all existing subscriptions are approved
+        // Map approved subscriptions - use product_id from subscription itself
         let approvedSubs = (subsData || []).map(sub => {
-          const leadId = sub.leads?.id || sub.lead_id
-          const productInfo = leadId ? leadProductMap[leadId] : null
+          const productInfo = sub.product_id ? productsMap[sub.product_id] : null
           return {
             ...sub,
             approval_status: 'approved' as const, // All existing subscriptions are approved
-            product_id: productInfo?.product_id || null,
-            product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
+            product_id: sub.product_id || null,
+            product: productInfo ? { id: productInfo.id, name: productInfo.name } : null,
             leads: sub.leads ? {
               ...sub.leads,
               assignee: (sub.leads as unknown as { assignee: { name: string; email: string } | null }).assignee
@@ -320,11 +393,11 @@ export default function SubscriptionsPage() {
           }
         }) as Subscription[]
 
-        // Map pending approvals as subscriptions
+        // Map pending approvals as subscriptions - use product_id from approval itself
         let pendingSubs: Subscription[] = []
         if (pendingApprovalsData && pendingApprovalsData.length > 0) {
           pendingSubs = pendingApprovalsData.map(approval => {
-            const productInfo = approval.lead_id ? leadProductMap[approval.lead_id] : null
+            const productInfo = approval.product_id ? productsMap[approval.product_id] : null
             const leadData = approval.lead_id ? pendingLeadsMap[approval.lead_id] : null
             return {
               id: approval.id, // Use approval ID as subscription ID for pending
@@ -340,8 +413,8 @@ export default function SubscriptionsPage() {
               notes: approval.notes,
               created_at: approval.created_at,
               approval_status: 'pending' as const,
-              product_id: productInfo?.product_id || null,
-              product: productInfo ? { id: productInfo.product_id, name: productInfo.product_name } : null,
+              product_id: approval.product_id || null,
+              product: productInfo ? { id: productInfo.id, name: productInfo.name } : null,
               leads: leadData ? {
                 ...leadData,
                 assignee: (leadData as unknown as { assignee: { name: string; email: string } | null }).assignee
@@ -431,6 +504,151 @@ export default function SubscriptionsPage() {
   }
 
   // Toggle pause/resume subscription
+  // Handle edit subscription
+  const handleEdit = (subscription: Subscription) => {
+    const startDate = subscription.start_date.split('T')[0]
+    const validityDays = subscription.validity_days
+    let validityType: 'days' | 'months' | 'years' | 'non_recurring' = 'days'
+    let validityValue = validityDays.toString()
+
+    if (validityDays >= 36500) {
+      validityType = 'non_recurring'
+      validityValue = ''
+    } else if (validityDays >= 365) {
+      validityType = 'years'
+      validityValue = Math.floor(validityDays / 365).toString()
+    } else if (validityDays >= 30) {
+      validityType = 'months'
+      validityValue = Math.floor(validityDays / 30).toString()
+    }
+
+    setEditFormData({
+      deal_value: subscription.deal_value.toString(),
+      start_date: startDate,
+      validity_days: validityValue,
+      validity_type: validityType,
+      product_id: subscription.product_id || 'none',
+      notes: subscription.notes || '',
+      amount_credited: subscription.amount_credited.toString(),
+    })
+    setEditingSubscription(subscription)
+    setIsEditDialogOpen(true)
+  }
+
+  // Handle save edited subscription
+  const handleSaveEdit = async () => {
+    if (!editingSubscription) return
+
+    const dealValue = parseFloat(editFormData.deal_value)
+    const amountCredited = parseFloat(editFormData.amount_credited) || 0
+    const startDate = editFormData.start_date
+
+    if (isNaN(dealValue) || dealValue < 0) {
+      toast.error('Please enter a valid deal value')
+      return
+    }
+
+    if (amountCredited < 0 || amountCredited > dealValue) {
+      toast.error('Amount credited must be between 0 and deal value')
+      return
+    }
+
+    let validityDays = 0
+    let endDate = ''
+
+    if (editFormData.validity_type === 'non_recurring') {
+      validityDays = 36500
+      endDate = new Date(new Date(startDate).getTime() + 36500 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    } else {
+      const value = parseInt(editFormData.validity_days)
+      if (isNaN(value) || value <= 0) {
+        toast.error('Please enter a valid validity period')
+        return
+      }
+
+      switch (editFormData.validity_type) {
+        case 'days':
+          validityDays = value
+          break
+        case 'months':
+          validityDays = value * 30
+          break
+        case 'years':
+          validityDays = value * 365
+          break
+      }
+
+      const start = new Date(startDate)
+      endDate = new Date(start.getTime() + validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    }
+
+    try {
+      setIsSaving(true)
+      const response = await fetch(`/api/subscriptions/${editingSubscription.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deal_value: dealValue,
+          amount_credited: amountCredited,
+          start_date: startDate,
+          end_date: endDate,
+          validity_days: validityDays,
+          product_id: editFormData.product_id && editFormData.product_id !== 'none' ? editFormData.product_id : null,
+          notes: editFormData.notes || null,
+        }),
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to update subscription')
+      }
+
+      toast.success('Subscription updated successfully')
+      setIsEditDialogOpen(false)
+      setEditingSubscription(null)
+      await fetchData()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update subscription')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Handle delete subscription
+  const handleDelete = async () => {
+    if (!deleteSubscriptionId || !subscriptionToDelete) return
+
+    // Check if user typed "delete"
+    if (deleteConfirmText.toLowerCase() !== 'delete') {
+      toast.error('Please type "delete" to confirm')
+      return
+    }
+
+    try {
+      setIsDeleting(true)
+      const response = await fetch(`/api/subscriptions/${deleteSubscriptionId}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to delete subscription')
+      }
+
+      toast.success('Subscription deleted successfully')
+      setDeleteSubscriptionId(null)
+      setSubscriptionToDelete(null)
+      setDeleteConfirmText('')
+      // Force refresh by clearing and refetching
+      setSubscriptions([])
+      await fetchData()
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete subscription')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   async function togglePause(subId: string, currentStatus: string) {
     const newStatus = currentStatus === 'paused' ? 'active' : 'paused'
 
@@ -624,8 +842,8 @@ export default function SubscriptionsPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header
-        title="Subscriptions"
-        description="Manage customer subscriptions"
+        title={getMenuLabel(menuNames, 'subscriptions', 'Subscriptions')}
+        description={`Manage ${getMenuLabel(menuNames, 'subscriptions', 'subscriptions').toLowerCase()}`}
         onRefresh={handleRefresh}
         isRefreshing={isLoading}
       />
@@ -656,7 +874,7 @@ export default function SubscriptionsPage() {
               onClick={() => setApprovalFilter('all')}
               className="h-8 sm:h-9 text-xs sm:text-sm"
             >
-              All Subscriptions
+              All
             </Button>
           </div>
           <div className="text-xs sm:text-sm text-muted-foreground">
@@ -706,10 +924,10 @@ export default function SubscriptionsPage() {
               <div>
                 <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
                   <CreditCard className="h-4 w-4 sm:h-5 sm:w-5" />
-                  Customer Subscriptions
+                  {getMenuLabel(menuNames, 'subscriptions', 'Subscriptions')}
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  {filteredSubscriptions.length} of {subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
+                  {filteredSubscriptions.length} of {subscriptions.length} {getMenuLabel(menuNames, 'subscriptions', 'subscription').toLowerCase()}{subscriptions.length !== 1 ? 's' : ''}
                 </CardDescription>
               </div>
               <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
@@ -919,7 +1137,7 @@ export default function SubscriptionsPage() {
               <div className="text-center py-8 sm:py-12 text-muted-foreground">
                 <CreditCard className="h-8 w-8 sm:h-12 sm:w-12 mx-auto mb-2 sm:mb-4 opacity-50" />
                 <p className="text-sm sm:text-lg font-medium">No subscriptions found</p>
-                <p className="text-xs sm:text-sm">Win deals to create customer subscriptions</p>
+                <p className="text-xs sm:text-sm">Win deals to create subscriptions</p>
               </div>
             ) : (
               <div className="space-y-3 sm:space-y-4">
@@ -1038,20 +1256,46 @@ export default function SubscriptionsPage() {
                             </td>
                             {isAdmin && (
                               <td className="py-3 px-2 text-center">
-                                {statusInfo.status !== 'inactive' && statusInfo.status !== 'pending_approval' && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => togglePause(sub.id, sub.status)}
-                                    title={sub.status === 'paused' ? 'Resume' : 'Pause'}
-                                  >
-                                    {sub.status === 'paused' ? (
-                                      <Play className="h-4 w-4 text-green-600" />
-                                    ) : (
-                                      <Pause className="h-4 w-4 text-yellow-600" />
-                                    )}
-                                  </Button>
-                                )}
+                                <div className="flex items-center justify-center gap-1">
+                                  {statusInfo.status !== 'inactive' && statusInfo.status !== 'pending_approval' && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => togglePause(sub.id, sub.status)}
+                                      title={sub.status === 'paused' ? 'Resume' : 'Pause'}
+                                    >
+                                      {sub.status === 'paused' ? (
+                                        <Play className="h-4 w-4 text-green-600" />
+                                      ) : (
+                                        <Pause className="h-4 w-4 text-yellow-600" />
+                                      )}
+                                    </Button>
+                                  )}
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button size="sm" variant="ghost">
+                                        <MoreVertical className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => handleEdit(sub)}>
+                                        <Pencil className="h-4 w-4 mr-2" />
+                                        Edit
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          setDeleteSubscriptionId(sub.id)
+                                          setSubscriptionToDelete(sub)
+                                          setDeleteConfirmText('')
+                                        }}
+                                        className="text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
                               </td>
                             )}
                           </tr>
@@ -1167,26 +1411,50 @@ export default function SubscriptionsPage() {
                             <Clock className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
                             {format(parseISO(sub.start_date), 'dd MMM')} - {sub.validity_days >= 36500 ? 'Non Recurring' : format(parseISO(sub.end_date), 'dd MMM yyyy')}
                           </div>
-                          {/* Only admin can pause/resume subscriptions (not for pending approvals) */}
-                          {isAdmin && statusInfo.status !== 'inactive' && statusInfo.status !== 'pending_approval' && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => togglePause(sub.id, sub.status)}
-                              className="h-7 sm:h-8 text-xs"
-                            >
-                              {sub.status === 'paused' ? (
-                                <>
-                                  <Play className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
-                                  Resume
-                                </>
-                              ) : (
-                                <>
-                                  <Pause className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
-                                  Pause
-                                </>
+                          {/* Actions - Admin Only */}
+                          {isAdmin && (
+                            <div className="flex items-center gap-2">
+                              {statusInfo.status !== 'inactive' && statusInfo.status !== 'pending_approval' && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => togglePause(sub.id, sub.status)}
+                                  className="h-7 sm:h-8 text-xs"
+                                >
+                                  {sub.status === 'paused' ? (
+                                    <>
+                                      <Play className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
+                                      Resume
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Pause className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-1" />
+                                      Pause
+                                    </>
+                                  )}
+                                </Button>
                               )}
-                            </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button size="sm" variant="outline" className="h-7 sm:h-8 text-xs">
+                                    <MoreVertical className="h-3 w-3" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleEdit(sub)}>
+                                    <Pencil className="h-4 w-4 mr-2" />
+                                    Edit
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => setDeleteSubscriptionId(sub.id)}
+                                    className="text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -1198,6 +1466,227 @@ export default function SubscriptionsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Edit Subscription Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Subscription</DialogTitle>
+            <DialogDescription>
+              Update subscription details for {editingSubscription?.leads?.name || editingSubscription?.leads?.phone}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-deal-value">Deal Value (₹)</Label>
+                <Input
+                  id="edit-deal-value"
+                  type="number"
+                  value={editFormData.deal_value}
+                  onChange={(e) => setEditFormData({ ...editFormData, deal_value: e.target.value })}
+                  placeholder="0"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-amount-credited">Amount Credited (₹)</Label>
+                <Input
+                  id="edit-amount-credited"
+                  type="number"
+                  value={editFormData.amount_credited}
+                  onChange={(e) => setEditFormData({ ...editFormData, amount_credited: e.target.value })}
+                  placeholder="0"
+                  min="0"
+                  step="0.01"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-start-date">Start Date</Label>
+              <Input
+                id="edit-start-date"
+                type="date"
+                value={editFormData.start_date}
+                onChange={(e) => setEditFormData({ ...editFormData, start_date: e.target.value })}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-validity-type">Validity Type</Label>
+                <Select
+                  value={editFormData.validity_type}
+                  onValueChange={(value: 'days' | 'months' | 'years' | 'non_recurring') =>
+                    setEditFormData({ ...editFormData, validity_type: value, validity_days: '' })
+                  }
+                >
+                  <SelectTrigger id="edit-validity-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="days">Days</SelectItem>
+                    <SelectItem value="months">Months</SelectItem>
+                    <SelectItem value="years">Years</SelectItem>
+                    <SelectItem value="non_recurring">Non Recurring</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {editFormData.validity_type !== 'non_recurring' && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-validity-days">
+                    {editFormData.validity_type === 'days' ? 'Days' :
+                     editFormData.validity_type === 'months' ? 'Months' : 'Years'}
+                  </Label>
+                  <Input
+                    id="edit-validity-days"
+                    type="number"
+                    value={editFormData.validity_days}
+                    onChange={(e) => setEditFormData({ ...editFormData, validity_days: e.target.value })}
+                    placeholder="0"
+                    min="1"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-product">Product</Label>
+              <Select
+                value={editFormData.product_id}
+                onValueChange={(value) => setEditFormData({ ...editFormData, product_id: value })}
+              >
+                <SelectTrigger id="edit-product">
+                  <SelectValue placeholder="Select product" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {products.map((product) => (
+                    <SelectItem key={product.id} value={product.id}>
+                      {product.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-notes">Notes</Label>
+              <Textarea
+                id="edit-notes"
+                value={editFormData.notes}
+                onChange={(e) => setEditFormData({ ...editFormData, notes: e.target.value })}
+                placeholder="Additional notes..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isSaving}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog - Type 'delete' to confirm */}
+      <Dialog open={!!deleteSubscriptionId} onOpenChange={(open) => {
+        if (!open) {
+          setDeleteSubscriptionId(null)
+          setSubscriptionToDelete(null)
+          setDeleteConfirmText('')
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Delete Subscription Permanently
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div>
+                {subscriptionToDelete && (
+                  <div className="my-3 p-3 bg-muted rounded-lg">
+                    <p className="font-medium">
+                      {subscriptionToDelete.leads?.name || 'Unknown Lead'}
+                    </p>
+                    {subscriptionToDelete.leads?.phone && (
+                      <p className="text-sm text-muted-foreground">{subscriptionToDelete.leads.phone}</p>
+                    )}
+                    {subscriptionToDelete.leads?.email && (
+                      <p className="text-sm text-muted-foreground">{subscriptionToDelete.leads.email}</p>
+                    )}
+                    <p className="text-sm font-medium mt-2">
+                      Deal Value: ₹{subscriptionToDelete.deal_value.toLocaleString()}
+                    </p>
+                  </div>
+                )}
+                <p className="text-sm">This will permanently delete this subscription and all associated data including:</p>
+                <ul className="list-disc list-inside mt-2 text-sm text-muted-foreground">
+                  <li>All associated payments</li>
+                  <li>All associated invoices</li>
+                  <li>Subscription history</li>
+                </ul>
+                <p className="mt-3 font-medium text-red-600">This action cannot be undone!</p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="delete-confirm" className="text-sm font-medium">
+                Type <span className="font-bold text-red-600">delete</span> to confirm:
+              </Label>
+              <Input
+                id="delete-confirm"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="Type 'delete' here"
+                className="border-red-200 focus-visible:ring-red-500"
+                disabled={isDeleting}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteSubscriptionId(null)
+                setSubscriptionToDelete(null)
+                setDeleteConfirmText('')
+              }}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isDeleting || deleteConfirmText.toLowerCase() !== 'delete'}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Permanently'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

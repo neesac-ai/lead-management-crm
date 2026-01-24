@@ -60,6 +60,7 @@ import { ContactActions } from './contact-actions'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
 import { Product } from '@/types/database.types'
+import { getLeadStatuses, getStatusOptions } from '@/lib/lead-statuses'
 
 type Lead = {
   id: string
@@ -94,23 +95,10 @@ interface LeadDetailDialogProps {
   isAdmin?: boolean // Admin can unassign leads
 }
 
-// All status options for display
-const statusOptions = [
-  { value: 'new', label: 'New', color: 'bg-blue-500' },
-  { value: 'call_not_picked', label: 'Call Not Picked', color: 'bg-yellow-500' },
-  { value: 'not_interested', label: 'Not Interested', color: 'bg-gray-500' },
-  { value: 'follow_up_again', label: 'Follow Up Again', color: 'bg-orange-500' },
-  { value: 'demo_booked', label: 'Meeting Booked', color: 'bg-purple-500' },
-  { value: 'demo_completed', label: 'Meeting Completed', color: 'bg-indigo-500' },
-  { value: 'deal_won', label: 'Deal Won', color: 'bg-emerald-500' },
-  { value: 'deal_lost', label: 'Deal Lost', color: 'bg-red-500' },
-]
-
-// Status options available for selection (excludes 'new' - leads start as new automatically)
-const selectableStatusOptions = statusOptions.filter(s => s.value !== 'new')
-
 export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditStatus = true, isAdmin = false }: LeadDetailDialogProps) {
   const [isSaving, setIsSaving] = useState(false)
+  const [statusOptions, setStatusOptions] = useState<Array<{ value: string; label: string; color: string }>>([])
+  const [selectableStatusOptions, setSelectableStatusOptions] = useState<Array<{ value: string; label: string; color: string }>>([])
   const [isUnassigning, setIsUnassigning] = useState(false)
   const [status, setStatus] = useState('new')
   const [subscriptionType, setSubscriptionType] = useState<string>('')
@@ -179,6 +167,35 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
   useEffect(() => {
     setMounted(true)
   }, [])
+
+  // Fetch lead statuses
+  useEffect(() => {
+    const loadStatuses = async () => {
+      const statuses = await getLeadStatuses()
+      const allOptions = statuses.map(s => ({
+        value: s.status_value,
+        label: s.label,
+        color: s.color,
+      }))
+      setStatusOptions(allOptions)
+      setSelectableStatusOptions(allOptions.filter(s => s.value !== 'new'))
+    }
+    if (open) {
+      loadStatuses()
+    }
+
+    // Listen for status updates
+    const handleStatusUpdate = () => {
+      if (open) {
+        loadStatuses()
+      }
+    }
+    window.addEventListener('lead-statuses-updated', handleStatusUpdate)
+
+    return () => {
+      window.removeEventListener('lead-statuses-updated', handleStatusUpdate)
+    }
+  }, [open])
 
   // Calculate end date and pending amount
   const calculateEndDate = (startDate: string, validityDays: string): string => {
@@ -522,10 +539,8 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
       // Fetch last product used for this lead
       fetchLastProduct(lead.id)
 
-      // If status is deal_won, fetch existing subscription data
-      if (lead.status === 'deal_won') {
-        fetchExistingSubscription(lead.id)
-      }
+      // Note: Removed fetchExistingSubscription to allow multiple subscriptions per lead
+      // Users can now create multiple subscriptions for the same lead
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, lead?.id])
@@ -736,91 +751,45 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
         ? new Date(new Date(subscriptionStartDate).getTime() + 36500 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         : calculateEndDate(subscriptionStartDate, validity)
 
-      if (existingSubscriptionId) {
-        // Update existing subscription
-        const { error: subError } = await supabase
-          .from('customer_subscriptions')
-          .update({
-            start_date: subscriptionStartDate,
-            end_date: endDateValue,
-            validity_days: validityDays,
-            deal_value: parseFloat(dealValue),
-            amount_credited: parseFloat(amountCredited || '0'),
-            notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existingSubscriptionId)
+      // Always create a new subscription (allow multiple subscriptions per lead)
+      // Get org_id from lead for new subscription
+      const { data: leadData } = await supabase
+        .from('leads')
+        .select('org_id')
+        .eq('id', lead.id)
+        .single()
 
-        if (subError) {
-          console.error('Failed to update subscription:', subError)
-          toast.error('Failed to update subscription')
-        } else {
-          toast.success('Subscription updated successfully!')
+      if (leadData?.org_id) {
+        // Always create a new approval entry (allow multiple subscriptions per lead)
+        // Include product_id if a product was selected
+        const approvalData: Record<string, unknown> = {
+          org_id: leadData.org_id,
+          lead_id: lead.id,
+          subscription_type: subscriptionType,
+          start_date: subscriptionStartDate,
+          end_date: endDateValue,
+          validity_days: validityDays,
+          deal_value: parseFloat(dealValue),
+          amount_credited: parseFloat(amountCredited || '0'),
+          notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
+          status: 'pending',
+          created_by: profile.id,
         }
-      } else {
-        // Get org_id from lead for new subscription
-        const { data: leadData } = await supabase
-          .from('leads')
-          .select('org_id')
-          .eq('id', lead.id)
-          .single()
 
-        if (leadData?.org_id) {
-          // Check if approval entry already exists
-          const { data: existingApproval } = await supabase
-            .from('subscription_approvals')
-            .select('id, status')
-            .eq('lead_id', lead.id)
-            .eq('status', 'pending')
-            .single()
+        // Add product_id if a product was selected (and not 'na')
+        if (selectedProductId && selectedProductId !== 'na') {
+          approvalData.product_id = selectedProductId
+        }
 
-          if (existingApproval) {
-            // Update existing pending approval
-            const { error: approvalError } = await supabase
-              .from('subscription_approvals')
-              .update({
-                subscription_type: subscriptionType,
-                start_date: subscriptionStartDate,
-                end_date: endDateValue,
-                validity_days: validityDays,
-                deal_value: parseFloat(dealValue),
-                amount_credited: parseFloat(amountCredited || '0'),
-                notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', existingApproval.id)
+        const { error: approvalError } = await supabase
+          .from('subscription_approvals')
+          .insert(approvalData)
 
-            if (approvalError) {
-              console.error('Failed to update approval:', approvalError)
-              toast.error('Lead updated but approval update failed')
-            } else {
-              toast.success('Subscription approval request updated! Waiting for accountant approval.')
-            }
-          } else {
-            // Create new approval entry (not direct subscription)
-            const { error: approvalError } = await supabase
-              .from('subscription_approvals')
-              .insert({
-                org_id: leadData.org_id,
-                lead_id: lead.id,
-                subscription_type: subscriptionType,
-                start_date: subscriptionStartDate,
-                end_date: endDateValue,
-                validity_days: validityDays,
-                deal_value: parseFloat(dealValue),
-                amount_credited: parseFloat(amountCredited || '0'),
-                notes: validity === 'non_recurring' ? 'Non-recurring subscription' : null,
-                status: 'pending',
-                created_by: profile.id,
-              })
-
-            if (approvalError) {
-              console.error('Failed to create approval:', approvalError)
-              toast.error('Lead updated but approval creation failed')
-            } else {
-              toast.success('Subscription approval request created! Waiting for accountant approval.')
-            }
-          }
+        if (approvalError) {
+          console.error('Failed to create approval:', approvalError)
+          toast.error('Lead updated but approval creation failed')
+        } else {
+          toast.success('Subscription approval request created! Waiting for accountant approval.')
         }
       }
     }

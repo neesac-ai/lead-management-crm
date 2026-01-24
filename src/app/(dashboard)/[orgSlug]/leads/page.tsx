@@ -40,6 +40,8 @@ import { LeadDetailDialog } from '@/components/leads/lead-detail-dialog'
 import { Target, Plus, Loader2, Phone, Mail, User, UserCircle, AlertTriangle, Upload, FileSpreadsheet, CheckCircle, AlertCircle, X, UserCheck, Users, Filter, Calendar, Package, Trash2, TrendingUp, CheckCircle2, XCircle, Clock } from 'lucide-react'
 import { differenceInDays, format, parseISO } from 'date-fns'
 import { toast } from 'sonner'
+import { getLeadStatuses } from '@/lib/lead-statuses'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 
 type Lead = {
   id: string
@@ -130,20 +132,8 @@ const statusColors: Record<string, string> = {
   deal_lost: 'bg-red-500',
 }
 
-const statusOptions = [
-  { value: 'all', label: 'All Statuses' },
-  { value: 'new', label: 'New' },
-  { value: 'call_not_picked', label: 'Call Not Picked' },
-  { value: 'not_interested', label: 'Not Interested' },
-  { value: 'follow_up_again', label: 'Follow Up Again' },
-  { value: 'demo_booked', label: 'Meeting Booked' },
-  { value: 'demo_completed', label: 'Meeting Completed' },
-  { value: 'deal_won', label: 'Deal Won' },
-  { value: 'deal_lost', label: 'Deal Lost' },
-]
-
 // Helper to get display label for status
-const getStatusLabel = (status: string): string => {
+const getStatusLabel = (statusOptions: Array<{ value: string; label: string }>, status: string): string => {
   const option = statusOptions.find(o => o.value === status)
   return option?.label || status.replace(/_/g, ' ')
 }
@@ -160,6 +150,7 @@ export default function LeadsPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   const [formData, setFormData] = useState({
     name: '',
@@ -189,6 +180,9 @@ export default function LeadsPage() {
   const [leadAgeDays, setLeadAgeDays] = useState<string>('')
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
+  const [statusOptions, setStatusOptions] = useState<Array<{ value: string; label: string }>>([
+    { value: 'all', label: 'All Statuses' },
+  ])
   const [showFilters, setShowFilters] = useState(false)
   const [phoneSearch, setPhoneSearch] = useState<string>('')
 
@@ -234,7 +228,29 @@ export default function LeadsPage() {
 
   useEffect(() => {
     fetchUserAndLeads()
+    fetchMenuNames()
   }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
 
   const fetchUserAndLeads = async () => {
     const supabase = createClient()
@@ -256,6 +272,29 @@ export default function LeadsPage() {
     }
     setIsLoading(false)
   }
+
+  // Fetch lead statuses
+  useEffect(() => {
+    const loadStatuses = async () => {
+      const statuses = await getLeadStatuses()
+      const options = [
+        { value: 'all', label: 'All Statuses' },
+        ...statuses.map(s => ({ value: s.status_value, label: s.label })),
+      ]
+      setStatusOptions(options)
+    }
+    loadStatuses()
+
+    // Listen for status updates
+    const handleStatusUpdate = () => {
+      loadStatuses()
+    }
+    window.addEventListener('lead-statuses-updated', handleStatusUpdate)
+
+    return () => {
+      window.removeEventListener('lead-statuses-updated', handleStatusUpdate)
+    }
+  }, [])
 
   const fetchLeads = async (profile: UserProfile) => {
     const supabase = createClient()
@@ -1394,7 +1433,7 @@ export default function LeadsPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header
-        title="Leads"
+        title={getMenuLabel(menuNames, 'leads', 'Leads')}
         description={isAdmin ? "View all leads and assign to sales team" : "Manage your assigned leads"}
         onRefresh={handleRefresh}
         isRefreshing={isLoading}
@@ -1467,7 +1506,7 @@ export default function LeadsPage() {
                         <SelectValue placeholder="Subscription" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All Subscriptions</SelectItem>
+                        <SelectItem value="all">All</SelectItem>
                         <SelectItem value="trial">Trial</SelectItem>
                         <SelectItem value="paid">Paid</SelectItem>
                         <SelectItem value="not_set">Not Specified</SelectItem>
@@ -1775,7 +1814,7 @@ export default function LeadsPage() {
                       {/* Right Section: Status Badges - Stacked on mobile */}
                       <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 shrink-0 sm:items-start">
                         <Badge className={`text-xs w-fit ${statusColors[lead.status] || 'bg-gray-500'}`}>
-                          {getStatusLabel(lead.status)}
+                          {getStatusLabel(statusOptions, lead.status)}
                         </Badge>
                         {/* Subscription status for deal won leads */}
                         {lead.status === 'deal_won' && lead.subscription && (
@@ -2398,7 +2437,7 @@ export default function LeadsPage() {
                       <li>All activities and notes</li>
                       <li>All meetings/demos</li>
                       <li>All call recordings</li>
-                      <li>All subscriptions</li>
+                      <li>All</li>
                     </ul>
                     <div className="text-sm font-medium text-red-600 dark:text-red-400 mb-4">
                       This action cannot be undone.

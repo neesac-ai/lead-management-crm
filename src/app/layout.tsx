@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegistration } from "@/components/pwa/service-worker-registration";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 import { GlobalCallTracker } from "@/components/global-call-tracker";
+import { GlobalDeviceCallLogTracker } from "@/components/global-device-call-log-tracker";
 import { GlobalLocationTracker } from "@/components/global-location-tracker";
 import "./globals.css";
 
@@ -71,6 +72,7 @@ export default function RootLayout({
         <ServiceWorkerRegistration />
         <InstallPrompt />
         <GlobalCallTracker />
+        <GlobalDeviceCallLogTracker />
         <GlobalLocationTracker />
       </body>
     </html>

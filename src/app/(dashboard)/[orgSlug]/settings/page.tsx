@@ -2,6 +2,7 @@
 
 import { useEffect, useState, use } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -9,35 +10,24 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import {
   Building2,
   Calendar,
   CheckCircle2,
   XCircle,
   Loader2,
   ExternalLink,
-  Sparkles,
-  FolderOpen,
-  Folder,
-  ChevronRight,
-  RefreshCw,
+  Phone,
   User,
   Key,
   Pencil,
   X,
-  Download,
-  Smartphone,
   MapPin,
 } from 'lucide-react'
-import { isNativeApp } from '@/lib/native-bridge'
+import { isNativeApp, getNativeBridge } from '@/lib/native-bridge'
+import { globalNativeEventListener } from '@/lib/global-native-events'
 import { toast } from 'sonner'
-import Link from 'next/link'
+import { LeadStatusesManager } from '@/components/settings/lead-statuses-manager'
+import { MenuNamesManager } from '@/components/settings/menu-names-manager'
 
 interface PageProps {
   params: Promise<{ orgSlug: string }>
@@ -58,11 +48,6 @@ type OrgInfo = {
   contact_email?: string | null
 }
 
-type DriveFolder = {
-  id: string
-  name: string
-}
-
 export default function SettingsPage({ params }: PageProps) {
   const { orgSlug } = use(params)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -72,7 +57,11 @@ export default function SettingsPage({ params }: PageProps) {
   const [orgName, setOrgName] = useState('')
   const [orgEmail, setOrgEmail] = useState('')
   const [isSavingOrg, setIsSavingOrg] = useState(false)
-  const [hasAIConfig, setHasAIConfig] = useState(false)
+  const [callTrackingStatus, setCallTrackingStatus] = useState<{
+    enabled: boolean
+    configured: boolean
+    allowed_phone_account_ids: string[]
+  } | null>(null)
 
   // Profile editing states
   const [profileName, setProfileName] = useState('')
@@ -86,25 +75,66 @@ export default function SettingsPage({ params }: PageProps) {
   const [isChangingPassword, setIsChangingPassword] = useState(false)
   const [showPasswordSection, setShowPasswordSection] = useState(false)
 
-  // Drive folder states
-  const [syncSettings, setSyncSettings] = useState<{
-    id?: string
-    folder_id: string | null
-    folder_name: string | null
-    last_sync_at: string | null
-  } | null>(null)
-  const [showFolderBrowser, setShowFolderBrowser] = useState(false)
-  const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([])
-  const [loadingFolders, setLoadingFolders] = useState(false)
-  const [savingFolder, setSavingFolder] = useState(false)
-
   // Location tracking (team member only)
   const [isLocationTrackingEnabled, setIsLocationTrackingEnabled] = useState(false)
   const [isLoadingLocationTracking, setIsLoadingLocationTracking] = useState(true)
   const [isSavingLocationTracking, setIsSavingLocationTracking] = useState(false)
+  const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
   useEffect(() => {
     fetchData()
+    fetchMenuNames()
+  }, [orgSlug])
+
+  // Fetch menu names
+  const fetchMenuNames = async () => {
+    try {
+      const names = await getMenuNames()
+      setMenuNames(names)
+    } catch (error) {
+      console.error('Error fetching menu names:', error)
+    }
+  }
+
+  // Listen for menu name updates
+  useEffect(() => {
+    const handleMenuNamesUpdate = () => {
+      fetchMenuNames()
+    }
+    window.addEventListener('menu-names-updated', handleMenuNamesUpdate)
+    return () => {
+      window.removeEventListener('menu-names-updated', handleMenuNamesUpdate)
+    }
+  }, [])
+
+  // Call tracking status (native only)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!isNativeApp()) return
+
+    const bridge = getNativeBridge()
+    const refresh = () => {
+      try {
+        const raw = bridge?.getCallTrackingStatus?.()
+        if (!raw) return
+        const parsed = JSON.parse(raw) as any
+        setCallTrackingStatus({
+          enabled: !!parsed.enabled,
+          configured: !!parsed.configured,
+          allowed_phone_account_ids: Array.isArray(parsed.allowed_phone_account_ids) ? parsed.allowed_phone_account_ids : [],
+        })
+      } catch (e) {
+        console.warn('Failed to parse call tracking status', e)
+      }
+    }
+
+    refresh()
+    const cleanup = globalNativeEventListener.addHandler((event) => {
+      if (event.type === 'CALL_TRACKING_SETUP') {
+        refresh()
+      }
+    })
+    return cleanup
   }, [orgSlug])
 
   const fetchData = async () => {
@@ -138,25 +168,7 @@ export default function SettingsPage({ params }: PageProps) {
       }
 
       if (profile.role === 'admin' && profile.org_id) {
-        const { data: aiConfigs } = await supabase
-          .from('ai_config')
-          .select('id')
-          .eq('org_id', profile.org_id)
-          .eq('is_active', true)
-          .limit(1)
-
-        setHasAIConfig(!!(aiConfigs && aiConfigs.length > 0))
-      }
-
-      // Get drive sync settings
-      const { data: sync } = await (supabase as any)
-        .from('drive_sync_settings')
-        .select('id, folder_id, folder_name, last_sync_at')
-        .eq('user_id', profile.id)
-        .single()
-
-      if (sync) {
-        setSyncSettings(sync)
+        // AI configuration settings removed for now
       }
     }
 
@@ -317,7 +329,6 @@ export default function SettingsPage({ params }: PageProps) {
     } else {
       toast.success('Google account disconnected')
       setUserProfile(prev => prev ? { ...prev, google_refresh_token: null } : null)
-      setSyncSettings(null)
     }
   }
 
@@ -342,106 +353,8 @@ export default function SettingsPage({ params }: PageProps) {
     setIsSavingOrg(false)
   }
 
-  const handleBrowseFolders = async () => {
-    setShowFolderBrowser(true)
-    setLoadingFolders(true)
-
-    try {
-      const response = await fetch('/api/google/drive/folders')
-      const data = await response.json()
-
-      if (data.error) {
-        toast.error(data.error)
-        setShowFolderBrowser(false)
-      } else {
-        setDriveFolders(data.folders || [])
-      }
-    } catch (error) {
-      console.error('Error fetching folders:', error)
-      toast.error('Failed to load folders')
-      setShowFolderBrowser(false)
-    }
-
-    setLoadingFolders(false)
-  }
-
-  const handleSelectFolder = async (folder: DriveFolder) => {
-    if (!userProfile?.id || !userProfile?.org_id) return
-
-    setSavingFolder(true)
-    const supabase = createClient()
-
-    if (syncSettings?.id) {
-      const { error } = await (supabase as any)
-        .from('drive_sync_settings')
-        .update({
-          folder_id: folder.id,
-          folder_name: folder.name,
-        })
-        .eq('id', syncSettings.id)
-
-      if (error) {
-        toast.error('Failed to save folder')
-      } else {
-        toast.success(`Connected to folder: ${folder.name}`)
-        setSyncSettings(prev => prev ? { ...prev, folder_id: folder.id, folder_name: folder.name } : null)
-        setShowFolderBrowser(false)
-        // Trigger initial sync
-        triggerSync()
-      }
-    } else {
-      const { data, error } = await (supabase as any)
-        .from('drive_sync_settings')
-        .insert({
-          user_id: userProfile.id,
-          org_id: userProfile.org_id,
-          folder_id: folder.id,
-          folder_name: folder.name,
-        })
-        .select('id, folder_id, folder_name, last_sync_at')
-        .single()
-
-      if (error) {
-        toast.error('Failed to save folder')
-      } else {
-        toast.success(`Connected to folder: ${folder.name}`)
-        setSyncSettings(data)
-        setShowFolderBrowser(false)
-        // Trigger initial sync
-        triggerSync()
-      }
-    }
-    setSavingFolder(false)
-  }
-
-  const triggerSync = async () => {
-    try {
-      await fetch('/api/recordings/sync', { method: 'POST' })
-    } catch (error) {
-      console.error('Initial sync error:', error)
-    }
-  }
-
-  const handleDisconnectFolder = async () => {
-    if (!syncSettings?.id) return
-
-    const supabase = createClient()
-    const { error } = await (supabase as any)
-      .from('drive_sync_settings')
-      .delete()
-      .eq('id', syncSettings.id)
-
-    if (error) {
-      toast.error('Failed to disconnect folder')
-    } else {
-      toast.success('Folder disconnected')
-      setSyncSettings(null)
-    }
-  }
-
   const isAdmin = userProfile?.role === 'admin'
   const isGoogleConnected = !!userProfile?.google_refresh_token
-  const isFolderConnected = !!syncSettings?.folder_id
 
   if (isLoading) {
     return (
@@ -650,60 +563,7 @@ export default function SettingsPage({ params }: PageProps) {
           </CardContent>
         </Card>
 
-        {/* Live Location Tracking (team member only) */}
-        <Card>
-          <CardHeader className="px-4 lg:px-6">
-            <div className="flex items-center gap-2">
-              <MapPin className="h-5 w-5 text-purple-500" />
-              <CardTitle>Live Location Tracking</CardTitle>
-            </div>
-            <CardDescription>
-              When enabled, your location is tracked while the app is open. Admins can view team locations in real time.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="px-4 lg:px-6">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                {isLoadingLocationTracking ? (
-                  <>
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    <div>
-                      <p className="font-medium">Loading…</p>
-                      <p className="text-sm text-muted-foreground">Fetching your tracking setting</p>
-                    </div>
-                  </>
-                ) : isLocationTrackingEnabled ? (
-                  <>
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    <div>
-                      <p className="font-medium">Enabled</p>
-                      <p className="text-sm text-muted-foreground">Your location will update while the app is open</p>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <XCircle className="h-5 w-5 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium">Disabled</p>
-                      <p className="text-sm text-muted-foreground">Enable to share your live location (app open)</p>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <Button
-                variant={isLocationTrackingEnabled ? 'outline' : 'default'}
-                disabled={isLoadingLocationTracking || isSavingLocationTracking}
-                onClick={() => handleToggleLocationTracking(!isLocationTrackingEnabled)}
-              >
-                {isSavingLocationTracking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {isLocationTrackingEnabled ? 'Disable' : 'Enable'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* 1. Google Calendar Connection */}
+        {/* 2. Google Calendar Connection */}
         <Card>
           <CardHeader className="px-4 lg:px-6">
             <div className="flex items-center gap-2">
@@ -758,41 +618,40 @@ export default function SettingsPage({ params }: PageProps) {
           </CardContent>
         </Card>
 
-        {/* 2. Call Recording Drive Folder */}
+        {/* 3. Lead Statuses Management (Admin only) */}
+        {isAdmin && <LeadStatusesManager orgSlug={orgSlug} isAdmin={isAdmin} />}
+
+        {/* 4. Sidebar Menu Names (Admin only) */}
+        {isAdmin && <MenuNamesManager orgSlug={orgSlug} isAdmin={isAdmin} />}
+
+        {/* 5. Call Tracking (Android app only) */}
         <Card>
           <CardHeader className="px-4 lg:px-6">
             <div className="flex items-center gap-2">
-              <FolderOpen className="h-5 w-5 text-amber-500" />
-              <CardTitle>Call Recording Folder</CardTitle>
+              <Phone className="h-5 w-5 text-green-600" />
+              <CardTitle>Call Tracking</CardTitle>
             </div>
             <CardDescription>
-              Connect your Google Drive folder where call recordings are saved
+              Enable tracking for inbound and outbound calls (Android app only). You'll choose which SIM to allow.
             </CardDescription>
           </CardHeader>
           <CardContent className="px-4 lg:px-6">
-            {!isGoogleConnected ? (
-              <div className="text-center py-6 text-muted-foreground">
-                <Calendar className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                <p>Connect Google account first to access Drive folders</p>
+            {!isNativeApp() ? (
+              <div className="text-sm text-muted-foreground">
+                Call tracking is available in the Android app. Install/open the Android app to enable.
               </div>
             ) : (
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
-                  {isFolderConnected ? (
+                  {callTrackingStatus?.enabled ? (
                     <>
                       <CheckCircle2 className="h-5 w-5 text-green-500" />
                       <div>
-                        <p className="font-medium flex items-center gap-2">
-                          <Folder className="h-4 w-4" />
-                          {syncSettings?.folder_name}
-                        </p>
+                        <p className="font-medium">Enabled</p>
                         <p className="text-sm text-muted-foreground">
-                          Recordings auto-sync from this folder
-                          {syncSettings?.last_sync_at && (
-                            <span className="ml-1">
-                              • Last: {new Date(syncSettings.last_sync_at).toLocaleString()}
-                            </span>
-                          )}
+                          {callTrackingStatus.allowed_phone_account_ids?.length
+                            ? `Allowed SIMs: ${callTrackingStatus.allowed_phone_account_ids.length}`
+                            : 'Allowed SIMs: All (no SIM filter)'}
                         </p>
                       </div>
                     </>
@@ -800,136 +659,86 @@ export default function SettingsPage({ params }: PageProps) {
                     <>
                       <XCircle className="h-5 w-5 text-muted-foreground" />
                       <div>
-                        <p className="font-medium">No Folder Selected</p>
+                        <p className="font-medium">Disabled</p>
                         <p className="text-sm text-muted-foreground">
-                          Select the folder where your call recordings are saved
+                          Enable to track all calls from selected SIM(s)
                         </p>
                       </div>
                     </>
                   )}
                 </div>
 
-                {isFolderConnected ? (
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={handleBrowseFolders}>
-                      Change
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={handleDisconnectFolder}>
-                      Disconnect
-                    </Button>
-                  </div>
-                ) : (
-                  <Button onClick={handleBrowseFolders}>
-                    <FolderOpen className="h-4 w-4 mr-2" />
-                    Select Folder
-                  </Button>
-                )}
+                <Button
+                  onClick={() => {
+                    const bridge = getNativeBridge()
+                    if (!bridge?.setupCallTracking) {
+                      toast.error('Native call tracking setup not available')
+                      return
+                    }
+                    toast.info('Select SIM and grant permissions on the prompt')
+                    bridge.setupCallTracking()
+                  }}
+                >
+                  {callTrackingStatus?.enabled ? 'Manage' : 'Enable'}
+                </Button>
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* AI Configuration (Admin Only) */}
-        {isAdmin && (
-          <Card>
-            <CardHeader className="px-4 lg:px-6">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-5 w-5 text-purple-500" />
-                <CardTitle>AI Configuration</CardTitle>
+        {/* 6. Live Location Tracking (team member only) */}
+        <Card>
+          <CardHeader className="px-4 lg:px-6">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-5 w-5 text-purple-500" />
+              <CardTitle>Live Location Tracking</CardTitle>
+            </div>
+            <CardDescription>
+              When enabled, your location is tracked while the app is open. Admins can view team locations in real time.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 lg:px-6">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                {isLoadingLocationTracking ? (
+                  <>
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <div>
+                      <p className="font-medium">Loading…</p>
+                      <p className="text-sm text-muted-foreground">Fetching your tracking setting</p>
+                    </div>
+                  </>
+                ) : isLocationTrackingEnabled ? (
+                  <>
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    <div>
+                      <p className="font-medium">Enabled</p>
+                      <p className="text-sm text-muted-foreground">Your location will update while the app is open</p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="h-5 w-5 text-muted-foreground" />
+                    <div>
+                      <p className="font-medium">Disabled</p>
+                      <p className="text-sm text-muted-foreground">Enable to share your live location (app open)</p>
+                    </div>
+                  </>
+                )}
               </div>
-              <CardDescription>
-                Configure AI providers for call transcription and analysis
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 lg:px-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {hasAIConfig ? (
-                    <>
-                      <CheckCircle2 className="h-5 w-5 text-green-500" />
-                      <div>
-                        <p className="font-medium">Configured</p>
-                        <p className="text-sm text-muted-foreground">
-                          AI providers are set up
-                        </p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <XCircle className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">Not Configured</p>
-                        <p className="text-sm text-muted-foreground">
-                          Set up AI for call analysis
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </div>
 
-                <Button asChild>
-                  <Link href={`/${orgSlug}/settings/ai`}>
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    {hasAIConfig ? 'Manage AI' : 'Configure AI'}
-                    <ExternalLink className="h-3 w-3 ml-2" />
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              <Button
+                variant={isLocationTrackingEnabled ? 'outline' : 'default'}
+                disabled={isLoadingLocationTracking || isSavingLocationTracking}
+                onClick={() => handleToggleLocationTracking(!isLocationTrackingEnabled)}
+              >
+                {isSavingLocationTracking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isLocationTrackingEnabled ? 'Disable' : 'Enable'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
-
-      {/* Folder Browser Dialog */}
-      <Dialog open={showFolderBrowser} onOpenChange={setShowFolderBrowser}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Select Recording Folder</DialogTitle>
-            <DialogDescription>
-              Choose the Google Drive folder where your call recordings are saved
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="py-4">
-            {loadingFolders ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : driveFolders.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Folder className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                <p>No folders found in your Drive</p>
-                <p className="text-xs mt-2">Create a folder in Google Drive first</p>
-              </div>
-            ) : (
-              <div className="space-y-1 max-h-[300px] overflow-y-auto">
-                {driveFolders.map((folder) => (
-                  <button
-                    key={folder.id}
-                    onClick={() => handleSelectFolder(folder)}
-                    disabled={savingFolder}
-                    className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors text-left"
-                  >
-                    <Folder className="h-5 w-5 text-amber-500 flex-shrink-0" />
-                    <span className="flex-1 truncate">{folder.name}</span>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-between items-center pt-2 border-t">
-            <Button variant="ghost" size="sm" onClick={handleBrowseFolders} disabled={loadingFolders}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loadingFolders ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-            <Button variant="outline" onClick={() => setShowFolderBrowser(false)}>
-              Cancel
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

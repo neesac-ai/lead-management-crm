@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import androidx.appcompat.app.AlertDialog
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -20,6 +21,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var nativeBridge: NativeBridge
     private lateinit var callTrackingBridge: CallTrackingBridge
     private lateinit var locationBridge: LocationBridge
+    private lateinit var simSelectionManager: SimSelectionManager
+    private var deviceCallLogMonitor: DeviceCallLogMonitor? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -41,6 +44,37 @@ class MainActivity : AppCompatActivity() {
                     locationBridge.onPermissionDenied(permission)
                 }
             }
+        }
+
+        if (pendingCallTrackingSetup) {
+            val phoneGranted = hasPhonePermission()
+            val callLogGranted = hasCallLogPermission()
+
+            if (!phoneGranted) {
+                // User denied phone permission → stop setup
+                pendingCallTrackingSetup = false
+                simSelectionManager.setEnabled(false)
+                sendCallTrackingSetupEventToJS(success = false, enabled = false)
+                return@registerForActivityResult
+            }
+
+            // We have phone permission now → show SIM picker (even if previously configured, allow re-selection)
+            if (!callLogGranted) {
+                // Only show SIM picker if we don't have Call Log permission yet
+                // (if we already have it, we're probably just re-enabling, so skip SIM picker)
+                showSimSelectionDialog()
+                return@registerForActivityResult
+            }
+
+            // SIMs chosen; wait for call-log permission to start tracking
+            if (callLogGranted && simSelectionManager.isEnabled()) {
+                maybeStartDeviceCallLogMonitor()
+                sendCallTrackingSetupEventToJS(success = true, enabled = true)
+                pendingCallTrackingSetup = false
+            }
+        } else {
+            // Normal flow (e.g. outbound call tracking)
+            maybeStartDeviceCallLogMonitor()
         }
     }
 
@@ -78,6 +112,8 @@ class MainActivity : AppCompatActivity() {
         nativeBridge = NativeBridge(this, webView)
         callTrackingBridge = CallTrackingBridge(this, webView)
         locationBridge = LocationBridge(this, webView)
+        simSelectionManager = SimSelectionManager(this)
+        deviceCallLogMonitor = DeviceCallLogMonitor(this, webView)
 
         webView.addJavascriptInterface(nativeBridge, "NativeBridge")
         webView.addJavascriptInterface(callTrackingBridge, "CallTrackingBridge")
@@ -203,6 +239,18 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Catch-up scan any time the app becomes active.
+        maybeStartDeviceCallLogMonitor()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Avoid unnecessary polling while app is backgrounded; we’ll catch up on next resume.
+        deviceCallLogMonitor?.stop()
+    }
+
     fun requestPermissions(permissions: Array<String>) {
         val permissionsToRequest = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -219,7 +267,150 @@ class MainActivity : AppCompatActivity() {
                     locationBridge.onPermissionGranted(permission)
                 }
             }
+
+            maybeStartDeviceCallLogMonitor()
         }
+    }
+
+    private fun hasPhonePermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasCallLogPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun maybeStartDeviceCallLogMonitor() {
+        if (!::simSelectionManager.isInitialized) return
+        if (!simSelectionManager.isEnabled()) return
+
+        val hasCallLog = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val hasPhoneState = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        if (!hasCallLog || !hasPhoneState) return
+
+        deviceCallLogMonitor?.start()
+        // Also run an immediate scan (helps after permission grant)
+        deviceCallLogMonitor?.scanAndSend()
+    }
+
+    /**
+     * Explicit call-tracking setup flow (invoked from the PWA Settings page).
+     *
+     * IMPORTANT: We do NOT auto-prompt on app launch anymore (per product requirement).
+     */
+    fun showCallTrackingSetupDialog() {
+        pendingCallTrackingSetup = true
+
+        // Step 1: ensure we have phone permission before trying to read SIM list
+        if (!hasPhonePermission()) {
+            requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE))
+            return
+        }
+
+        // We already have READ_PHONE_STATE → show SIM picker
+        showSimSelectionDialog()
+    }
+
+    private fun showSimSelectionDialog() {
+        try {
+            android.util.Log.d("MainActivity", "showSimSelectionDialog() called")
+            val accounts = simSelectionManager.getAvailablePhoneAccounts()
+            android.util.Log.d("MainActivity", "Found ${accounts.size} phone accounts: ${accounts.map { "${it.label} (${it.id})" }}")
+
+        val optionLabels = mutableListOf<String>()
+        val optionAccountSets = mutableListOf<Set<String>>()
+
+        if (accounts.isNotEmpty()) {
+            accounts.forEachIndexed { idx, acc ->
+                val label = "SIM ${idx + 1} - ${acc.label}"
+                optionLabels.add(label)
+                optionAccountSets.add(setOf(acc.id))
+            }
+            if (accounts.size > 1) {
+                optionLabels.add("Both SIMs")
+                optionAccountSets.add(accounts.map { it.id }.toSet())
+            }
+        } else {
+            // Fallback when we can't enumerate accounts; allow "All SIMs" mode.
+            android.util.Log.w("MainActivity", "No phone accounts found, using fallback 'All SIMs' option")
+            // Show a more descriptive message when we can't detect individual SIMs
+            optionLabels.add("Track all calls (SIM detection unavailable)")
+            optionAccountSets.add(emptySet()) // empty means "no SIM filter" (allow-all)
+        }
+
+        if (optionLabels.isEmpty()) {
+            android.util.Log.e("MainActivity", "No SIM options available, cannot show dialog")
+            pendingCallTrackingSetup = false
+            sendCallTrackingSetupEventToJS(success = false, enabled = false)
+            return
+        }
+
+        var selectedIdx = 0
+        android.util.Log.d("MainActivity", "Showing SIM selection dialog with ${optionLabels.size} options")
+        AlertDialog.Builder(this)
+            .setTitle("Select SIM for Call Tracking")
+            .setMessage("Choose which SIM(s) to track calls from. We will track all inbound and outbound calls from the selected SIM(s).")
+            .setSingleChoiceItems(optionLabels.toTypedArray(), 0) { _, which ->
+                selectedIdx = which
+                android.util.Log.d("MainActivity", "User selected option $which: ${optionLabels[which]}")
+            }
+            .setPositiveButton("Continue") { _, _ ->
+                val selectedSet = optionAccountSets.getOrNull(selectedIdx) ?: emptySet()
+                android.util.Log.d("MainActivity", "User confirmed SIM selection: ${optionLabels[selectedIdx]}, account IDs: $selectedSet")
+
+                // Persist selection and enable
+                simSelectionManager.setAllowedPhoneAccountIds(selectedSet)
+                simSelectionManager.setEnabled(true)
+
+                // Step 2: request Call Log permission now that SIM choice is known
+                if (!hasCallLogPermission()) {
+                    android.util.Log.d("MainActivity", "Requesting READ_CALL_LOG permission")
+                    requestPermissions(arrayOf(Manifest.permission.READ_CALL_LOG))
+                } else {
+                    android.util.Log.d("MainActivity", "Call Log permission already granted, starting monitor")
+                    maybeStartDeviceCallLogMonitor()
+                    pendingCallTrackingSetup = false
+                    sendCallTrackingSetupEventToJS(success = true, enabled = true)
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                android.util.Log.d("MainActivity", "User cancelled SIM selection")
+                pendingCallTrackingSetup = false
+                simSelectionManager.setEnabled(false)
+                sendCallTrackingSetupEventToJS(success = false, enabled = false)
+            }
+            .setCancelable(false)
+            .show()
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error showing SIM selection dialog", e)
+            pendingCallTrackingSetup = false
+            sendCallTrackingSetupEventToJS(success = false, enabled = false)
+        }
+    }
+
+    private var pendingCallTrackingSetup: Boolean = false
+
+    private fun sendCallTrackingSetupEventToJS(success: Boolean, enabled: Boolean) {
+        val allowed = simSelectionManager.getAllowedPhoneAccountIds()
+        val dataJson = """
+            {
+              "success": ${if (success) "true" else "false"},
+              "enabled": ${if (enabled) "true" else "false"},
+              "allowed_phone_account_ids": ${allowed.map { "\"${it.replace("\"", "\\\"")}\"" }.joinToString(prefix = "[", postfix = "]")}
+            }
+        """.trimIndent()
+
+        val script = """
+            try {
+              if (typeof window.onNativeEvent === 'function') {
+                window.onNativeEvent({ type: 'CALL_TRACKING_SETUP', data: $dataJson });
+              } else if (typeof window.dispatchEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('nativeappevent', { detail: { type: 'CALL_TRACKING_SETUP', data: $dataJson } }));
+              }
+            } catch (e) {}
+        """.trimIndent()
+
+        runOnUiThread { webView.evaluateJavascript(script, null) }
     }
 }
 
