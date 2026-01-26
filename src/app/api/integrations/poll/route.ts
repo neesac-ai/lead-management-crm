@@ -11,6 +11,7 @@ import { InstagramIntegration } from '@/lib/integrations/instagram';
 import { GoogleSheetsIntegration } from '@/lib/integrations/google-sheets';
 import { mapLeadData, validateMappedLead, getSourceFromPlatform } from '@/lib/integrations/mapper';
 import { assignLead } from '@/lib/integrations/assignment';
+import { checkDuplicateByPhone } from '@/lib/leads/duplicate-check';
 
 // Verify this is called from a trusted source (cron job, admin, etc.)
 const POLLING_SECRET = process.env.POLLING_SECRET || '';
@@ -132,17 +133,42 @@ export async function POST(request: NextRequest) {
         // Process each lead
         for (const leadData of leadsData) {
           try {
-            // Check for duplicate
-            const { data: existingLead } = await supabase
+            // Check for duplicate by external_id first
+            const { data: existingLeadByExternalId } = await supabase
               .from('leads')
               .select('id')
               .eq('org_id', integration.org_id)
               .eq('external_id', leadData.external_id)
               .single();
 
-            if (existingLead) {
+            if (existingLeadByExternalId) {
               leadsUpdated++;
               continue;
+            }
+
+            // Also check for duplicate by phone number (if phone is provided)
+            // This prevents creating duplicates when the same phone comes from different sources
+            if (leadData.phone) {
+              console.log('[POLL] Checking for duplicate by phone:', leadData.phone, 'orgId:', integration.org_id, 'external_id:', leadData.external_id)
+              const duplicateByPhone = await checkDuplicateByPhone(
+                supabase,
+                supabase, // Already using admin client
+                leadData.phone,
+                integration.org_id
+              );
+              
+              if (duplicateByPhone) {
+                console.log('[POLL] ⚠️ Duplicate found by phone:', duplicateByPhone.id, 'Skipping external_id:', leadData.external_id)
+              } else {
+                console.log('[POLL] ✅ No duplicate by phone for:', leadData.phone)
+              }
+
+              if (duplicateByPhone) {
+                // Skip duplicate by phone - log but don't create
+                console.log(`Skipping duplicate lead by phone: ${leadData.phone} (external_id: ${leadData.external_id})`);
+                leadsUpdated++;
+                continue;
+              }
             }
 
             // Map and validate

@@ -463,24 +463,76 @@ export default function LeadsPage() {
     console.log('[LEADS PAGE] Fetching products for', leadIds.length, 'leads...')
     let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
     if (leadIds.length > 0) {
-      // First fetch activities with product_id
-      console.log('[LEADS PAGE] Querying lead_activities table...')
-      const { data: activitiesData, error: activitiesError } = await supabase
-        .from('lead_activities')
-        .select('lead_id, product_id')
-        .in('lead_id', leadIds)
-        .not('product_id', 'is', null)
-        .order('created_at', { ascending: false })
+      // Batch the query if there are too many leads (Supabase has limits on .in() clause size)
+      // Process in batches of 100 to avoid query size limits
+      const BATCH_SIZE = 100
+      let activitiesData: any[] = []
+      let activitiesError = null
+      
+      console.log('[LEADS PAGE] Querying lead_activities table for', leadIds.length, 'leads in batches of', BATCH_SIZE, '...')
+      
+      try {
+        for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
+          const batch = leadIds.slice(i, i + BATCH_SIZE)
+          const result = await supabase
+            .from('lead_activities')
+            .select('lead_id, product_id')
+            .in('lead_id', batch)
+            .not('product_id', 'is', null)
+            .order('created_at', { ascending: false })
+          
+          if (result.error) {
+            activitiesError = result.error
+            console.error(`[LEADS PAGE] Error fetching activities batch ${Math.floor(i / BATCH_SIZE) + 1}:`, result.error)
+            break // Stop processing if there's an error
+          }
+          
+          if (result.data) {
+            activitiesData = activitiesData.concat(result.data)
+          }
+        }
+      } catch (err) {
+        console.error('[LEADS PAGE] Exception while fetching activities:', err)
+        activitiesError = err as any
+      }
 
-      if (activitiesError) {
+      // Check if there's a real error (not just an empty object)
+      // An empty object {} might be returned even when there's no actual error
+      const hasError = activitiesError && (
+        (typeof activitiesError === 'object' && activitiesError !== null && Object.keys(activitiesError).length > 0) ||
+        activitiesError.message || 
+        activitiesError.code || 
+        activitiesError.details
+      )
+
+      if (hasError) {
         console.error('[LEADS PAGE] ❌ ERROR fetching activities:', activitiesError)
+        // Log more details about the error
+        if (activitiesError.message) {
+          console.error('[LEADS PAGE] Error message:', activitiesError.message)
+        }
+        if (activitiesError.code) {
+          console.error('[LEADS PAGE] Error code:', activitiesError.code)
+        }
+        if (activitiesError.details) {
+          console.error('[LEADS PAGE] Error details:', activitiesError.details)
+        }
+        if (activitiesError.hint) {
+          console.error('[LEADS PAGE] Error hint:', activitiesError.hint)
+        }
+        // Log the full error object for debugging
+        console.error('[LEADS PAGE] Full error object:', JSON.stringify(activitiesError, null, 2))
+        // Continue execution even if activities fetch fails - products are optional
+        console.warn('[LEADS PAGE] ⚠️ Continuing without product data due to activities fetch error')
+        // Set activitiesData to empty array on error to prevent downstream issues
+        activitiesData = []
       } else {
         console.log('[LEADS PAGE] ✅ Activities fetched:', activitiesData?.length || 0)
       }
 
-      // Get unique product IDs
+      // Get unique product IDs (only if activities were fetched successfully)
       const productIds = new Set<string>()
-      if (activitiesData) {
+      if (activitiesData && !hasError) {
         for (const activity of activitiesData) {
           if (activity.product_id && !leadProductMap[activity.lead_id]) {
             productIds.add(activity.product_id)
@@ -510,8 +562,8 @@ export default function LeadsPage() {
         }
       }
 
-      // Build map of lead_id -> most recent product
-      if (activitiesData) {
+      // Build map of lead_id -> most recent product (only if activities were fetched successfully)  
+      if (activitiesData && !hasError) {
         for (const activity of activitiesData) {
           if (activity.product_id && !leadProductMap[activity.lead_id]) {
             const productData = productsMap[activity.product_id]
@@ -688,46 +740,30 @@ export default function LeadsPage() {
     return cleaned
   }
 
-  // Check for duplicate phone number - optimized with single query
+  // Check for duplicate phone number using API endpoint (bypasses RLS)
+  // This ensures sales users can detect duplicates even if assigned to others
   const checkDuplicate = async (phone: string): Promise<DuplicateLead | null> => {
     if (!phone || !orgId) return null
 
-    const supabase = createClient()
-    const normalizedPhone = normalizePhone(phone)
+    try {
+      const response = await fetch('/api/leads/check-duplicate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ phone }),
+      })
 
-    // Search for leads with matching phone using ILIKE for flexibility
-    const { data: matches } = await supabase
-      .from('leads')
-      .select('id, name, phone, assigned_to')
-      .eq('org_id', orgId)
-      .or(`phone.ilike.%${phone.replace(/[^\d]/g, '').slice(-10)}%`)
-      .limit(5)
+      if (!response.ok) {
+        console.error('Error checking duplicate:', response.statusText)
+        return null
+      }
 
-    // Find exact match with normalized phone
-    const match = matches?.find(lead => {
-      if (!lead.phone) return false
-      return normalizePhone(lead.phone) === normalizedPhone
-    })
-
-    if (!match) return null
-
-    // Fetch assignee name separately if needed
-    let assigneeName = null
-    if (match.assigned_to) {
-      const { data: assigneeData } = await supabase
-        .from('users')
-        .select('name, email')
-        .eq('id', match.assigned_to)
-        .single()
-      assigneeName = assigneeData ? `${assigneeData.name} (${assigneeData.email})` : null
-    }
-
-    return {
-      id: match.id,
-      name: match.name,
-      phone: match.phone,
-      assigned_to: match.assigned_to,
-      assignee_name: assigneeName,
+      const data = await response.json()
+      return data.duplicate || null
+    } catch (error) {
+      console.error('Error checking duplicate lead:', error)
+      return null
     }
   }
 
@@ -826,10 +862,42 @@ export default function LeadsPage() {
   const addLead = async (forceAdd = false) => {
     if (!orgId || !userProfile) return
 
-    // Note: Duplicate prevention is handled in handleSubmit, so we don't check here
-    // This allows the function to proceed when called legitimately from handleSubmit
     setIsSaving(true)
     const supabase = createClient()
+
+    // CRITICAL: Re-check for duplicates right before insert to prevent race conditions
+    // This is a final safety check even if handleSubmit already checked
+    console.log('[LEAD INSERT] Starting addLead for phone:', formData.phone, 'forceAdd:', forceAdd)
+    
+    if (!forceAdd) {
+      console.log('[LEAD INSERT] Re-checking duplicate before insert (race condition protection)...')
+      const duplicate = await checkDuplicate(formData.phone)
+      
+      if (duplicate) {
+        console.error('[LEAD INSERT] ❌ DUPLICATE DETECTED at insert time! Phone:', formData.phone, 'Existing lead ID:', duplicate.id)
+        setDuplicateLead(duplicate)
+        
+        // For sales rep - show error and skip
+        if (userProfile.role === 'sales') {
+          if (duplicate.assigned_to) {
+            toast.error(`Lead already assigned to ${duplicate.assignee_name || 'another rep'}. Skipped.`)
+          } else {
+            toast.error('Lead already exists in the system. Skipped.')
+          }
+          setIsSaving(false)
+          isSubmittingRef.current = false
+          return
+        }
+        
+        // For admin - show dialog
+        setShowDuplicateDialog(true)
+        setIsSaving(false)
+        return
+      }
+      console.log('[LEAD INSERT] ✅ No duplicate found, proceeding with insert')
+    } else {
+      console.log('[LEAD INSERT] ⚠️ forceAdd=true, skipping duplicate check (admin chose to add anyway)')
+    }
 
     // Only non-manager sales reps auto-assign to themselves
     // Admins and managers (sales with reportees) leave leads unassigned
@@ -853,7 +921,16 @@ export default function LeadsPage() {
       }
     }
 
-    const { error } = await supabase
+    console.log('[LEAD INSERT] Inserting lead with data:', {
+      org_id: orgId,
+      phone: formData.phone,
+      name: formData.name || formData.phone,
+      source: formData.source,
+      assigned_to: assignTo,
+      created_by: userProfile.id
+    })
+
+    const { data: insertedLead, error } = await supabase
       .from('leads')
       .insert({
         org_id: orgId,
@@ -866,11 +943,15 @@ export default function LeadsPage() {
         created_by: userProfile.id,
         assigned_to: assignTo,
       })
+      .select('id')
+      .single()
 
     if (error) {
+      console.error('[LEAD INSERT] ❌ ERROR inserting lead:', error)
       toast.error('Failed to add lead')
       console.error(error)
     } else {
+      console.log('[LEAD INSERT] ✅ Lead inserted successfully. ID:', insertedLead?.id)
       toast.success('Lead added successfully')
       setFormData({ name: '', company: '', email: '', phone: '', source: 'manual', status: 'new' })
       setIsDialogOpen(false)

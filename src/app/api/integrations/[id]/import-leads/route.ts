@@ -6,9 +6,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { mapLeadData, getSourceFromPlatform, validateMappedLead } from '@/lib/integrations/mapper';
 import { assignLead } from '@/lib/integrations/assignment';
+import { checkDuplicateByPhone } from '@/lib/leads/duplicate-check';
 import type { LeadData } from '@/lib/integrations/base';
 
 type ImportLead = {
@@ -91,15 +92,37 @@ export async function POST(
           continue;
         }
 
-        // Dedupe by external_id
-        const { data: existingLead } = await supabase
+        // Dedupe by external_id first
+        const { data: existingLeadByExternalId } = await supabase
           .from('leads')
           .select('id')
           .eq('org_id', integration.org_id)
           .eq('external_id', l.external_id)
           .single();
 
-        if (existingLead) {
+        if (existingLeadByExternalId) {
+          skippedDuplicates++;
+          continue;
+        }
+
+        // Also check for duplicate by phone number
+        // This prevents creating duplicates when the same phone comes from different sources
+        console.log('[IMPORT-LEADS] Checking for duplicate by phone:', phone, 'orgId:', integration.org_id)
+        const adminClient = await createAdminClient()
+        const duplicateByPhone = await checkDuplicateByPhone(
+          supabase,
+          adminClient, // Using admin client to bypass RLS
+          phone,
+          integration.org_id
+        );
+        
+        if (duplicateByPhone) {
+          console.log('[IMPORT-LEADS] ⚠️ Duplicate found by phone:', duplicateByPhone.id, 'Skipping external_id:', l.external_id)
+        } else {
+          console.log('[IMPORT-LEADS] ✅ No duplicate by phone for:', phone)
+        }
+
+        if (duplicateByPhone) {
           skippedDuplicates++;
           continue;
         }

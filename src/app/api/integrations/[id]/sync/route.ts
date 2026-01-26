@@ -10,6 +10,7 @@ import { InstagramIntegration } from '@/lib/integrations/instagram';
 import { GoogleSheetsIntegration } from '@/lib/integrations/google-sheets';
 import { mapLeadData, validateMappedLead, getSourceFromPlatform } from '@/lib/integrations/mapper';
 import { assignLead } from '@/lib/integrations/assignment';
+import { checkDuplicateByPhone } from '@/lib/leads/duplicate-check';
 
 export async function POST(
   request: NextRequest,
@@ -288,6 +289,23 @@ export async function POST(
             syncedLeads.push({ ...(existingLead as any), was_created: false });
           }
           continue;
+        }
+
+        // Also check for duplicate by phone number (if phone is provided)
+        // This prevents creating duplicates when the same phone comes from different sources
+        if (leadData.phone) {
+          const duplicateByPhone = await checkDuplicateByPhone(
+            supabase,
+            adminClient, // Using admin client to bypass RLS
+            leadData.phone,
+            integration.org_id
+          );
+
+          if (duplicateByPhone) {
+            // Skip duplicate by phone
+            leadsUpdated++;
+            continue;
+          }
         }
 
         // Map lead data

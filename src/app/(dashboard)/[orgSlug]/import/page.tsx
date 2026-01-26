@@ -225,8 +225,50 @@ export default function ImportPage() {
     const supabase = createClient()
     let success = 0
     let failed = 0
+    let skippedDuplicates = 0
+
+    // Build phone lookup map for duplicate checking
+    const phoneToExisting = new Map<string, { id: string }>()
+    
+    // Fetch all existing leads with phones for this org (using API to bypass RLS)
+    if (leads.some(l => l.phone)) {
+      try {
+        const response = await fetch('/api/leads/check-duplicate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone: 'dummy' }), // We'll check individually
+        })
+        // We'll check each lead individually via API
+      } catch (e) {
+        console.error('Error setting up duplicate check:', e)
+      }
+    }
 
     for (const lead of leads) {
+      // CRITICAL: Re-check for duplicates right before insert (race condition protection)
+      if (lead.phone) {
+        try {
+          const response = await fetch('/api/leads/check-duplicate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ phone: lead.phone }),
+          })
+          
+          if (response.ok) {
+            const data = await response.json()
+            if (data.duplicate) {
+              console.log('[IMPORT] ⚠️ Duplicate detected at insert time for phone:', lead.phone, 'Skipping')
+              skippedDuplicates++
+              continue
+            }
+          }
+        } catch (error) {
+          console.error('[IMPORT] Error checking duplicate for:', lead.phone, error)
+          // Continue with insert if check fails (better to have duplicate than lose data)
+        }
+      }
+
+      console.log('[IMPORT] Inserting lead:', lead.name, 'phone:', lead.phone)
       const { error } = await supabase
         .from('leads')
         .insert({
@@ -242,21 +284,23 @@ export default function ImportPage() {
 
       if (error) {
         failed++
-        console.error('Failed to import lead:', lead.name, error)
+        console.error('[IMPORT] ❌ Failed to import lead:', lead.name, error)
       } else {
         success++
+        console.log('[IMPORT] ✅ Successfully imported lead:', lead.name)
       }
     }
 
-    setImportResult({ success, failed, skipped: skippedCount })
+    const totalSkipped = skippedCount + skippedDuplicates
+    setImportResult({ success, failed, skipped: totalSkipped })
     setImportPreview(null)
     setSelectedDuplicates(new Set())
 
     if (success > 0) {
       toast.success(`Imported ${success} leads successfully`)
     }
-    if (skippedCount > 0) {
-      toast.info(`${skippedCount} duplicate leads skipped`)
+    if (totalSkipped > 0) {
+      toast.info(`${totalSkipped} duplicate leads skipped (${skippedCount} from preview, ${skippedDuplicates} detected at insert)`)
     }
     if (failed > 0) {
       toast.error(`Failed to import ${failed} leads`)

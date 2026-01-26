@@ -4,10 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { FacebookIntegration } from '@/lib/integrations/facebook';
 import { mapLeadData, validateMappedLead, getSourceFromPlatform } from '@/lib/integrations/mapper';
 import { assignLead } from '@/lib/integrations/assignment';
+import { checkDuplicateByPhone } from '@/lib/leads/duplicate-check';
 
 const facebookIntegration = new FacebookIntegration();
 
@@ -202,15 +203,15 @@ export async function POST(request: NextRequest) {
       created_at: leadJson.created_time,
     };
 
-    // Check for duplicate lead (by external_id)
-    const { data: existingLead } = await supabase
+    // Check for duplicate lead by external_id first
+    const { data: existingLeadByExternalId } = await supabase
       .from('leads')
       .select('id')
       .eq('org_id', integration.org_id)
       .eq('external_id', leadData.external_id)
       .single();
 
-    if (existingLead) {
+    if (existingLeadByExternalId) {
       // Lead already exists, log but don't create duplicate
       await logSyncOperation(
         supabase,
@@ -222,7 +223,41 @@ export async function POST(request: NextRequest) {
         'Lead already exists'
       );
 
-      return NextResponse.json({ message: 'Lead already exists', lead_id: existingLead.id });
+      return NextResponse.json({ message: 'Lead already exists', lead_id: existingLeadByExternalId.id });
+    }
+
+    // Also check for duplicate by phone number (if phone is provided)
+    // This prevents creating duplicates when the same phone comes from different sources
+    if (leadData.phone) {
+      console.log('[WEBHOOK] Checking for duplicate by phone:', leadData.phone, 'orgId:', integration.org_id)
+      const adminClient = await createAdminClient()
+      const duplicateByPhone = await checkDuplicateByPhone(
+        supabase,
+        adminClient, // Using admin client to bypass RLS
+        leadData.phone,
+        integration.org_id
+      );
+      
+      if (duplicateByPhone) {
+        console.log('[WEBHOOK] ⚠️ Duplicate found by phone:', duplicateByPhone.id)
+      } else {
+        console.log('[WEBHOOK] ✅ No duplicate by phone')
+      }
+
+      if (duplicateByPhone) {
+        // Lead already exists by phone, log but don't create duplicate
+        await logSyncOperation(
+          supabase,
+          integration.id,
+          'webhook',
+          'success',
+          0,
+          1, // 1 updated (skipped)
+          'Lead already exists (duplicate phone)'
+        );
+
+        return NextResponse.json({ message: 'Lead already exists (duplicate phone)', lead_id: duplicateByPhone.id });
+      }
     }
 
     // Map lead data to CRM structure
