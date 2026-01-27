@@ -424,11 +424,17 @@ export default function MeetingsPage() {
         if (meetingDate > toDate) return false
       }
 
-      // Phone search filter
+      // Search filter: phone or lead name
       if (phoneSearch) {
-        const searchTerm = phoneSearch.replace(/[^\d]/g, '')
-        const leadPhone = (m.leads?.phone || '').replace(/[^\d]/g, '')
-        if (!leadPhone.includes(searchTerm)) return false
+        const searchText = phoneSearch.trim().toLowerCase()
+        const searchDigits = phoneSearch.replace(/[^\d]/g, '')
+        const leadPhoneDigits = (m.leads?.phone || '').replace(/[^\d]/g, '')
+        const leadName = (m.leads?.name || '').toLowerCase()
+
+        const matchesPhone = searchDigits ? leadPhoneDigits.includes(searchDigits) : false
+        const matchesName = searchText ? leadName.includes(searchText) : false
+
+        if (!matchesPhone && !matchesName) return false
       }
 
       return true

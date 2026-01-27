@@ -79,14 +79,32 @@ class NativeBridge(
 
     /**
      * Get current call tracking status (enabled + selected SIMs).
+     * Also returns available phone accounts so the PWA can show SIM1/SIM2 labels.
      */
     @JavascriptInterface
     fun getCallTrackingStatus(): String {
         val allowed = simSelectionManager.getAllowedPhoneAccountIds().toList()
         val enabled = simSelectionManager.isEnabled()
         val configured = simSelectionManager.isConfigured()
+
+        // Enumerate available phone accounts (SIM slots) if the OS exposes them
+        val availableAccounts = simSelectionManager.getAvailablePhoneAccounts()
+        val accountsJson = availableAccounts.joinToString(prefix = "[", postfix = "]") { acc ->
+            val safeId = acc.id.replace("\"", "\\\"")
+            val safeLabel = acc.label.replace("\"", "\\\"")
+            """{"id":"$safeId","label":"$safeLabel"}"""
+        }
+
         val allowedJson = allowed.joinToString(prefix = "[", postfix = "]") { "\"${it.replace("\"", "\\\"")}\"" }
-        return """{"enabled": $enabled, "configured": $configured, "allowed_phone_account_ids": $allowedJson}"""
+
+        return """
+            {
+              "enabled": $enabled,
+              "configured": $configured,
+              "allowed_phone_account_ids": $allowedJson,
+              "available_phone_accounts": $accountsJson
+            }
+        """.trimIndent()
     }
 
     // ========== Location Methods ==========

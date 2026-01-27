@@ -302,13 +302,14 @@ export default function LeadsPage() {
 
     // Fetch leads first
     console.log('[LEADS PAGE] Querying leads table...')
-    let query = supabase
-      .from('leads')
-      .select(`
-        id, name, email, phone, source, status, subscription_type, custom_fields, created_at, created_by, assigned_to
-      `)
-      .eq('org_id', profile.org_id)
-      .order('created_at', { ascending: false })
+    const baseLeadsQuery = () =>
+      supabase
+        .from('leads')
+        .select(`
+          id, name, email, phone, source, status, subscription_type, custom_fields, created_at, created_by, assigned_to
+        `)
+        .eq('org_id', profile.org_id)
+        .order('created_at', { ascending: false })
 
     // Fetch reportees for managers to enable client-side filtering and explicit query filtering
     let reporteeIds: string[] = []
@@ -337,8 +338,25 @@ export default function LeadsPage() {
     // So we fetch all leads that pass RLS, then filter in JavaScript to include unassigned leads created by managers
     // We don't add query filters here because RLS might block them - we'll filter client-side instead
 
-    console.log('[LEADS PAGE] Executing leads query...')
-    const { data: leadsData, error } = await query
+    console.log('[LEADS PAGE] Executing leads query in batches (to avoid 1000 row cap)...')
+    const batchSize = 1000
+    let offset = 0
+    let leadsData: any[] = []
+    let error: any = null
+
+    while (true) {
+      const result = await baseLeadsQuery().range(offset, offset + batchSize - 1)
+
+      if (result.error) {
+        error = result.error
+        break
+      }
+
+      const batch = result.data || []
+      leadsData = leadsData.concat(batch)
+      if (batch.length < batchSize) break
+      offset += batchSize
+    }
 
     if (error) {
       console.error('[LEADS PAGE] ❌ ERROR fetching leads:', error)
@@ -459,122 +477,33 @@ export default function LeadsPage() {
     // Get lead IDs to fetch their products from lead_activities
     const leadIds = (filteredLeadsData || []).map((l: any) => l.id)
 
-    // Fetch the most recent product_id for each lead from lead_activities
-    console.log('[LEADS PAGE] Fetching products for', leadIds.length, 'leads...')
+    // Fetch the most recent product for each lead via a server API (bypasses RLS issues on lead_activities).
+    console.log('[LEADS PAGE] Fetching products for', leadIds.length, 'leads (server API)...')
     let leadProductMap: Record<string, { product_id: string; product_name: string }> = {}
     if (leadIds.length > 0) {
-      // Batch the query if there are too many leads (Supabase has limits on .in() clause size)
-      // Process in batches of 100 to avoid query size limits
-      const BATCH_SIZE = 100
-      let activitiesData: any[] = []
-      let activitiesError = null
-      
-      console.log('[LEADS PAGE] Querying lead_activities table for', leadIds.length, 'leads in batches of', BATCH_SIZE, '...')
-      
       try {
+        // Keep payloads reasonable
+        const BATCH_SIZE = 500
         for (let i = 0; i < leadIds.length; i += BATCH_SIZE) {
           const batch = leadIds.slice(i, i + BATCH_SIZE)
-          const result = await supabase
-            .from('lead_activities')
-            .select('lead_id, product_id')
-            .in('lead_id', batch)
-            .not('product_id', 'is', null)
-            .order('created_at', { ascending: false })
-          
-          if (result.error) {
-            activitiesError = result.error
-            console.error(`[LEADS PAGE] Error fetching activities batch ${Math.floor(i / BATCH_SIZE) + 1}:`, result.error)
-            break // Stop processing if there's an error
-          }
-          
-          if (result.data) {
-            activitiesData = activitiesData.concat(result.data)
-          }
-        }
-      } catch (err) {
-        console.error('[LEADS PAGE] Exception while fetching activities:', err)
-        activitiesError = err as any
-      }
-
-      // Check if there's a real error (not just an empty object)
-      // An empty object {} might be returned even when there's no actual error
-      const hasError = activitiesError && (
-        (typeof activitiesError === 'object' && activitiesError !== null && Object.keys(activitiesError).length > 0) ||
-        activitiesError.message || 
-        activitiesError.code || 
-        activitiesError.details
-      )
-
-      if (hasError) {
-        console.error('[LEADS PAGE] ❌ ERROR fetching activities:', activitiesError)
-        // Log more details about the error
-        if (activitiesError.message) {
-          console.error('[LEADS PAGE] Error message:', activitiesError.message)
-        }
-        if (activitiesError.code) {
-          console.error('[LEADS PAGE] Error code:', activitiesError.code)
-        }
-        if (activitiesError.details) {
-          console.error('[LEADS PAGE] Error details:', activitiesError.details)
-        }
-        if (activitiesError.hint) {
-          console.error('[LEADS PAGE] Error hint:', activitiesError.hint)
-        }
-        // Log the full error object for debugging
-        console.error('[LEADS PAGE] Full error object:', JSON.stringify(activitiesError, null, 2))
-        // Continue execution even if activities fetch fails - products are optional
-        console.warn('[LEADS PAGE] ⚠️ Continuing without product data due to activities fetch error')
-        // Set activitiesData to empty array on error to prevent downstream issues
-        activitiesData = []
-      } else {
-        console.log('[LEADS PAGE] ✅ Activities fetched:', activitiesData?.length || 0)
-      }
-
-      // Get unique product IDs (only if activities were fetched successfully)
-      const productIds = new Set<string>()
-      if (activitiesData && !hasError) {
-        for (const activity of activitiesData) {
-          if (activity.product_id && !leadProductMap[activity.lead_id]) {
-            productIds.add(activity.product_id)
-          }
-        }
-      }
-
-      // Fetch products separately
-      let productsMap: Record<string, { id: string; name: string }> = {}
-      if (productIds.size > 0) {
-        console.log('[LEADS PAGE] Querying products table for', productIds.size, 'products...')
-        const { data: productsData, error: productsError } = await supabase
-          .from('products')
-          .select('id, name')
-          .in('id', Array.from(productIds))
-
-        if (productsError) {
-          console.error('[LEADS PAGE] ❌ ERROR fetching products:', productsError)
-        } else {
-          console.log('[LEADS PAGE] ✅ Products fetched:', productsData?.length || 0)
-        }
-
-        if (productsData) {
-          productsData.forEach(product => {
-            productsMap[product.id] = product
+          const res = await fetch('/api/leads/products-by-lead-ids', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ leadIds: batch }),
           })
-        }
-      }
 
-      // Build map of lead_id -> most recent product (only if activities were fetched successfully)  
-      if (activitiesData && !hasError) {
-        for (const activity of activitiesData) {
-          if (activity.product_id && !leadProductMap[activity.lead_id]) {
-            const productData = productsMap[activity.product_id]
-            if (productData) {
-              leadProductMap[activity.lead_id] = {
-                product_id: activity.product_id,
-                product_name: productData.name
-              }
-            }
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}))
+            console.error('[LEADS PAGE] ❌ Error fetching lead products batch:', err)
+            continue
           }
+
+          const data = await res.json()
+          const batchMap = (data?.leadProducts || {}) as Record<string, { product_id: string; product_name: string }>
+          leadProductMap = { ...leadProductMap, ...batchMap }
         }
+      } catch (e) {
+        console.error('[LEADS PAGE] ❌ Exception fetching lead products via API:', e)
       }
     }
 
@@ -899,26 +828,13 @@ export default function LeadsPage() {
       console.log('[LEAD INSERT] ⚠️ forceAdd=true, skipping duplicate check (admin chose to add anyway)')
     }
 
-    // Only non-manager sales reps auto-assign to themselves
-    // Admins and managers (sales with reportees) leave leads unassigned
+    // IMPORTANT:
+    // Always assign sales-created leads to the creator.
+    // Some orgs/policies require `assigned_to` to be set for sales inserts, and
+    // leaving it NULL can cause RLS insert failures for manager-type sales reps.
     let assignTo: string | null = null
     if (userProfile.role === 'sales') {
-      // Check if this sales rep is a manager (has reportees)
-      try {
-        const { data: reportees } = await supabase
-          .rpc('get_all_reportees', { manager_user_id: userProfile.id } as any)
-
-        const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
-
-        // Only auto-assign if NOT a manager (no reportees)
-        if (reporteeIds.length === 0) {
-          assignTo = userProfile.id
-        }
-      } catch (error) {
-        console.error('Error checking if manager:', error)
-        // On error, assume not a manager and auto-assign
-        assignTo = userProfile.id
-      }
+      assignTo = userProfile.id
     }
 
     console.log('[LEAD INSERT] Inserting lead with data:', {
@@ -949,7 +865,6 @@ export default function LeadsPage() {
     if (error) {
       console.error('[LEAD INSERT] ❌ ERROR inserting lead:', error)
       toast.error('Failed to add lead')
-      console.error(error)
     } else {
       console.log('[LEAD INSERT] ✅ Lead inserted successfully. ID:', insertedLead?.id)
       toast.success('Lead added successfully')
@@ -1101,11 +1016,17 @@ export default function LeadsPage() {
       if (leadDate > toDate) return false
     }
 
-    // Phone search filter
+    // Search filter: phone or lead name
     if (phoneSearch) {
-      const searchTerm = phoneSearch.replace(/[^\d]/g, '') // Remove non-digits
-      const leadPhone = (lead.phone || '').replace(/[^\d]/g, '')
-      if (!leadPhone.includes(searchTerm)) return false
+      const searchText = phoneSearch.trim().toLowerCase()
+      const searchDigits = phoneSearch.replace(/[^\d]/g, '')
+      const leadPhoneDigits = (lead.phone || '').replace(/[^\d]/g, '')
+      const leadName = (lead.name || '').toLowerCase()
+
+      const matchesPhone = searchDigits ? leadPhoneDigits.includes(searchDigits) : false
+      const matchesName = searchText ? leadName.includes(searchText) : false
+
+      if (!matchesPhone && !matchesName) return false
     }
 
     return true

@@ -378,14 +378,51 @@ export default function SubscriptionsPage() {
           }
         }
 
+        // Fallback: for older subscriptions/approvals without product_id, derive product from lead activities
+        // (same as Leads page) via server API that bypasses RLS on lead_activities.
+        let leadProductsMap: Record<string, { product_id: string; product_name: string }> = {}
+        if (allLeadIds.length > 0) {
+          try {
+            const BATCH_SIZE = 500
+            for (let i = 0; i < allLeadIds.length; i += BATCH_SIZE) {
+              const batch = allLeadIds.slice(i, i + BATCH_SIZE)
+              const res = await fetch('/api/leads/products-by-lead-ids', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ leadIds: batch }),
+              })
+
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}))
+                console.error('[SUBSCRIPTIONS] ❌ Error fetching lead products batch:', err)
+                continue
+              }
+
+              const data = await res.json()
+              const batchMap = (data?.leadProducts || {}) as Record<string, { product_id: string; product_name: string }>
+              leadProductsMap = { ...leadProductsMap, ...batchMap }
+            }
+          } catch (e) {
+            console.error('[SUBSCRIPTIONS] ❌ Exception fetching lead products via API:', e)
+          }
+        }
+
         // Map approved subscriptions - use product_id from subscription itself
         let approvedSubs = (subsData || []).map(sub => {
-          const productInfo = sub.product_id ? productsMap[sub.product_id] : null
+          const leadId = sub.leads?.id || sub.lead_id
+          const fallback = leadId ? leadProductsMap[leadId] : undefined
+          const effectiveProductId = sub.product_id || fallback?.product_id || null
+          const effectiveProductName = sub.product_id
+            ? productsMap[sub.product_id]?.name
+            : (fallback?.product_name || null)
+          const productInfo = effectiveProductId && effectiveProductName
+            ? { id: effectiveProductId, name: effectiveProductName }
+            : null
           return {
             ...sub,
             approval_status: 'approved' as const, // All existing subscriptions are approved
-            product_id: sub.product_id || null,
-            product: productInfo ? { id: productInfo.id, name: productInfo.name } : null,
+            product_id: effectiveProductId,
+            product: productInfo,
             leads: sub.leads ? {
               ...sub.leads,
               assignee: (sub.leads as unknown as { assignee: { name: string; email: string } | null }).assignee
@@ -397,7 +434,15 @@ export default function SubscriptionsPage() {
         let pendingSubs: Subscription[] = []
         if (pendingApprovalsData && pendingApprovalsData.length > 0) {
           pendingSubs = pendingApprovalsData.map(approval => {
-            const productInfo = approval.product_id ? productsMap[approval.product_id] : null
+            const leadId = approval.lead_id
+            const fallback = leadId ? leadProductsMap[leadId] : undefined
+            const effectiveProductId = approval.product_id || fallback?.product_id || null
+            const effectiveProductName = approval.product_id
+              ? productsMap[approval.product_id]?.name
+              : (fallback?.product_name || null)
+            const productInfo = effectiveProductId && effectiveProductName
+              ? { id: effectiveProductId, name: effectiveProductName }
+              : null
             const leadData = approval.lead_id ? pendingLeadsMap[approval.lead_id] : null
             return {
               id: approval.id, // Use approval ID as subscription ID for pending
@@ -413,8 +458,8 @@ export default function SubscriptionsPage() {
               notes: approval.notes,
               created_at: approval.created_at,
               approval_status: 'pending' as const,
-              product_id: approval.product_id || null,
-              product: productInfo ? { id: productInfo.id, name: productInfo.name } : null,
+              product_id: effectiveProductId,
+              product: productInfo,
               leads: leadData ? {
                 ...leadData,
                 assignee: (leadData as unknown as { assignee: { name: string; email: string } | null }).assignee
@@ -749,11 +794,17 @@ export default function SubscriptionsPage() {
         if (subDate > toDate) return false
       }
 
-      // Phone search filter
+      // Search filter: phone or lead name
       if (phoneSearch) {
-        const searchTerm = phoneSearch.replace(/[^\d]/g, '')
-        const leadPhone = (sub.leads?.phone || '').replace(/[^\d]/g, '')
-        if (!leadPhone.includes(searchTerm)) return false
+        const searchText = phoneSearch.trim().toLowerCase()
+        const searchDigits = phoneSearch.replace(/[^\d]/g, '')
+        const leadPhoneDigits = (sub.leads?.phone || '').replace(/[^\d]/g, '')
+        const leadName = (sub.leads?.name || '').toLowerCase()
+
+        const matchesPhone = searchDigits ? leadPhoneDigits.includes(searchDigits) : false
+        const matchesName = searchText ? leadName.includes(searchText) : false
+
+        if (!matchesPhone && !matchesName) return false
       }
 
       return true

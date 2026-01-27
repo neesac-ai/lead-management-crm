@@ -61,6 +61,7 @@ export default function SettingsPage({ params }: PageProps) {
     enabled: boolean
     configured: boolean
     allowed_phone_account_ids: string[]
+    available_phone_accounts: { id: string; label: string }[]
   } | null>(null)
 
   // Profile editing states
@@ -122,6 +123,12 @@ export default function SettingsPage({ params }: PageProps) {
           enabled: !!parsed.enabled,
           configured: !!parsed.configured,
           allowed_phone_account_ids: Array.isArray(parsed.allowed_phone_account_ids) ? parsed.allowed_phone_account_ids : [],
+          available_phone_accounts: Array.isArray(parsed.available_phone_accounts)
+            ? parsed.available_phone_accounts.map((acc: any) => ({
+              id: String(acc.id ?? ''),
+              label: String(acc.label ?? 'SIM'),
+            }))
+            : [],
         })
       } catch (e) {
         console.warn('Failed to parse call tracking status', e)
@@ -649,9 +656,36 @@ export default function SettingsPage({ params }: PageProps) {
                       <div>
                         <p className="font-medium">Enabled</p>
                         <p className="text-sm text-muted-foreground">
-                          {callTrackingStatus.allowed_phone_account_ids?.length
-                            ? `Allowed SIMs: ${callTrackingStatus.allowed_phone_account_ids.length}`
-                            : 'Allowed SIMs: All (no SIM filter)'}
+                          {(() => {
+                            const allowedIds = callTrackingStatus.allowed_phone_account_ids || []
+                            const accounts = callTrackingStatus.available_phone_accounts || []
+
+                            if (!callTrackingStatus.configured) {
+                              return 'Not configured yet'
+                            }
+
+                            // Map allowed IDs to labels when we know them
+                            const matchedLabels = allowedIds
+                              .map(id => accounts.find(acc => acc.id === id)?.label)
+                              .filter((label): label is string => !!label)
+
+                            if (matchedLabels.length > 0) {
+                              return `Allowed SIMs: ${matchedLabels.join(', ')}`
+                            }
+
+                            if (allowedIds.length > 0) {
+                              return `Allowed SIMs: ${allowedIds.length}`
+                            }
+
+                            if (accounts.length > 0) {
+                              // No explicit filter saved, but we do see SIMs → treat as "all visible SIMs"
+                              const labels = accounts.map(acc => acc.label).join(', ')
+                              return `Tracking all visible SIMs: ${labels}`
+                            }
+
+                            // Fallback when OS doesn't expose per-SIM info
+                            return 'Tracking all calls (device does not expose per-SIM info)'
+                          })()}
                         </p>
                       </div>
                     </>

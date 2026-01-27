@@ -432,11 +432,17 @@ export default function FollowUpsPage() {
         if (followUpDate > toDate) return false
       }
 
-      // Phone search filter
+      // Search filter: phone or lead name
       if (phoneSearch) {
-        const searchTerm = phoneSearch.replace(/[^\d]/g, '')
-        const leadPhone = (f.leads?.phone || '').replace(/[^\d]/g, '')
-        if (!leadPhone.includes(searchTerm)) return false
+        const searchText = phoneSearch.trim().toLowerCase()
+        const searchDigits = phoneSearch.replace(/[^\d]/g, '')
+        const leadPhoneDigits = (f.leads?.phone || '').replace(/[^\d]/g, '')
+        const leadName = (f.leads?.name || '').toLowerCase()
+
+        const matchesPhone = searchDigits ? leadPhoneDigits.includes(searchDigits) : false
+        const matchesName = searchText ? leadName.includes(searchText) : false
+
+        if (!matchesPhone && !matchesName) return false
       }
 
       return true

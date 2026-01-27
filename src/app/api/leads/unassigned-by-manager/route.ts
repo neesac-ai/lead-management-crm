@@ -35,12 +35,31 @@ export async function GET(request: NextRequest) {
 
     // Use admin client to bypass RLS and fetch unassigned leads created by manager/reportees
     const adminClient = await createAdminClient()
-    const { data: unassignedLeads, error } = await adminClient
-      .from('leads')
-      .select('id, name, email, phone, source, status, subscription_type, custom_fields, created_at, created_by, assigned_to')
-      .eq('org_id', callerProfile.org_id)
-      .is('assigned_to', null)
-      .in('created_by', accessibleUserIds)
+    const batchSize = 1000
+    let offset = 0
+    let unassignedLeads: any[] = []
+    let error: any = null
+
+    while (true) {
+      const result = await adminClient
+        .from('leads')
+        .select('id, name, email, phone, source, status, subscription_type, custom_fields, created_at, created_by, assigned_to')
+        .eq('org_id', callerProfile.org_id)
+        .is('assigned_to', null)
+        .in('created_by', accessibleUserIds)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + batchSize - 1)
+
+      if (result.error) {
+        error = result.error
+        break
+      }
+
+      const batch = result.data || []
+      unassignedLeads = unassignedLeads.concat(batch)
+      if (batch.length < batchSize) break
+      offset += batchSize
+    }
 
     if (error) {
       console.error('Error fetching unassigned leads:', error)
