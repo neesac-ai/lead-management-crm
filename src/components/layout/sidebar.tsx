@@ -266,19 +266,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       )
     }
 
-    // 7. Call Tracking
-    if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
-      items.push(
-        { title: getMenuLabel('call-tracking', 'Call Tracking'), href: `${baseUrl}/call-tracking`, icon: <Phone className="w-5 h-5" /> },
-      )
-    }
-
-    // 8. Locations - visible to everyone
-    items.push(
-      { title: getMenuLabel('locations', 'Locations'), href: `${baseUrl}/locations`, icon: <MapPin className="w-5 h-5" /> },
-    )
-
-    // 9. Lead Assignment
+    // 7. Lead Assignment
     if (user?.role === 'admin' || user?.role === 'super_admin' || user?.role === 'sales') {
       items.push(
         { title: getMenuLabel('assignment', 'Lead Assignment'), href: `${baseUrl}/assignment`, icon: <UserPlus className="w-5 h-5" /> },
@@ -304,14 +292,26 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       { title: getMenuLabel('team', 'Team'), href: `${baseUrl}/team`, icon: <Users className="w-5 h-5" /> },
     )
 
-    // 13. Payments
+    // 13. Call Tracking (after Team)
+    if (user?.role === 'admin' || user?.role === 'sales' || user?.role === 'super_admin') {
+      items.push(
+        { title: getMenuLabel('call-tracking', 'Call Tracking'), href: `${baseUrl}/call-tracking`, icon: <Phone className="w-5 h-5" /> },
+      )
+    }
+
+    // 14. Locations - visible to everyone (after Team)
+    items.push(
+      { title: getMenuLabel('locations', 'Locations'), href: `${baseUrl}/locations`, icon: <MapPin className="w-5 h-5" /> },
+    )
+
+    // 15. Payments
     if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
       items.push(
         { title: getMenuLabel('payments', 'Payments'), href: `${baseUrl}/payments`, icon: <CreditCard className="w-5 h-5" /> },
       )
     }
 
-    // 14. Invoices
+    // 16. Invoices
     if (user?.role === 'accountant' || user?.role === 'admin' || user?.role === 'super_admin') {
       items.push(
         { title: getMenuLabel('invoices', 'Invoices'), href: `${baseUrl}/invoices`, icon: <FileText className="w-5 h-5" /> },
@@ -325,7 +325,7 @@ export function Sidebar({ orgSlug }: SidebarProps) {
       )
     }
 
-    // 15. Settings - available for all users
+    // 17. Settings - available for all users
     items.push(
       { title: getMenuLabel('settings', 'Settings'), href: `${baseUrl}/settings`, icon: <Settings className="w-5 h-5" /> },
     )

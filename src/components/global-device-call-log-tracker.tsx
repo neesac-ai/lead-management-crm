@@ -6,13 +6,23 @@ import { globalNativeEventListener } from '@/lib/global-native-events'
 type DeviceCallLogRow = {
   device_call_log_id?: number
   phone_number: string
-  call_direction: 'incoming' | 'outgoing' | 'missed' | 'rejected' | 'blocked'
-  call_status: 'completed' | 'missed' | 'rejected' | 'blocked' | 'busy' | 'failed'
+  call_direction: 'incoming' | 'outgoing'
+  call_status:
+  | 'completed'
+  | 'missed'
+  | 'rejected'
+  | 'blocked'
+  | 'busy'
+  | 'failed'
+  | 'voicemail'
+  | 'answered_externally'
+  | 'unknown'
   call_started_at: string
   call_ended_at?: string
   duration_seconds?: number
   contact_name?: string | null
   phone_account_id?: string | null
+  raw_call_type?: number
 }
 
 // Light client-side dedupe to reduce noisy repeat scans.
@@ -70,6 +80,7 @@ export function GlobalDeviceCallLogTracker() {
                 device_call_log_id: row.device_call_log_id,
                 contact_name: row.contact_name,
                 phone_account_id: row.phone_account_id,
+                raw_call_type: row.raw_call_type,
                 source: 'android_call_log',
               },
             }),

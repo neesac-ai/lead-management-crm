@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
         network_type,
         created_at,
         users:users ( id, name, email ),
-        leads:leads ( id, name, phone )
+        leads:leads ( id, name, phone, status )
       `)
       .eq('org_id', orgId)
 
@@ -77,8 +77,26 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Calculate analytics
+    // Total leads in org for the date range (for recommendations)
+    let totalLeads = 0
+    let leadsQuery = supabase
+      .from('leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+    if (startDate) {
+      leadsQuery = leadsQuery.gte('created_at', startDate)
+    }
+    if (endDate) {
+      leadsQuery = leadsQuery.lte('created_at', endDate)
+    }
+    const { count: leadsCount } = await leadsQuery
+    totalLeads = leadsCount ?? 0
+
     const logs = (callLogs || []) as any[]
+    const contactedLeadIds = new Set((logs.map((c: any) => c.lead_id).filter(Boolean) as string[]))
+    const contactedLeads = contactedLeadIds.size
+
+    // Calculate analytics
     const totalCalls = logs.length
     const completedCalls = logs.filter(c => c.call_status === 'completed').length
     const missedCalls = logs.filter(c => c.call_status === 'missed').length
@@ -96,6 +114,8 @@ export async function GET(request: NextRequest) {
       avg_duration_seconds: avgDuration,
       avg_talk_time_seconds: avgTalkTime,
       completion_rate: totalCalls > 0 ? Math.round((completedCalls / totalCalls) * 100) : 0,
+      total_leads: totalLeads,
+      contacted_leads: contactedLeads,
       call_logs: callLogs || [],
     }
 

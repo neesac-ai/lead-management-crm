@@ -14,6 +14,28 @@ export interface NativeBridge {
   getLastCallStatus?: () => string
   setupCallTracking?: () => void
   getCallTrackingStatus?: () => string
+  requestSimInfoPermission?: () => void
+  requestAllCallTrackingPermissions?: () => void
+  openAppPermissionsSettings?: () => void
+  configureCallTracking?: (enabled: boolean, allowedPhoneAccountIdsJson: string) => string
+  setSyncIntervalMinutes?: (minutes: number) => string
+  getSyncIntervalMinutes?: () => number
+  setAutoSyncEnabled?: (enabled: boolean) => string
+  isAutoSyncEnabled?: () => boolean
+  syncCallLogsNow?: (fullSync: boolean) => string
+  setAuthTokens?: (accessToken: string, refreshToken: string, expiresAtEpochSeconds: number) => void
+  setDeviceEnrollment?: (deviceId: string, deviceKey: string) => void
+  setDeviceEnrollmentWithResult?: (deviceId: string, deviceKey: string) => string
+  setDeviceEnrollmentDetailsWithResult?: (
+    deviceId: string,
+    deviceKey: string,
+    assignedUserName: string,
+    assignedUserEmail: string
+  ) => string
+  requestNotificationPermission?: () => void
+  openNotificationSettings?: () => void
+  sendTestNotification?: () => string
+  startCallTrackingServiceNow?: () => string
 
   // Recording methods
   // (Call recording disabled for now)
@@ -75,6 +97,23 @@ export function getNativeBridge(): NativeBridge | null {
     getLastCallStatus: bridge.getLastCallStatus?.bind(bridge),
     setupCallTracking: bridge.setupCallTracking?.bind(bridge),
     getCallTrackingStatus: bridge.getCallTrackingStatus?.bind(bridge),
+    requestSimInfoPermission: bridge.requestSimInfoPermission?.bind(bridge),
+    requestAllCallTrackingPermissions: bridge.requestAllCallTrackingPermissions?.bind(bridge),
+    openAppPermissionsSettings: bridge.openAppPermissionsSettings?.bind(bridge),
+    configureCallTracking: bridge.configureCallTracking?.bind(bridge),
+    setSyncIntervalMinutes: bridge.setSyncIntervalMinutes?.bind(bridge),
+    getSyncIntervalMinutes: bridge.getSyncIntervalMinutes?.bind(bridge),
+    setAutoSyncEnabled: bridge.setAutoSyncEnabled?.bind(bridge),
+    isAutoSyncEnabled: bridge.isAutoSyncEnabled?.bind(bridge),
+    syncCallLogsNow: bridge.syncCallLogsNow?.bind(bridge),
+    setAuthTokens: bridge.setAuthTokens?.bind(bridge),
+    setDeviceEnrollment: bridge.setDeviceEnrollment?.bind(bridge),
+    setDeviceEnrollmentWithResult: bridge.setDeviceEnrollmentWithResult?.bind(bridge),
+    setDeviceEnrollmentDetailsWithResult: bridge.setDeviceEnrollmentDetailsWithResult?.bind(bridge),
+    requestNotificationPermission: bridge.requestNotificationPermission?.bind(bridge),
+    openNotificationSettings: bridge.openNotificationSettings?.bind(bridge),
+    sendTestNotification: bridge.sendTestNotification?.bind(bridge),
+    startCallTrackingServiceNow: bridge.startCallTrackingServiceNow?.bind(bridge),
     getCurrentLocation: bridge.getCurrentLocation?.bind(bridge),
     startTracking: bridge.startTracking?.bind(bridge),
     stopTracking: bridge.stopTracking?.bind(bridge),

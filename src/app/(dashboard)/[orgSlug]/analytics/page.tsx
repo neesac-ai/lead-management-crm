@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Select,
   SelectContent,
@@ -26,6 +25,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -38,24 +38,35 @@ import {
   TrendingDown,
   Minus,
   CheckCircle2,
-  XCircle,
   Calendar,
   Users,
   BarChart3,
   Phone,
   Clock,
-  RefreshCw,
-  Search,
   Loader2,
-  AlertCircle,
   User as UserIcon,
+  ChevronDown,
 } from 'lucide-react'
 import { User, Lead, LeadStatus } from '@/types/database.types'
 import { format, subDays, startOfDay, endOfDay, isWithinInterval } from 'date-fns'
-// Note: CallRecording type removed - using native call tracking only
 import Link from 'next/link'
 import { getLeadStatuses } from '@/lib/lead-statuses'
 import { getMenuNames, getMenuLabel } from '@/lib/menu-names'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts'
 
 type DateFilter = 'today' | 'last_7_days' | 'last_30_days' | 'all_time' | 'custom'
 
@@ -91,6 +102,27 @@ const STATUS_COLORS: Record<LeadStatus, string> = {
   deal_lost: 'bg-red-500'
 }
 
+const CHART_STATUS_COLORS: Record<LeadStatus, string> = {
+  new: '#3b82f6',
+  call_not_picked: '#eab308',
+  not_interested: '#6b7280',
+  follow_up_again: '#f97316',
+  demo_booked: '#a855f7',
+  demo_completed: '#6366f1',
+  deal_won: '#22c55e',
+  deal_lost: '#ef4444',
+}
+
+const SMALL_LEGEND_PROPS = {
+  wrapperStyle: { fontSize: 10 },
+  iconSize: 8,
+  iconType: 'square' as const,
+  layout: 'horizontal' as const,
+  align: 'center' as const,
+}
+
+const LEAD_STATUS_OPTIONS: LeadStatus[] = ['new', 'call_not_picked', 'not_interested', 'follow_up_again', 'demo_booked', 'demo_completed', 'deal_won', 'deal_lost']
+
 const ACTION_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   call: { label: 'Call Made', color: 'bg-blue-100 text-blue-700' },
   email: { label: 'Email Sent', color: 'bg-cyan-100 text-cyan-700' },
@@ -114,7 +146,6 @@ export default function AnalyticsPage() {
   const [user, setUser] = useState<User | null>(null)
   const [orgId, setOrgId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('overview')
   const [isManager, setIsManager] = useState(false)
   const [canViewTeam, setCanViewTeam] = useState(false)
 
@@ -127,37 +158,13 @@ export default function AnalyticsPage() {
   const [leadStatuses, setLeadStatuses] = useState<Array<{ status_value: string; label: string; color: string }>>([])
   const [menuNames, setMenuNames] = useState<Record<string, string>>({})
 
-  // Call analytics state (using native call tracking)
-  type CallLog = {
-    id: string
-    lead_id: string | null
-    user_id: string
-    phone_number: string
-    call_direction: string
-    call_status: string
-    call_started_at: string
-    call_ended_at: string | null
-    duration_seconds: number
-    talk_time_seconds: number | null
-    ring_duration_seconds: number | null
-    users?: { id: string; name: string; email: string } | null
-    leads?: { id: string; name: string; phone: string | null } | null
-  }
-  const [callLogs, setCallLogs] = useState<CallLog[]>([])
-  const [isLoadingCallLogs, setIsLoadingCallLogs] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [selectedSalesRep, setSelectedSalesRep] = useState<string>('all')
-
-  const [callStats, setCallStats] = useState({
-    totalCalls: 0,
-    totalDuration: 0,
-    avgDuration: 0,
-    completed: 0,
-    missed: 0,
-    failed: 0,
-    totalTalkTime: 0,
-    avgTalkTime: 0,
-  })
+  // Chart filters: multi-select for line chart and bar chart (empty = all statuses)
+  const [lineChartStatusFilter, setLineChartStatusFilter] = useState<Set<LeadStatus>>(new Set())
+  const [barChartStatusFilter, setBarChartStatusFilter] = useState<Set<LeadStatus>>(new Set())
+  const [pieRepByStatusFilter, setPieRepByStatusFilter] = useState<string>('')
+  const [pieRepBySubFilter, setPieRepBySubFilter] = useState<string>('trial')
+  const [pieStatusByRepFilter, setPieStatusByRepFilter] = useState<string>('')
+  const [pieSubByRepFilter, setPieSubByRepFilter] = useState<string>('')
 
   // Sales rep detail view
   const [selectedRepForDetail, setSelectedRepForDetail] = useState<SalesPerformance | null>(null)
@@ -221,14 +228,6 @@ export default function AnalyticsPage() {
       window.removeEventListener('lead-statuses-updated', handleStatusUpdate)
     }
   }, [])
-
-  // Refresh call logs when tab changes to calls
-  useEffect(() => {
-    if (activeTab === 'calls' && !loading && orgId && user) {
-      fetchCallLogs(orgId, user)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, loading, orgId, user?.id, selectedSalesRep, dateFilter, customDateFrom, customDateTo])
 
   async function fetchData() {
     try {
@@ -371,130 +370,12 @@ export default function AnalyticsPage() {
         .eq('is_active', true)
         .limit(1)
 
-      // Note: Google Drive sync removed - using native call tracking only
-      await fetchCallLogs(currentOrgId, userData)
-
     } catch (error) {
       console.error('Error fetching data:', error)
     } finally {
       setLoading(false)
     }
   }
-
-  async function fetchCallLogs(currentOrgId?: string, currentUser?: User) {
-    const orgIdToUse = currentOrgId || orgId
-    const userToUse = currentUser || user
-    if (!orgIdToUse || !userToUse) return
-
-    setIsLoadingCallLogs(true)
-
-    try {
-      // Build API URL with filters
-      const params = new URLSearchParams()
-
-      // Apply date filter
-      let startDate: Date | null = null
-      let endDate: Date | null = null
-
-      if (dateFilter === 'today') {
-        startDate = startOfDay(new Date())
-        endDate = endOfDay(new Date())
-      } else if (dateFilter === 'last_7_days') {
-        startDate = startOfDay(subDays(new Date(), 7))
-        endDate = endOfDay(new Date())
-      } else if (dateFilter === 'last_30_days') {
-        startDate = startOfDay(subDays(new Date(), 30))
-        endDate = endOfDay(new Date())
-      } else if (dateFilter === 'custom' && customDateFrom && customDateTo) {
-        startDate = startOfDay(new Date(customDateFrom))
-        endDate = endOfDay(new Date(customDateTo))
-      }
-
-      if (startDate) {
-        params.append('start_date', startDate.toISOString())
-      }
-      if (endDate) {
-        params.append('end_date', endDate.toISOString())
-      }
-
-      const response = await fetch(`/api/calls/analytics?${params.toString()}`)
-      if (!response.ok) {
-        throw new Error('Failed to fetch call logs')
-      }
-
-      const data = await response.json()
-      const logs = data.call_logs || []
-
-      // Filter by user role (sales can only see their own, managers see team)
-      let filteredLogs = logs
-      if (userToUse.role === 'sales') {
-        try {
-          const { data: reportees } = await supabase
-            .rpc('get_all_reportees', { manager_user_id: userToUse.id } as any)
-
-          const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) || []
-          if (reporteeIds.length > 0) {
-            // Manager: see logs from self + reportees
-            filteredLogs = logs.filter((log: CallLog) =>
-              (log.user_id === userToUse.id || reporteeIds.includes(log.user_id))
-            )
-          } else {
-            // Non-manager: only own logs
-            filteredLogs = logs.filter((log: CallLog) =>
-              log.user_id === userToUse.id
-            )
-          }
-        } catch (error) {
-          // Fallback: only own logs
-          filteredLogs = logs.filter((log: CallLog) =>
-            log.user_id === userToUse.id
-          )
-        }
-      }
-
-      setCallLogs(filteredLogs)
-      calculateCallStats(filteredLogs)
-    } catch (error) {
-      console.error('Error fetching call logs:', error)
-      setCallLogs([])
-    } finally {
-      setIsLoadingCallLogs(false)
-    }
-  }
-
-  function calculateCallStats(logs: CallLog[]) {
-    const stats = {
-      totalCalls: logs.length,
-      totalDuration: 0,
-      avgDuration: 0,
-      completed: 0,
-      missed: 0,
-      failed: 0,
-      totalTalkTime: 0,
-      avgTalkTime: 0,
-    }
-
-    logs.forEach(log => {
-      stats.totalDuration += log.duration_seconds || 0
-      stats.totalTalkTime += log.talk_time_seconds || 0
-      if (log.call_status === 'completed') stats.completed++
-      else if (log.call_status === 'missed') stats.missed++
-      else if (log.call_status === 'failed') stats.failed++
-    })
-
-    stats.avgDuration = stats.totalCalls > 0
-      ? Math.round(stats.totalDuration / stats.totalCalls)
-      : 0
-    stats.avgTalkTime = stats.completed > 0
-      ? Math.round(stats.totalTalkTime / stats.completed)
-      : 0
-
-    setCallStats(stats)
-  }
-
-  // Note: Google Drive sync removed - using native call tracking only
-
-  // Note: handleProcess and handleDelete removed - using native call tracking only
 
   // Fetch activities for selected sales rep
   async function fetchRepActivities(userId: string) {
@@ -643,271 +524,6 @@ export default function AnalyticsPage() {
     }).sort((a, b) => b.totalLeads - a.totalLeads)
   }
 
-  // Call analytics helpers
-  const formatDuration = (seconds: number | null) => {
-    if (!seconds) return '--:--'
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
-  // Note: getSentimentIcon, getSentimentBadge, getStatusBadge removed - using native call tracking only
-
-  // Filter call logs by search and sales rep - memoized for performance
-  const filteredCallLogs = useMemo(() => {
-    return callLogs.filter(log => {
-      // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase()
-        const matchesSearch = log.phone_number?.toLowerCase().includes(query) ||
-          log.users?.name?.toLowerCase().includes(query) ||
-          log.users?.email?.toLowerCase().includes(query)
-        if (!matchesSearch) return false
-      }
-
-      // Sales rep filter (admin only)
-      if (isAdmin && selectedSalesRep !== 'all') {
-        if (log.user_id !== selectedSalesRep) return false
-      }
-
-      return true
-    })
-  }, [callLogs, searchQuery, isAdmin, selectedSalesRep])
-
-  const RECENT_CALLS_LIMIT = 20
-  const recentCalls = useMemo(() => {
-    return filteredCallLogs.slice(0, RECENT_CALLS_LIMIT)
-  }, [filteredCallLogs])
-
-  // Call Overview (for Overview tab) - aggregated across all visible call logs (ignores selectedSalesRep)
-  const callOverview = useMemo(() => {
-    const logs = callLogs
-
-    const statusCounts: Record<string, number> = {}
-    let totalDuration = 0
-    let totalTalkTime = 0
-    let totalRingTime = 0
-
-    const uniqueLeadsAll = new Set<string>()
-    const uniqueLeadsByStatus: Record<string, Set<string>> = {
-      completed: new Set(),
-      missed: new Set(),
-      failed: new Set(),
-      rejected: new Set(),
-      blocked: new Set(),
-      busy: new Set(),
-    }
-
-    for (const l of logs) {
-      const s = l.call_status || 'unknown'
-      statusCounts[s] = (statusCounts[s] || 0) + 1
-      totalDuration += l.duration_seconds || 0
-      totalTalkTime += l.talk_time_seconds || 0
-      totalRingTime += l.ring_duration_seconds || 0
-
-      if (l.lead_id) {
-        uniqueLeadsAll.add(l.lead_id)
-        if (uniqueLeadsByStatus[s]) {
-          uniqueLeadsByStatus[s].add(l.lead_id)
-        }
-      }
-    }
-
-    const totalCalls = logs.length
-    const completed = statusCounts.completed || 0
-    const missed = statusCounts.missed || 0
-    const failed = statusCounts.failed || 0
-    const rejected = statusCounts.rejected || 0
-    const blocked = statusCounts.blocked || 0
-    const busy = statusCounts.busy || 0
-
-    const answerRate = totalCalls > 0 ? Math.round((completed / totalCalls) * 100) : 0
-    const avgTalkTime = completed > 0 ? Math.round(totalTalkTime / completed) : 0
-    const avgRingTime = totalCalls > 0 ? Math.round(totalRingTime / totalCalls) : 0
-
-    // By Team Member
-    const byUser = new Map<string, {
-      userId: string
-      name: string
-      email: string
-      totalCalls: number
-      completed: number
-      missed: number
-      failed: number
-      uniqueLeads: number
-      uniqueCompletedLeads: number
-      uniqueMissedLeads: number
-      uniqueFailedLeads: number
-      totalTalkTime: number
-      avgTalkTime: number
-      answerRate: number
-      lastCallAt: string | null
-    }>()
-
-    const uniqueLeadsByUser = new Map<string, {
-      all: Set<string>
-      completed: Set<string>
-      missed: Set<string>
-      failed: Set<string>
-    }>()
-
-    for (const l of logs) {
-      const uid = l.user_id
-      const u = l.users
-      const existing = byUser.get(uid)
-      const callAt = l.call_started_at || null
-      const base = existing || {
-        userId: uid,
-        name: u?.name || 'Unknown',
-        email: u?.email || '',
-        totalCalls: 0,
-        completed: 0,
-        missed: 0,
-        failed: 0,
-        uniqueLeads: 0,
-        uniqueCompletedLeads: 0,
-        uniqueMissedLeads: 0,
-        uniqueFailedLeads: 0,
-        totalTalkTime: 0,
-        avgTalkTime: 0,
-        answerRate: 0,
-        lastCallAt: null as string | null,
-      }
-
-      base.totalCalls += 1
-      if (l.call_status === 'completed') base.completed += 1
-      else if (l.call_status === 'missed') base.missed += 1
-      else if (l.call_status === 'failed') base.failed += 1
-      base.totalTalkTime += l.talk_time_seconds || 0
-
-      if (l.lead_id) {
-        const sets = uniqueLeadsByUser.get(uid) || {
-          all: new Set<string>(),
-          completed: new Set<string>(),
-          missed: new Set<string>(),
-          failed: new Set<string>(),
-        }
-        sets.all.add(l.lead_id)
-        if (l.call_status === 'completed') sets.completed.add(l.lead_id)
-        if (l.call_status === 'missed') sets.missed.add(l.lead_id)
-        if (l.call_status === 'failed') sets.failed.add(l.lead_id)
-        uniqueLeadsByUser.set(uid, sets)
-      }
-
-      if (!base.lastCallAt || (callAt && new Date(callAt) > new Date(base.lastCallAt))) {
-        base.lastCallAt = callAt
-      }
-
-      byUser.set(uid, base)
-    }
-
-    const byUserArray = Array.from(byUser.values()).map(u => {
-      const avgTT = u.completed > 0 ? Math.round(u.totalTalkTime / u.completed) : 0
-      const ans = u.totalCalls > 0 ? Math.round((u.completed / u.totalCalls) * 100) : 0
-      const sets = uniqueLeadsByUser.get(u.userId)
-      return {
-        ...u,
-        avgTalkTime: avgTT,
-        answerRate: ans,
-        uniqueLeads: sets?.all.size || 0,
-        uniqueCompletedLeads: sets?.completed.size || 0,
-        uniqueMissedLeads: sets?.missed.size || 0,
-        uniqueFailedLeads: sets?.failed.size || 0,
-      }
-    }).sort((a, b) => b.totalCalls - a.totalCalls)
-
-    // By Lead (top 10)
-    const byLead = new Map<string, {
-      leadId: string
-      name: string
-      phone: string | null
-      totalCalls: number
-      completed: number
-      missed: number
-      failed: number
-      totalTalkTime: number
-      lastCallAt: string | null
-    }>()
-
-    for (const l of logs) {
-      if (!l.lead_id) continue
-      const lid = l.lead_id
-      const lead = l.leads
-      const existing = byLead.get(lid)
-      const callAt = l.call_started_at || null
-      const base = existing || {
-        leadId: lid,
-        name: lead?.name || 'Unknown',
-        phone: lead?.phone || null,
-        totalCalls: 0,
-        completed: 0,
-        missed: 0,
-        failed: 0,
-        totalTalkTime: 0,
-        lastCallAt: null as string | null,
-      }
-      base.totalCalls += 1
-      if (l.call_status === 'completed') base.completed += 1
-      else if (l.call_status === 'missed') base.missed += 1
-      else if (l.call_status === 'failed') base.failed += 1
-      base.totalTalkTime += l.talk_time_seconds || 0
-      if (!base.lastCallAt || (callAt && new Date(callAt) > new Date(base.lastCallAt))) {
-        base.lastCallAt = callAt
-      }
-      byLead.set(lid, base)
-    }
-
-    const byLeadArray = Array.from(byLead.values())
-      .sort((a, b) => b.totalCalls - a.totalCalls)
-      .slice(0, 10)
-
-    return {
-      totalCalls,
-      totalDuration,
-      totalTalkTime,
-      totalRingTime,
-      avgTalkTime,
-      avgRingTime,
-      answerRate,
-      uniqueLeads: uniqueLeadsAll.size,
-      uniqueLeadsByStatus: {
-        completed: uniqueLeadsByStatus.completed.size,
-        missed: uniqueLeadsByStatus.missed.size,
-        failed: uniqueLeadsByStatus.failed.size,
-        rejected: uniqueLeadsByStatus.rejected.size,
-        blocked: uniqueLeadsByStatus.blocked.size,
-        busy: uniqueLeadsByStatus.busy.size,
-      },
-      statusCounts: { completed, missed, failed, rejected, blocked, busy },
-      byUser: byUserArray,
-      byLead: byLeadArray,
-    }
-  }, [callLogs])
-
-  // Calculate call stats for selected rep - memoized (using call logs)
-  const repCallStats = useMemo(() => {
-    const logs = selectedSalesRep === 'all'
-      ? callLogs
-      : callLogs.filter(log => log.users?.id === selectedSalesRep)
-
-    const stats = {
-      totalCalls: logs.length,
-      totalDuration: 0,
-      completed: 0,
-      missed: 0,
-      failed: 0,
-    }
-
-    logs.forEach(log => {
-      stats.totalDuration += log.duration_seconds || 0
-      if (log.call_status === 'completed') stats.completed++
-      else if (log.call_status === 'missed') stats.missed++
-      else if (log.call_status === 'failed') stats.failed++
-    })
-
-    return stats
-  }, [callLogs, selectedSalesRep])
-
   // Memoize expensive lead analytics calculations
   const filteredLeads = useMemo(() => getFilteredLeads(), [leads, dateFilter, customDateFrom, customDateTo])
   const statusBreakdown = useMemo(() => getStatusBreakdown(filteredLeads), [filteredLeads])
@@ -920,10 +536,111 @@ export default function AnalyticsPage() {
   const actionRate = totalLeads > 0 ? Math.round((actionedLeadsCount / totalLeads) * 100) : 0
   const conversionRate = actionedLeadsCount > 0 ? Math.round((wonDeals / actionedLeadsCount) * 100) : 0
 
-  // Subscription type breakdown
-  const trialLeads = filteredLeads.filter(l => l.subscription_type === 'trial').length
-  const paidLeads = filteredLeads.filter(l => l.subscription_type === 'paid').length
-  const unspecifiedLeads = filteredLeads.filter(l => !l.subscription_type).length
+  // Line chart: one line per (selected or all) lead status; data has one key per status per date
+  const lineChartStatuses = lineChartStatusFilter.size === 0 ? LEAD_STATUS_OPTIONS : Array.from(lineChartStatusFilter)
+  const leadsByDayData = useMemo(() => {
+    const map = new Map<string, Record<LeadStatus, number>>()
+    filteredLeads.forEach((lead) => {
+      const key = format(new Date(lead.created_at), 'yyyy-MM-dd')
+      const row = map.get(key) || ({} as Record<LeadStatus, number>)
+      LEAD_STATUS_OPTIONS.forEach((s) => { if (!(s in row)) row[s] = 0 })
+      if (lead.status in row) row[lead.status as LeadStatus] += 1
+      map.set(key, row)
+    })
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-14)
+      .map(([dateKey, row]) => ({
+        date: format(new Date(dateKey), 'MMM d'),
+        ...row,
+      }))
+  }, [filteredLeads])
+
+  // Bar chart: stacked bars by (selected or all) lead statuses
+  const barChartStatuses = barChartStatusFilter.size === 0 ? LEAD_STATUS_OPTIONS : Array.from(barChartStatusFilter)
+  const leadsByDayByStatusData = useMemo(() => {
+    const map = new Map<string, Record<LeadStatus, number>>()
+    filteredLeads.forEach((lead) => {
+      const key = format(new Date(lead.created_at), 'yyyy-MM-dd')
+      const row = map.get(key) || ({} as Record<LeadStatus, number>)
+      LEAD_STATUS_OPTIONS.forEach((s) => { if (!(s in row)) row[s] = 0 })
+      if (lead.status in row) row[lead.status as LeadStatus] += 1
+      map.set(key, row)
+    })
+    return Array.from(map.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-14)
+      .map(([dateKey, row]) => ({
+        date: format(new Date(dateKey), 'MMM d'),
+        ...row,
+      }))
+  }, [filteredLeads])
+
+  // Pie: sales reps by lead status (filter = lead status)
+  const pieRepByStatusData = useMemo(() => {
+    if (!pieRepByStatusFilter || !canViewTeam || salesTeam.length === 0) return []
+    const leadsWithStatus = filteredLeads.filter((l) => l.status === pieRepByStatusFilter)
+    const byRep = new Map<string, number>()
+    salesTeam.forEach((u) => byRep.set(u.id, 0))
+    leadsWithStatus.forEach((lead) => {
+      const owner = lead.assigned_to || lead.created_by
+      if (owner && byRep.has(owner)) byRep.set(owner, (byRep.get(owner) ?? 0) + 1)
+    })
+    return salesTeam
+      .map((u) => ({ name: u.name, value: byRep.get(u.id) ?? 0 }))
+      .filter((d) => d.value > 0)
+  }, [filteredLeads, canViewTeam, salesTeam, pieRepByStatusFilter])
+
+  // Pie: sales reps by subscription type (filter = sub type; only leads with subscription)
+  const pieRepBySubData = useMemo(() => {
+    if (!pieRepBySubFilter || !canViewTeam || salesTeam.length === 0) return []
+    const leadsWithSub = filteredLeads.filter((l) => l.subscription_type === pieRepBySubFilter)
+    const byRep = new Map<string, number>()
+    salesTeam.forEach((u) => byRep.set(u.id, 0))
+    leadsWithSub.forEach((lead) => {
+      const owner = lead.assigned_to || lead.created_by
+      if (owner && byRep.has(owner)) byRep.set(owner, (byRep.get(owner) ?? 0) + 1)
+    })
+    return salesTeam
+      .map((u) => ({ name: u.name, value: byRep.get(u.id) ?? 0 }))
+      .filter((d) => d.value > 0)
+  }, [filteredLeads, canViewTeam, salesTeam, pieRepBySubFilter])
+
+  // Pie: lead status by sales rep (filter = sales rep)
+  const pieStatusByRepData = useMemo(() => {
+    if (!pieStatusByRepFilter) return []
+    const repLeads = filteredLeads.filter(
+      (l) => (l.assigned_to === pieStatusByRepFilter || (!l.assigned_to && l.created_by === pieStatusByRepFilter))
+    )
+    const breakdown: Record<LeadStatus, number> = {
+      new: 0, call_not_picked: 0, not_interested: 0, follow_up_again: 0,
+      demo_booked: 0, demo_completed: 0, deal_won: 0, deal_lost: 0,
+    }
+    repLeads.forEach((l) => {
+      if (l.status in breakdown) breakdown[l.status as LeadStatus] += 1
+    })
+    return (Object.entries(breakdown) as [LeadStatus, number][])
+      .filter(([, c]) => c > 0)
+      .map(([status, value]) => ({
+        name: getStatusLabel(status, leadStatuses),
+        value,
+        color: CHART_STATUS_COLORS[status],
+      }))
+  }, [filteredLeads, pieStatusByRepFilter, leadStatuses])
+
+  // Pie: subscription type by sales rep (filter = sales rep; only leads with subscription)
+  const pieSubByRepData = useMemo(() => {
+    if (!pieSubByRepFilter) return []
+    const repLeads = filteredLeads.filter(
+      (l) => (l.assigned_to === pieSubByRepFilter || (!l.assigned_to && l.created_by === pieSubByRepFilter)),
+    ).filter((l) => l.subscription_type === 'trial' || l.subscription_type === 'paid')
+    const trial = repLeads.filter((l) => l.subscription_type === 'trial').length
+    const paid = repLeads.filter((l) => l.subscription_type === 'paid').length
+    return [
+      ...(trial > 0 ? [{ name: 'Trial', value: trial, color: '#3b82f6' }] : []),
+      ...(paid > 0 ? [{ name: 'Paid', value: paid, color: '#22c55e' }] : []),
+    ]
+  }, [filteredLeads, pieSubByRepFilter])
 
   if (loading) {
     return (
@@ -941,918 +658,547 @@ export default function AnalyticsPage() {
       />
 
       <div className="flex-1 p-3 sm:p-4 lg:p-6 pb-20 lg:pb-6">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-3 sm:space-y-4 lg:space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-2 h-auto">
-            <TabsTrigger value="overview" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm px-2 sm:px-4 py-2">
-              <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              Overview
-            </TabsTrigger>
-            <TabsTrigger value="calls" className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm px-2 sm:px-4 py-2">
-              <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              Calls
-            </TabsTrigger>
-          </TabsList>
-
-          {/* OVERVIEW TAB */}
-          <TabsContent value="overview" className="space-y-3 sm:space-y-4 lg:space-y-6 mt-3 sm:mt-4">
-            {/* Date Filter */}
-            <Card>
-              <CardHeader className="pb-2 sm:pb-3 p-3 sm:p-6">
-                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
-                  <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                  Time Period
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-6 pt-0">
-                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
-                  {[
-                    { value: 'today', label: 'Today' },
-                    { value: 'last_7_days', label: 'Last 7 Days' },
-                    { value: 'last_30_days', label: 'Last 30 Days' },
-                    { value: 'all_time', label: 'All Time' },
-                    { value: 'custom', label: 'Custom' },
-                  ].map((filter) => (
-                    <Button
-                      key={filter.value}
-                      variant={dateFilter === filter.value ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setDateFilter(filter.value as DateFilter)}
-                      className="text-xs sm:text-sm h-8 sm:h-9"
-                    >
-                      {filter.label}
-                    </Button>
-                  ))}
-                  {dateFilter === 'custom' && (
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto sm:ml-2">
-                      <Input
-                        type="date"
-                        value={customDateFrom}
-                        onChange={(e) => setCustomDateFrom(e.target.value)}
-                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
-                      />
-                      <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
-                      <Input
-                        type="date"
-                        value={customDateTo}
-                        onChange={(e) => setCustomDateTo(e.target.value)}
-                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
-                      />
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3 lg:gap-4">
-              <Card>
-                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg shrink-0">
-                      <Target className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{totalLeads}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Total Leads</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-1.5 sm:p-2 bg-yellow-100 rounded-lg shrink-0">
-                      <Phone className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{actionedLeadsCount}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Actioned</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-1.5 sm:p-2 bg-cyan-100 rounded-lg shrink-0">
-                      <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 text-cyan-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{actionRate}%</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Action Rate</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg shrink-0">
-                      <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{wonDeals}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Deals Won</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <div className="p-1.5 sm:p-2 bg-purple-100 rounded-lg shrink-0">
-                      <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{conversionRate}%</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Win Rate</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Subscription Type Breakdown */}
-            <Card>
-              <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
-                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
-                  <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
-                  Subscription Type Breakdown
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-6 pt-0">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 lg:gap-4">
-                  <div className="flex items-center justify-between p-2 sm:p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">Trial</p>
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold text-blue-600 truncate">{trialLeads}</p>
-                    </div>
-                    <Badge variant="outline" className="border-blue-500 text-blue-600 text-xs shrink-0 ml-2">
-                      {totalLeads > 0 ? Math.round((trialLeads / totalLeads) * 100) : 0}%
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between p-2 sm:p-3 bg-green-50 dark:bg-green-950 rounded-lg">
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">Paid</p>
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold text-green-600 truncate">{paidLeads}</p>
-                    </div>
-                    <Badge variant="outline" className="border-green-500 text-green-600 text-xs shrink-0 ml-2">
-                      {totalLeads > 0 ? Math.round((paidLeads / totalLeads) * 100) : 0}%
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between p-2 sm:p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <div className="min-w-0">
-                      <p className="text-xs sm:text-sm font-medium text-muted-foreground truncate">Not Specified</p>
-                      <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-600 truncate">{unspecifiedLeads}</p>
-                    </div>
-                    <Badge variant="outline" className="border-gray-500 text-gray-600 text-xs shrink-0 ml-2">
-                      {totalLeads > 0 ? Math.round((unspecifiedLeads / totalLeads) * 100) : 0}%
-                    </Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Status Breakdown */}
-            <Card>
-              <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
-                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
-                  <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
-                  Lead Status Breakdown
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-6 pt-0">
-                {totalLeads === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">
-                    No leads found for this time period
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {Object.keys(statusBreakdown).map((status) => {
-                      const count = statusBreakdown[status as LeadStatus]
-                      const percentage = totalLeads > 0 ? (count / totalLeads) * 100 : 0
-
-                      if (count === 0) return null
-
-                      const statusLabel = getStatusLabel(status, leadStatuses)
-                      const statusColor = getStatusColor(status, leadStatuses)
-
-                      return (
-                        <div key={status} className="space-y-1">
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="font-medium">{statusLabel}</span>
-                            <span className="text-muted-foreground">
-                              {count} ({percentage.toFixed(1)}%)
-                            </span>
-                          </div>
-                          <div className="h-2 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className={`h-full ${statusColor} transition-all duration-500`}
-                              style={{ width: `${percentage}%` }}
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
+        <div className="space-y-3 sm:space-y-4 lg:space-y-6">
+          {/* Date Filter */}
+          <Card>
+            <CardHeader className="pb-2 sm:pb-3 p-3 sm:p-6">
+              <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                Time Period
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 sm:p-6 pt-0">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
+                {[
+                  { value: 'today', label: 'Today' },
+                  { value: 'last_7_days', label: 'Last 7 Days' },
+                  { value: 'last_30_days', label: 'Last 30 Days' },
+                  { value: 'all_time', label: 'All Time' },
+                  { value: 'custom', label: 'Custom' },
+                ].map((filter) => (
+                  <Button
+                    key={filter.value}
+                    variant={dateFilter === filter.value ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setDateFilter(filter.value as DateFilter)}
+                    className="text-xs sm:text-sm h-8 sm:h-9"
+                  >
+                    {filter.label}
+                  </Button>
+                ))}
+                {dateFilter === 'custom' && (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto sm:ml-2">
+                    <Input
+                      type="date"
+                      value={customDateFrom}
+                      onChange={(e) => setCustomDateFrom(e.target.value)}
+                      className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                    />
+                    <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
+                    <Input
+                      type="date"
+                      value={customDateTo}
+                      onChange={(e) => setCustomDateTo(e.target.value)}
+                      className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
+                    />
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </CardContent>
+          </Card>
 
-            {/* Team Performance (Admin and Managers) */}
-            {canViewTeam && salesTeam.length > 0 && (
-              <Card>
-                <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0">
-                    <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
-                      <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
-                      Team Performance
-                    </CardTitle>
-                    <p className="text-[10px] sm:text-xs text-muted-foreground">Click on a row to see details</p>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-3 sm:p-6 pt-0">
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left py-3 px-2 font-medium">Team Member</th>
-                          <th className="text-center py-3 px-2 font-medium">Role</th>
-                          <th className="text-center py-3 px-2 font-medium">Total</th>
-                          <th className="text-center py-3 px-2 font-medium">Actioned</th>
-                          <th className="text-center py-3 px-2 font-medium">Action %</th>
-                          <th className="text-center py-3 px-2 font-medium">Meeting</th>
-                          <th className="text-center py-3 px-2 font-medium">Won</th>
-                          <th className="text-center py-3 px-2 font-medium">Win Rate</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {salesPerformance.map((perf) => (
-                          <tr
-                            key={perf.user.id}
-                            className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
-                            onClick={() => handleRepClick(perf)}
-                          >
-                            <td className="py-3 px-2">
-                              <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
-                                  {perf.user.name.charAt(0).toUpperCase()}
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="font-medium">{perf.user.name}</span>
-                                  <span className="text-xs text-muted-foreground">{perf.user.email}</span>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="text-center py-3 px-2">
-                              <Badge variant="outline" className="capitalize">
-                                {perf.user.role === 'super_admin' ? 'Super Admin' : perf.user.role}
-                              </Badge>
-                            </td>
-                            <td className="text-center py-3 px-2">
-                              <Badge variant="secondary">{perf.totalLeads}</Badge>
-                            </td>
-                            <td className="text-center py-3 px-2">{perf.actionedLeads}</td>
-                            <td className="text-center py-3 px-2">
-                              <Badge className={perf.actionRate >= 70 ? 'bg-cyan-600' : ''}>
-                                {perf.actionRate}%
-                              </Badge>
-                            </td>
-                            <td className="text-center py-3 px-2">
-                              {perf.statusBreakdown.demo_booked + perf.statusBreakdown.demo_completed}
-                            </td>
-                            <td className="text-center py-3 px-2">
-                              <span className="text-green-600 font-medium">
-                                {perf.statusBreakdown.deal_won}
-                              </span>
-                            </td>
-                            <td className="text-center py-3 px-2">
-                              <Badge className={perf.conversionRate >= 50 ? 'bg-green-600' : ''}>
-                                {perf.conversionRate}%
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* Mobile Cards */}
-                  <div className="md:hidden space-y-4">
-                    {salesPerformance.map((perf) => (
-                      <div
-                        key={perf.user.id}
-                        className="border rounded-lg p-4 space-y-3 hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => handleRepClick(perf)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
-                              {perf.user.name.charAt(0).toUpperCase()}
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="font-medium">{perf.user.name}</span>
-                              <span className="text-xs text-muted-foreground">{perf.user.email}</span>
-                            </div>
-                          </div>
-                          <Badge variant="secondary">{perf.totalLeads} leads</Badge>
-                        </div>
-
-                        <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-center text-sm">
-                          <div className="bg-slate-50 rounded p-2">
-                            <p className="text-muted-foreground text-xs">Total</p>
-                            <p className="font-medium text-base">{perf.totalLeads}</p>
-                          </div>
-                          <div className="bg-blue-50 rounded p-2">
-                            <p className="text-muted-foreground text-xs">Actioned</p>
-                            <p className="font-medium text-base">{perf.actionedLeads}</p>
-                          </div>
-                          <div className="bg-cyan-50 rounded p-2">
-                            <p className="text-muted-foreground text-xs">Action%</p>
-                            <p className="font-medium text-base">{perf.actionRate}%</p>
-                          </div>
-                          <div className="bg-green-50 rounded p-2">
-                            <p className="text-muted-foreground text-xs">Won</p>
-                            <p className="font-medium text-base">{perf.statusBreakdown.deal_won}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Activity Summary for Sales (non-managers) */}
-            {!canViewTeam && (
-              <Card>
-                <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
-                  <CardTitle className="text-sm sm:text-base">Your Activity Summary</CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 sm:p-6 pt-0">
-                  <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
-                    <div className="text-center p-3 sm:p-4 bg-slate-50 rounded-lg">
-                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-700">
-                        {statusBreakdown.new + statusBreakdown.call_not_picked + statusBreakdown.follow_up_again}
-                      </p>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Leads to Follow Up</p>
-                    </div>
-                    <div className="text-center p-3 sm:p-4 bg-purple-50 rounded-lg">
-                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-purple-700">{statusBreakdown.demo_booked}</p>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Meetings Scheduled</p>
-                    </div>
-                    <div className="text-center p-3 sm:p-4 bg-green-50 rounded-lg">
-                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-green-700">{statusBreakdown.deal_won}</p>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Deals Closed</p>
-                    </div>
-                    <div className="text-center p-3 sm:p-4 bg-indigo-50 rounded-lg">
-                      <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-indigo-700">{statusBreakdown.demo_completed}</p>
-                      <p className="text-xs sm:text-sm text-muted-foreground">Meetings Completed</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
-
-          {/* CALLS TAB */}
-          <TabsContent value="calls" className="space-y-6">
-            {/* Time Period (same as Overview tab) */}
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3 lg:gap-4">
             <Card>
-              <CardHeader className="pb-2 sm:pb-3 p-3 sm:p-6">
-                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
-                  <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                  Time Period
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-6 pt-0">
-                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
-                  {[
-                    { value: 'today', label: 'Today' },
-                    { value: 'last_7_days', label: 'Last 7 Days' },
-                    { value: 'last_30_days', label: 'Last 30 Days' },
-                    { value: 'all_time', label: 'All Time' },
-                    { value: 'custom', label: 'Custom' },
-                  ].map((filter) => (
-                    <Button
-                      key={filter.value}
-                      variant={dateFilter === filter.value ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setDateFilter(filter.value as DateFilter)}
-                      className="text-xs sm:text-sm h-8 sm:h-9"
-                    >
-                      {filter.label}
-                    </Button>
-                  ))}
-                  {dateFilter === 'custom' && (
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto sm:ml-2">
-                      <Input
-                        type="date"
-                        value={customDateFrom}
-                        onChange={(e) => setCustomDateFrom(e.target.value)}
-                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
-                      />
-                      <span className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">to</span>
-                      <Input
-                        type="date"
-                        value={customDateTo}
-                        onChange={(e) => setCustomDateTo(e.target.value)}
-                        className="w-full sm:w-[140px] h-8 sm:h-9 text-xs sm:text-sm"
-                      />
-                    </div>
-                  )}
+              <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg shrink-0">
+                    <Target className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{totalLeads}</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Total Leads</p>
+                  </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Header with Refresh and Filters */}
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <p className="text-muted-foreground">
-                  Call analytics (native tracking)
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Overview is based on the selected time period. Team member filter applies only to the logs list.
-                </p>
-              </div>
+            <Card>
+              <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="p-1.5 sm:p-2 bg-yellow-100 rounded-lg shrink-0">
+                    <Phone className="h-4 w-4 sm:h-5 sm:w-5 text-yellow-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{actionedLeadsCount}</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Actioned</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
-                {/* Team Member Filter (Admin and Managers) - affects log list only */}
-                {canViewTeam && salesTeam.length > 0 && (
-                  <Select value={selectedSalesRep} onValueChange={setSelectedSalesRep}>
-                    <SelectTrigger className="w-full sm:w-[220px] h-8 sm:h-9 text-xs sm:text-sm">
-                      <SelectValue placeholder="Filter logs by member" />
+            <Card>
+              <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="p-1.5 sm:p-2 bg-cyan-100 rounded-lg shrink-0">
+                    <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 text-cyan-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{actionRate}%</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Action Rate</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="p-1.5 sm:p-2 bg-green-100 rounded-lg shrink-0">
+                    <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-green-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{wonDeals}</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Deals Won</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className="p-1.5 sm:p-2 bg-purple-100 rounded-lg shrink-0">
+                    <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg sm:text-xl lg:text-2xl font-bold truncate">{conversionRate}%</p>
+                    <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Win Rate</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Charts: Line, Stacked Bar, Pie */}
+          <Card>
+            <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+              <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                <BarChart3 className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
+                Charts
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm">Leads over time, status breakdown, and distribution</CardDescription>
+            </CardHeader>
+            <CardContent className="p-3 sm:p-6 pt-0 space-y-6">
+              {/* Leads over time – multi-select lead status for line chart */}
+              {leadsByDayData.length > 0 && (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <p className="text-xs sm:text-sm font-medium">Leads over time</p>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="text-xs gap-1 h-8">
+                          {lineChartStatusFilter.size === 0 ? 'All statuses' : `${lineChartStatusFilter.size} selected`}
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        {LEAD_STATUS_OPTIONS.map((s) => (
+                          <DropdownMenuCheckboxItem
+                            key={s}
+                            checked={lineChartStatusFilter.size === 0 || lineChartStatusFilter.has(s)}
+                            onCheckedChange={(checked) => {
+                              setLineChartStatusFilter((prev) => {
+                                const next = new Set(prev)
+                                if (prev.size === 0) {
+                                  if (!checked) LEAD_STATUS_OPTIONS.filter((x) => x !== s).forEach((x) => next.add(x))
+                                  return next
+                                }
+                                if (checked) next.add(s)
+                                else next.delete(s)
+                                return next
+                              })
+                            }}
+                          >
+                            {getStatusLabel(s, leadStatuses)}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={leadsByDayData} margin={{ left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} />
+                        <Tooltip />
+                        <Legend {...SMALL_LEGEND_PROPS} />
+                        {lineChartStatuses.map((s) => (
+                          <Line
+                            key={s}
+                            type="monotone"
+                            dataKey={s}
+                            name={getStatusLabel(s, leadStatuses)}
+                            stroke={CHART_STATUS_COLORS[s]}
+                            strokeWidth={2}
+                            strokeOpacity={1}
+                            dot={{ r: 3, fill: CHART_STATUS_COLORS[s] }}
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+              {/* Lead status by day – multi-select lead status for stacked bar chart */}
+              {leadsByDayByStatusData.length > 0 && (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <p className="text-xs sm:text-sm font-medium">Lead status by day</p>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="text-xs gap-1 h-8">
+                          {barChartStatusFilter.size === 0 ? 'All statuses' : `${barChartStatusFilter.size} selected`}
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        {LEAD_STATUS_OPTIONS.map((s) => (
+                          <DropdownMenuCheckboxItem
+                            key={s}
+                            checked={barChartStatusFilter.size === 0 || barChartStatusFilter.has(s)}
+                            onCheckedChange={(checked) => {
+                              setBarChartStatusFilter((prev) => {
+                                const next = new Set(prev)
+                                if (prev.size === 0) {
+                                  if (!checked) LEAD_STATUS_OPTIONS.filter((x) => x !== s).forEach((x) => next.add(x))
+                                  return next
+                                }
+                                if (checked) next.add(s)
+                                else next.delete(s)
+                                return next
+                              })
+                            }}
+                          >
+                            {getStatusLabel(s, leadStatuses)}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={leadsByDayByStatusData} barCategoryGap="24%" barGap={2}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} />
+                        <Tooltip />
+                        <Legend {...SMALL_LEGEND_PROPS} />
+                        {barChartStatuses.map((s, i) => (
+                          <Bar
+                            key={s}
+                            dataKey={s}
+                            stackId="a"
+                            fill={CHART_STATUS_COLORS[s]}
+                            name={getStatusLabel(s, leadStatuses)}
+                            radius={i === barChartStatuses.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                            maxBarSize={40}
+                          />
+                        ))}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+              {/* Row 1: Sales reps by lead status | Sales reps by subscription type */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-lg border p-4">
+                  <p className="text-xs sm:text-sm font-medium mb-2">Sales reps by lead status</p>
+                  <Select value={pieRepByStatusFilter || ''} onValueChange={setPieRepByStatusFilter}>
+                    <SelectTrigger className="w-full max-w-[200px] mb-3 h-8 text-xs">
+                      <SelectValue placeholder="Lead status" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Team Members (Logs)</SelectItem>
-                      {salesTeam.map((rep) => (
-                        <SelectItem key={rep.id} value={rep.id}>
-                          {rep.name} ({rep.email}) - {rep.role === 'super_admin' ? 'Super Admin' : rep.role}
+                      {LEAD_STATUS_OPTIONS.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {getStatusLabel(s, leadStatuses)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                )}
-
-                <Button variant="outline" onClick={() => fetchCallLogs()} disabled={isLoadingCallLogs} className="h-8 sm:h-9 text-xs sm:text-sm">
-                  <RefreshCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2 ${isLoadingCallLogs ? 'animate-spin' : ''}`} />
-                  {isLoadingCallLogs ? 'Loading...' : 'Refresh'}
-                </Button>
+                  {pieRepByStatusData.length > 0 ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={pieRepByStatusData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={64}>
+                            {pieRepByStatusData.map((_, i) => (
+                              <Cell key={i} fill={['hsl(var(--primary))', '#8b5cf6', '#06b6d4', '#22c55e', '#f97316', '#eab308'][i % 6]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ fontSize: 11 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm py-8 text-center">{pieRepByStatusFilter ? 'No data' : 'Select lead status'}</p>
+                  )}
+                </div>
+                <div className="rounded-lg border p-4">
+                  <p className="text-xs sm:text-sm font-medium mb-2">Sales reps by subscription type</p>
+                  <Select value={pieRepBySubFilter} onValueChange={setPieRepBySubFilter}>
+                    <SelectTrigger className="w-full max-w-[200px] mb-3 h-8 text-xs">
+                      <SelectValue placeholder="Subscription type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="trial">Trial</SelectItem>
+                      <SelectItem value="paid">Paid</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {pieRepBySubData.length > 0 ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={pieRepBySubData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={64}>
+                            {pieRepBySubData.map((_, i) => (
+                              <Cell key={i} fill={['hsl(var(--primary))', '#8b5cf6', '#06b6d4', '#22c55e', '#f97316'][i % 5]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ fontSize: 11 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm py-8 text-center">No leads with this subscription type</p>
+                  )}
+                </div>
               </div>
-            </div>
+              {/* Row 2: Lead status by sales rep | Subscription type by sales rep */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-lg border p-4">
+                  <p className="text-xs sm:text-sm font-medium mb-2">Lead status by sales rep</p>
+                  <Select value={pieStatusByRepFilter} onValueChange={setPieStatusByRepFilter}>
+                    <SelectTrigger className="w-full max-w-[200px] mb-3 h-8 text-xs">
+                      <SelectValue placeholder="Sales rep" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(canViewTeam ? salesTeam : user ? [user] : []).map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {pieStatusByRepData.length > 0 ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={pieStatusByRepData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={64}>
+                            {pieStatusByRepData.map((entry, i) => (
+                              <Cell key={i} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ fontSize: 11 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm py-8 text-center">{pieStatusByRepFilter ? 'No data' : 'Select sales rep'}</p>
+                  )}
+                </div>
+                <div className="rounded-lg border p-4">
+                  <p className="text-xs sm:text-sm font-medium mb-2">Subscription type by sales rep</p>
+                  <Select value={pieSubByRepFilter} onValueChange={setPieSubByRepFilter}>
+                    <SelectTrigger className="w-full max-w-[200px] mb-3 h-8 text-xs">
+                      <SelectValue placeholder="Sales rep" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(canViewTeam ? salesTeam : user ? [user] : []).map((u) => (
+                        <SelectItem key={u.id} value={u.id}>
+                          {u.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {pieSubByRepData.length > 0 ? (
+                    <div className="h-48">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={pieSubByRepData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={64}>
+                            {pieSubByRepData.map((entry, i) => (
+                              <Cell key={i} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ fontSize: 11 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm py-8 text-center">{pieSubByRepFilter ? 'No leads with subscription' : 'Select sales rep'}</p>
+                  )}
+                </div>
+              </div>
+              {leadsByDayData.length === 0 && leadsByDayByStatusData.length === 0 && (
+                <p className="text-center text-muted-foreground text-sm py-4">No chart data for this time period</p>
+              )}
+            </CardContent>
+          </Card>
 
-            {/* Warnings */}
-            {/* Note: Google Drive sync warnings removed - using native call tracking only */}
-
-            {/* Call Analytics Overview (same style as Overview tab) */}
+          {/* Team Performance (Admin and Managers) */}
+          {canViewTeam && salesTeam.length > 0 && (
             <Card>
               <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
-                <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
-                  <Phone className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
-                  Call Overview
-                </CardTitle>
-                <CardDescription>
-                  Summary of calls for the selected time period
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="p-3 sm:p-6 pt-0 space-y-4">
-                {/* Summary */}
-                <div className="grid grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-3 lg:gap-4">
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total Calls</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <Phone className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.totalCalls}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Completed</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.statusCounts.completed}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Not Picked</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.statusCounts.missed}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Failed</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-500 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.statusCounts.failed}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Answer Rate</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.answerRate}%</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Avg Talk Time</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-blue-500 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{formatDuration(callOverview.avgTalkTime)}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  <span>
-                    Unique leads contacted: <span className="font-medium text-foreground">{callOverview.uniqueLeads}</span>
-                  </span>
-                  <span className="text-muted-foreground/60">|</span>
-                  <span>
-                    Unique completed leads: <span className="font-medium text-foreground">{callOverview.uniqueLeadsByStatus.completed}</span>
-                  </span>
-                  <span className="text-muted-foreground/60">|</span>
-                  <span>
-                    Unique not picked leads: <span className="font-medium text-foreground">{callOverview.uniqueLeadsByStatus.missed}</span>
-                  </span>
-                </div>
-
-                {/* Unique Leads Summary (cards) */}
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-3 lg:gap-4">
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Leads</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 sm:w-5 sm:h-5 text-primary shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeads}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Completed</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-green-500 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeadsByStatus.completed}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Not Picked</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <XCircle className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeadsByStatus.missed}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Failed</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-red-500 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">{callOverview.uniqueLeadsByStatus.failed}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-2 p-3 sm:p-4">
-                      <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Unique Answer %</CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-3 sm:p-4 pt-0">
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-600 shrink-0" />
-                        <span className="text-lg sm:text-xl font-bold">
-                          {callOverview.uniqueLeads > 0
-                            ? Math.round((callOverview.uniqueLeadsByStatus.completed / callOverview.uniqueLeads) * 100)
-                            : 0}%
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {/* Call Metrics (per team member) */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">
-                      {canViewTeam ? 'Team Call Performance' : 'Your Call Performance'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Avg talk time is calculated on completed calls
-                    </p>
-                  </div>
-
-                  {callOverview.byUser.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-6 text-center">
-                      No call data for this period
-                    </p>
-                  ) : (
-                    <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b bg-muted/30">
-                            <th className="text-left py-2.5 px-3 font-medium">Member</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Calls</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Completed</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Not Picked</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Failed</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Answer %</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Avg Talk</th>
-                            <th className="text-right py-2.5 px-3 font-medium">Last Call</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(canViewTeam
-                            ? callOverview.byUser
-                            : callOverview.byUser.filter(u => u.userId === user?.id)
-                          ).map((u) => (
-                            <tr key={u.userId} className="border-b last:border-0">
-                              <td className="py-2.5 px-3">
-                                <div className="flex flex-col">
-                                  <span className="font-medium">{u.name}</span>
-                                  {u.email ? <span className="text-xs text-muted-foreground">{u.email}</span> : null}
-                                </div>
-                              </td>
-                              <td className="text-center py-2.5 px-3">{u.totalCalls}</td>
-                              <td className="text-center py-2.5 px-3">{u.completed}</td>
-                              <td className="text-center py-2.5 px-3">{u.missed}</td>
-                              <td className="text-center py-2.5 px-3">{u.failed}</td>
-                              <td className="text-center py-2.5 px-3">
-                                <Badge variant="secondary">{u.answerRate}%</Badge>
-                              </td>
-                              <td className="text-center py-2.5 px-3">{formatDuration(u.avgTalkTime)}</td>
-                              <td className="text-right py-2.5 px-3 text-muted-foreground">
-                                {u.lastCallAt ? format(new Date(u.lastCallAt), 'MMM d, HH:mm') : '--'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                {/* Unique Leads Metrics (per team member) */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">
-                      Unique Leads Metrics
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Unique Answer % = unique completed leads / unique leads contacted
-                    </p>
-                  </div>
-
-                  {callOverview.byUser.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-6 text-center">
-                      No lead-linked call data for this period
-                    </p>
-                  ) : (
-                    <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b bg-muted/30">
-                            <th className="text-left py-2.5 px-3 font-medium">Member</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Unique Leads</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Unique Completed</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Unique Not Picked</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Unique Failed</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Unique Answer %</th>
-                            <th className="text-right py-2.5 px-3 font-medium">Last Call</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(canViewTeam
-                            ? callOverview.byUser
-                            : callOverview.byUser.filter(u => u.userId === user?.id)
-                          ).map((u) => {
-                            const uniqueAnswerRate = u.uniqueLeads > 0
-                              ? Math.round((u.uniqueCompletedLeads / u.uniqueLeads) * 100)
-                              : 0
-                            return (
-                              <tr key={`unique-${u.userId}`} className="border-b last:border-0">
-                                <td className="py-2.5 px-3">
-                                  <div className="flex flex-col">
-                                    <span className="font-medium">{u.name}</span>
-                                    {u.email ? <span className="text-xs text-muted-foreground">{u.email}</span> : null}
-                                  </div>
-                                </td>
-                                <td className="text-center py-2.5 px-3">{u.uniqueLeads}</td>
-                                <td className="text-center py-2.5 px-3">{u.uniqueCompletedLeads}</td>
-                                <td className="text-center py-2.5 px-3">{u.uniqueMissedLeads}</td>
-                                <td className="text-center py-2.5 px-3">{u.uniqueFailedLeads}</td>
-                                <td className="text-center py-2.5 px-3">
-                                  <Badge variant="secondary">{uniqueAnswerRate}%</Badge>
-                                </td>
-                                <td className="text-right py-2.5 px-3 text-muted-foreground">
-                                  {u.lastCallAt ? format(new Date(u.lastCallAt), 'MMM d, HH:mm') : '--'}
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                {/* Lead breakdown */}
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Top Leads by Calls</p>
-
-                  {callOverview.byLead.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-6 text-center">
-                      No lead-linked call data for this period
-                    </p>
-                  ) : (
-                    <div className="overflow-x-auto border rounded-lg">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b bg-muted/30">
-                            <th className="text-left py-2.5 px-3 font-medium">Lead</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Calls</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Completed</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Not Picked</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Failed</th>
-                            <th className="text-center py-2.5 px-3 font-medium">Talk Time</th>
-                            <th className="text-right py-2.5 px-3 font-medium">Last Call</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {callOverview.byLead.map((l) => (
-                            <tr key={l.leadId} className="border-b last:border-0">
-                              <td className="py-2.5 px-3">
-                                <div className="flex flex-col">
-                                  <span className="font-medium">{l.name}</span>
-                                  {l.phone ? <span className="text-xs text-muted-foreground">{l.phone}</span> : null}
-                                </div>
-                              </td>
-                              <td className="text-center py-2.5 px-3">{l.totalCalls}</td>
-                              <td className="text-center py-2.5 px-3">{l.completed}</td>
-                              <td className="text-center py-2.5 px-3">{l.missed}</td>
-                              <td className="text-center py-2.5 px-3">{l.failed}</td>
-                              <td className="text-center py-2.5 px-3">{formatDuration(l.totalTalkTime)}</td>
-                              <td className="text-right py-2.5 px-3 text-muted-foreground">
-                                {l.lastCallAt ? format(new Date(l.lastCallAt), 'MMM d, HH:mm') : '--'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recent Calls */}
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div>
-                    <CardTitle>Recent Calls</CardTitle>
-                    <CardDescription>Most recent calls for the selected time period</CardDescription>
-                  </div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 sm:gap-0">
+                  <CardTitle className="text-sm sm:text-base flex items-center gap-1.5 sm:gap-2">
+                    <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 lg:h-5 lg:w-5" />
+                    Team Performance
+                  </CardTitle>
+                  <p className="text-[10px] sm:text-xs text-muted-foreground">Click on a row to see details</p>
                 </div>
               </CardHeader>
-              <CardContent>
-                {isLoadingCallLogs ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-                  </div>
-                ) : recentCalls.length === 0 ? (
-                  <div className="text-center py-12 text-muted-foreground">
-                    <Phone className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>{callLogs.length === 0 ? 'No calls tracked yet' : 'No recent calls for this period'}</p>
-                    <p className="text-sm mt-2">Calls made from the app will appear here</p>
-                  </div>
-                ) : (
-                  <ScrollArea className="h-[420px] pr-3">
-                    <div className="space-y-3">
-                      {recentCalls.map((log) => {
-                        const formatDuration = (seconds: number) => {
-                          const mins = Math.floor(seconds / 60)
-                          const secs = seconds % 60
-                          return `${mins}:${secs.toString().padStart(2, '0')}`
-                        }
-
-                        const getStatusColor = () => {
-                          switch (log.call_status) {
-                            case 'completed': return 'bg-green-500/10 text-green-600 border-green-500/20'
-                            case 'missed': return 'bg-orange-500/10 text-orange-600 border-orange-500/20'
-                            case 'failed': return 'bg-red-500/10 text-red-600 border-red-500/20'
-                            case 'rejected': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
-                            case 'busy': return 'bg-purple-500/10 text-purple-600 border-purple-500/20'
-                            case 'blocked': return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
-                            default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
-                          }
-                        }
-
-                        const getStatusLabel = () => {
-                          switch (log.call_status) {
-                            case 'completed': return 'Completed'
-                            case 'missed': return 'Not Picked'
-                            case 'failed': return 'Failed'
-                            case 'rejected': return 'Rejected'
-                            case 'busy': return 'Busy'
-                            case 'blocked': return 'Blocked'
-                            default: return log.call_status
-                          }
-                        }
-
-                        return (
-                          <div
-                            key={log.id}
-                            className="flex items-center gap-4 p-4 rounded-lg border hover:bg-muted/50"
-                          >
-                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                              <Phone className="w-5 h-5 text-primary" />
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{log.phone_number}</span>
-                                <Badge variant="outline" className={`text-xs ${getStatusColor()}`}>
-                                  {getStatusLabel()}
-                                </Badge>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-2 font-medium">Team Member</th>
+                        <th className="text-center py-3 px-2 font-medium">Role</th>
+                        <th className="text-center py-3 px-2 font-medium">Total</th>
+                        <th className="text-center py-3 px-2 font-medium">Actioned</th>
+                        <th className="text-center py-3 px-2 font-medium">Action %</th>
+                        <th className="text-center py-3 px-2 font-medium">Meeting</th>
+                        <th className="text-center py-3 px-2 font-medium">Won</th>
+                        <th className="text-center py-3 px-2 font-medium">Win Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {salesPerformance.map((perf) => (
+                        <tr
+                          key={perf.user.id}
+                          className="border-b last:border-0 hover:bg-muted/50 cursor-pointer transition-colors"
+                          onClick={() => handleRepClick(perf)}
+                        >
+                          <td className="py-3 px-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
+                                {perf.user.name.charAt(0).toUpperCase()}
                               </div>
-                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                <Calendar className="w-3 h-3" />
-                                {format(new Date(log.call_started_at), 'MMM d, h:mm a')}
-                                <Clock className="w-3 h-3 ml-2" />
-                                {formatDuration(log.duration_seconds)}
-                                {log.talk_time_seconds && log.talk_time_seconds > 0 && (
-                                  <>
-                                    <span className="ml-2">•</span>
-                                    <span>Talk: {formatDuration(log.talk_time_seconds)}</span>
-                                  </>
-                                )}
-                                {/* Show sales rep name for admin */}
-                                {isAdmin && log.users && (
-                                  <>
-                                    <UserIcon className="w-3 h-3 ml-2" />
-                                    <span className="text-primary">
-                                      {log.users.name} ({log.users.email})
-                                    </span>
-                                  </>
-                                )}
+                              <div className="flex flex-col">
+                                <span className="font-medium">{perf.user.name}</span>
+                                <span className="text-xs text-muted-foreground">{perf.user.email}</span>
                               </div>
                             </div>
+                          </td>
+                          <td className="text-center py-3 px-2">
+                            <Badge variant="outline" className="capitalize">
+                              {perf.user.role === 'super_admin' ? 'Super Admin' : perf.user.role}
+                            </Badge>
+                          </td>
+                          <td className="text-center py-3 px-2">
+                            <Badge variant="secondary">{perf.totalLeads}</Badge>
+                          </td>
+                          <td className="text-center py-3 px-2">{perf.actionedLeads}</td>
+                          <td className="text-center py-3 px-2">
+                            <Badge className={perf.actionRate >= 70 ? 'bg-cyan-600' : ''}>
+                              {perf.actionRate}%
+                            </Badge>
+                          </td>
+                          <td className="text-center py-3 px-2">
+                            {perf.statusBreakdown.demo_booked + perf.statusBreakdown.demo_completed}
+                          </td>
+                          <td className="text-center py-3 px-2">
+                            <span className="text-green-600 font-medium">
+                              {perf.statusBreakdown.deal_won}
+                            </span>
+                          </td>
+                          <td className="text-center py-3 px-2">
+                            <Badge className={perf.conversionRate >= 50 ? 'bg-green-600' : ''}>
+                              {perf.conversionRate}%
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile Cards */}
+                <div className="md:hidden space-y-4">
+                  {salesPerformance.map((perf) => (
+                    <div
+                      key={perf.user.id}
+                      className="border rounded-lg p-4 space-y-3 hover:bg-muted/50 cursor-pointer transition-colors"
+                      onClick={() => handleRepClick(perf)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
+                            {perf.user.name.charAt(0).toUpperCase()}
                           </div>
-                        )
-                      })}
+                          <div className="flex flex-col">
+                            <span className="font-medium">{perf.user.name}</span>
+                            <span className="text-xs text-muted-foreground">{perf.user.email}</span>
+                          </div>
+                        </div>
+                        <Badge variant="secondary">{perf.totalLeads} leads</Badge>
+                      </div>
+
+                      <div className="flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-2 text-center text-sm">
+                        <div className="bg-slate-50 rounded p-2">
+                          <p className="text-muted-foreground text-xs">Total</p>
+                          <p className="font-medium text-base">{perf.totalLeads}</p>
+                        </div>
+                        <div className="bg-blue-50 rounded p-2">
+                          <p className="text-muted-foreground text-xs">Actioned</p>
+                          <p className="font-medium text-base">{perf.actionedLeads}</p>
+                        </div>
+                        <div className="bg-cyan-50 rounded p-2">
+                          <p className="text-muted-foreground text-xs">Action%</p>
+                          <p className="font-medium text-base">{perf.actionRate}%</p>
+                        </div>
+                        <div className="bg-green-50 rounded p-2">
+                          <p className="text-muted-foreground text-xs">Won</p>
+                          <p className="font-medium text-base">{perf.statusBreakdown.deal_won}</p>
+                        </div>
+                      </div>
                     </div>
-                  </ScrollArea>
-                )}
+                  ))}
+                </div>
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+          )}
+
+          {/* Activity Summary for Sales (non-managers) */}
+          {!canViewTeam && (
+            <Card>
+              <CardHeader className="p-3 sm:p-6 pb-2 sm:pb-3">
+                <CardTitle className="text-sm sm:text-base">Your Activity Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 sm:p-6 pt-0">
+                <div className="flex flex-col sm:grid sm:grid-cols-2 gap-2 sm:gap-3 lg:gap-4">
+                  <div className="text-center p-3 sm:p-4 bg-slate-50 rounded-lg">
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-700">
+                      {statusBreakdown.new + statusBreakdown.call_not_picked + statusBreakdown.follow_up_again}
+                    </p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Leads to Follow Up</p>
+                  </div>
+                  <div className="text-center p-3 sm:p-4 bg-purple-50 rounded-lg">
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-purple-700">{statusBreakdown.demo_booked}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Meetings Scheduled</p>
+                  </div>
+                  <div className="text-center p-3 sm:p-4 bg-green-50 rounded-lg">
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-green-700">{statusBreakdown.deal_won}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Deals Closed</p>
+                  </div>
+                  <div className="text-center p-3 sm:p-4 bg-indigo-50 rounded-lg">
+                    <p className="text-xl sm:text-2xl lg:text-3xl font-bold text-indigo-700">{statusBreakdown.demo_completed}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground">Meetings Completed</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </div>
 
       {/* Sales Rep Detail Dialog */}

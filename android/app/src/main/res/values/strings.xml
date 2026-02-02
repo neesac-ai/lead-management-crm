@@ -3,8 +3,9 @@
     <string name="app_name">BharatCRM</string>
     <!-- <string name="pwa_url">https://bharatcrm.neesac.ai</string> -->
     <!--<string name="pwa_url">http://127.0.0.1:3000</string> -->
-    <!--<string name="pwa_url">http://192.168.0.101:3000</string> -->
-    <string name="pwa_url">https://bharatcrm.neesac.ai</string>
+    <string name="pwa_url">http://192.168.1.34:3000</string>
+
 </resources>
+
 
 

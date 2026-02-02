@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.provider.CallLog
 import android.util.Log
 import android.webkit.WebView
 import androidx.core.content.ContextCompat
@@ -86,7 +87,8 @@ class DeviceCallLogMonitor(
         if (!simSelectionManager.isEnabled()) return
 
         val allowedPhoneAccountIds = simSelectionManager.getAllowedPhoneAccountIds()
-        val lastTs = prefs.getLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, 0L)
+        val forceFull = simSelectionManager.consumeForceFullSyncOnce()
+        val lastTs = if (forceFull) 0L else prefs.getLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, 0L)
 
         // Read a conservative batch size so we don't overload the bridge / network.
         val rows = callLogReader.getDeviceCallLogsSince(
@@ -102,20 +104,32 @@ class DeviceCallLogMonitor(
         // Convert to payload the webapp can directly POST.
         // CallLog.Calls.DATE is the call start time. End time is approximated as start + duration seconds.
         val payloadRows = rows.mapNotNull { row ->
-            val direction = row.getCallTypeString()
-            if (direction == "unknown") return@mapNotNull null
+            val type = row.callType
+
+            // Direction is only incoming/outgoing. Status is the outcome/type.
+            val direction = when (type) {
+                CallLog.Calls.OUTGOING_TYPE -> "outgoing"
+                else -> "incoming"
+            }
 
             val callStartedAtIso = dateFormat.format(Date(row.date))
             val callEndedAtIso = dateFormat.format(Date(row.date + (row.duration * 1000L)))
 
-            // Backend validates call_status separately from call_direction.
-            // For incoming/outgoing, infer status from duration. For missed/rejected/blocked, status equals direction.
-            val status = when (direction) {
-                "incoming", "outgoing" -> if (row.duration > 0) "completed" else "missed"
-                "missed" -> "missed"
-                "rejected" -> "rejected"
-                "blocked" -> "blocked"
-                else -> "missed"
+            val status = when (type) {
+                CallLog.Calls.MISSED_TYPE -> "missed"
+                CallLog.Calls.REJECTED_TYPE -> "rejected"
+                CallLog.Calls.BLOCKED_TYPE -> "blocked"
+                CallLog.Calls.VOICEMAIL_TYPE -> "voicemail"
+                CallLog.Calls.ANSWERED_EXTERNALLY_TYPE -> "answered_externally"
+                CallLog.Calls.INCOMING_TYPE, CallLog.Calls.OUTGOING_TYPE -> {
+                    // CallLog duration is "talk time" for incoming/outgoing.
+                    when {
+                        row.duration <= 0L -> "missed"
+                        row.duration < 5L -> "failed"
+                        else -> "completed"
+                    }
+                }
+                else -> "unknown"
             }
 
             mapOf(
@@ -127,7 +141,8 @@ class DeviceCallLogMonitor(
                 "call_ended_at" to callEndedAtIso,
                 "duration_seconds" to row.duration,
                 "contact_name" to row.name,
-                "phone_account_id" to row.phoneAccountId
+                "phone_account_id" to row.phoneAccountId,
+                "raw_call_type" to row.callType
             )
         }
 

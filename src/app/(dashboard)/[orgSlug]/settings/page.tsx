@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import {
   Building2,
   Calendar,
@@ -60,9 +61,21 @@ export default function SettingsPage({ params }: PageProps) {
   const [callTrackingStatus, setCallTrackingStatus] = useState<{
     enabled: boolean
     configured: boolean
+    sim_slot_count?: number
+    active_sim_count?: number
+    sync_interval_minutes?: number
+    auto_sync_enabled?: boolean
+    permissions?: { read_phone_state: boolean; read_call_log: boolean; post_notifications?: boolean; notifications_enabled?: boolean }
+    service_status?: { running: boolean }
+    auth_state?: { device_key_present: boolean }
     allowed_phone_account_ids: string[]
-    available_phone_accounts: { id: string; label: string }[]
+    available_phone_accounts: { id: string; label: string; match_ids?: string[] }[]
   } | null>(null)
+
+  const [selectedCallTrackingSim, setSelectedCallTrackingSim] = useState<string>('ALL')
+  const [simSelectionDirty, setSimSelectionDirty] = useState(false)
+  const [isSavingCallTracking, setIsSavingCallTracking] = useState(false)
+  const [isSyncingNow, setIsSyncingNow] = useState(false)
 
   // Profile editing states
   const [profileName, setProfileName] = useState('')
@@ -119,17 +132,61 @@ export default function SettingsPage({ params }: PageProps) {
         const raw = bridge?.getCallTrackingStatus?.()
         if (!raw) return
         const parsed = JSON.parse(raw) as any
-        setCallTrackingStatus({
+        const nextStatus = {
           enabled: !!parsed.enabled,
           configured: !!parsed.configured,
+          sim_slot_count: typeof parsed.sim_slot_count === 'number' ? parsed.sim_slot_count : undefined,
+          active_sim_count: typeof parsed.active_sim_count === 'number' ? parsed.active_sim_count : undefined,
+          sync_interval_minutes: typeof parsed.sync_interval_minutes === 'number' ? parsed.sync_interval_minutes : 15,
+          auto_sync_enabled: parsed.auto_sync_enabled != null ? !!parsed.auto_sync_enabled : true,
+          permissions: parsed.permissions
+            ? {
+              read_phone_state: !!parsed.permissions.read_phone_state,
+              read_call_log: !!parsed.permissions.read_call_log,
+              post_notifications: parsed.permissions.post_notifications != null ? !!parsed.permissions.post_notifications : undefined,
+              notifications_enabled: parsed.permissions.notifications_enabled != null ? !!parsed.permissions.notifications_enabled : undefined,
+            }
+            : undefined,
+          service_status: parsed.service_status ? { running: !!parsed.service_status.running } : undefined,
+          auth_state: parsed.auth_state ? { device_key_present: !!parsed.auth_state.device_key_present } : undefined,
           allowed_phone_account_ids: Array.isArray(parsed.allowed_phone_account_ids) ? parsed.allowed_phone_account_ids : [],
           available_phone_accounts: Array.isArray(parsed.available_phone_accounts)
             ? parsed.available_phone_accounts.map((acc: any) => ({
               id: String(acc.id ?? ''),
               label: String(acc.label ?? 'SIM'),
+              match_ids: Array.isArray(acc.match_ids) ? acc.match_ids.map((x: any) => String(x)) : undefined,
             }))
             : [],
-        })
+        } satisfies NonNullable<typeof callTrackingStatus>
+
+        setCallTrackingStatus(nextStatus)
+
+        // Derive selected option from persisted allowed ids.
+        const allowed = nextStatus.allowed_phone_account_ids || []
+        const accounts = nextStatus.available_phone_accounts || []
+        const allowedSet = new Set(allowed)
+
+        if (allowedSet.size === 0) {
+          setSelectedCallTrackingSim('ALL')
+        } else {
+          // We store "match ids" (e.g. subscriptionId + slotIndex) for best-effort SIM filtering.
+          // So we need to map those ids back to a single SIM option in the UI.
+          const matchedAccount = accounts.find((acc) => {
+            const ids = (acc.match_ids && acc.match_ids.length > 0) ? acc.match_ids : [acc.id]
+            return ids.length > 0 && ids.every((id) => allowedSet.has(id))
+          })
+
+          if (matchedAccount?.id) {
+            setSelectedCallTrackingSim(matchedAccount.id)
+          } else if (accounts.length > 1) {
+            setSelectedCallTrackingSim('BOTH')
+          } else if (accounts[0]?.id) {
+            setSelectedCallTrackingSim(accounts[0].id)
+          } else {
+            setSelectedCallTrackingSim('ALL')
+          }
+        }
+        setSimSelectionDirty(false)
       } catch (e) {
         console.warn('Failed to parse call tracking status', e)
       }
@@ -143,6 +200,189 @@ export default function SettingsPage({ params }: PageProps) {
     })
     return cleanup
   }, [orgSlug])
+
+  const requestSimPermissionAndRefresh = async () => {
+    const bridge = getNativeBridge()
+    if (!bridge?.requestSimInfoPermission) {
+      // Backward-compatible fallback: older Android builds don't have this API.
+      if (bridge?.setupCallTracking) {
+        toast.info('Opening native setup to grant permissions')
+        bridge.setupCallTracking()
+        return
+      }
+      toast.error('Native SIM permission request not available')
+      return
+    }
+    toast.info('Grant SIM permission on the prompt')
+    bridge.requestSimInfoPermission()
+    // Permission prompt is async; poll a few times to refresh UI.
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 500))
+      try {
+        const raw = bridge.getCallTrackingStatus?.()
+        if (!raw) continue
+        const parsed = JSON.parse(raw) as any
+        if (parsed?.permissions?.read_phone_state) {
+          // Trigger the normal refresh path by dispatching an event we already listen to.
+          window.dispatchEvent(new CustomEvent('nativeappevent', { detail: { type: 'CALL_TRACKING_SETUP', data: {} } }))
+          return
+        }
+      } catch { }
+    }
+  }
+
+  const saveCallTrackingSelection = async (enabled: boolean) => {
+    const bridge = getNativeBridge()
+    if (!bridge?.configureCallTracking) {
+      // Backward-compatible fallback: older Android builds require native setup dialog.
+      if (bridge?.setupCallTracking) {
+        toast.info('Opening native setup to configure call tracking')
+        bridge.setupCallTracking()
+        return
+      }
+      toast.error('Native call tracking configuration not available')
+      return
+    }
+
+    let allowedIds: string[] = []
+    if (selectedCallTrackingSim === 'ALL') {
+      allowedIds = []
+    } else if (selectedCallTrackingSim === 'BOTH') {
+      allowedIds = (callTrackingStatus?.available_phone_accounts || [])
+        .flatMap((a) => (Array.isArray(a.match_ids) && a.match_ids.length > 0) ? a.match_ids : [a.id])
+        .filter(Boolean)
+    } else {
+      const selected = (callTrackingStatus?.available_phone_accounts || []).find((a) => a.id === selectedCallTrackingSim)
+      allowedIds = (selected?.match_ids && selected.match_ids.length > 0)
+        ? selected.match_ids
+        : [selectedCallTrackingSim]
+    }
+
+    setIsSavingCallTracking(true)
+    try {
+      const raw = bridge.configureCallTracking(enabled, JSON.stringify(allowedIds))
+      if (!raw) throw new Error('No response from native config')
+      const parsed = JSON.parse(raw) as any
+      if (parsed?.error) throw new Error(String(parsed.error))
+      toast.success('Call tracking settings saved')
+      setSimSelectionDirty(false)
+      // Refresh immediately, then poll a few times (permission dialog is async; web may get updated status after user grants)
+      window.dispatchEvent(new CustomEvent('nativeappevent', { detail: { type: 'CALL_TRACKING_SETUP', data: {} } }))
+      if (enabled) {
+        for (let i = 0; i < 5; i++) {
+          await new Promise((r) => setTimeout(r, 500))
+          window.dispatchEvent(new CustomEvent('nativeappevent', { detail: { type: 'CALL_TRACKING_SETUP', data: {} } }))
+        }
+      }
+    } catch (e) {
+      console.error('Failed saving call tracking selection', e)
+      toast.error(e instanceof Error ? e.message : 'Failed to save call tracking setting')
+    } finally {
+      setIsSavingCallTracking(false)
+    }
+  }
+
+  const handleSyncNow = async () => {
+    const bridge = getNativeBridge()
+    if (!bridge?.syncCallLogsNow) {
+      toast.error('Sync not available')
+      return
+    }
+    setIsSyncingNow(true)
+    try {
+      const raw = bridge.syncCallLogsNow(true)
+      const parsed = JSON.parse(raw) as any
+      if (parsed?.error) throw new Error(parsed.error)
+      toast.success('Syncing all available calls…')
+      window.dispatchEvent(new CustomEvent('nativeappevent', { detail: { type: 'CALL_TRACKING_SETUP', data: {} } }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Sync failed')
+    } finally {
+      setIsSyncingNow(false)
+    }
+  }
+
+  const handleAutoSyncChange = async (enabled: boolean) => {
+    const bridge = getNativeBridge()
+    if (!bridge?.setAutoSyncEnabled) return
+    try {
+      bridge.setAutoSyncEnabled(enabled)
+      setCallTrackingStatus((s) => (s ? { ...s, auto_sync_enabled: enabled } : null))
+      toast.success(enabled ? 'Auto sync enabled' : 'Auto sync disabled')
+    } catch {
+      toast.error('Failed to update auto sync')
+    }
+  }
+
+  const handleSyncIntervalChange = async (minutes: number) => {
+    const bridge = getNativeBridge()
+    if (!bridge?.setSyncIntervalMinutes) return
+    try {
+      bridge.setSyncIntervalMinutes(minutes)
+      setCallTrackingStatus((s) => (s ? { ...s, sync_interval_minutes: minutes } : null))
+      toast.success(`Sync interval set to ${minutes} min`)
+    } catch {
+      toast.error('Failed to update sync interval')
+    }
+  }
+
+  const handleStartBackgroundSync = () => {
+    const bridge = getNativeBridge()
+    if (!bridge?.startCallTrackingServiceNow) return
+    try {
+      const raw = bridge.startCallTrackingServiceNow()
+      const parsed = JSON.parse(raw) as any
+      if (parsed?.error) {
+        toast.error(parsed.error)
+      } else {
+        const attempt = typeof parsed?.attempt === 'string' ? JSON.parse(parsed.attempt || '{}') : parsed?.attempt || {}
+        if (attempt?.started) {
+          toast.success('Background sync started')
+        } else if (attempt?.blockers) {
+          toast.error(`Could not start: ${String(attempt.blockers).replace(/,/g, ', ')}`)
+        } else {
+          toast.info(attempt?.reason || attempt?.error || 'Check status')
+        }
+      }
+      window.dispatchEvent(new CustomEvent('nativeappevent', { detail: { type: 'CALL_TRACKING_SETUP', data: {} } }))
+    } catch {
+      toast.error('Failed to start background sync')
+    }
+  }
+
+  const enrollDeviceNow = async () => {
+    if (!isNativeApp()) return
+    const bridge = getNativeBridge()
+    if (!bridge?.setDeviceEnrollmentDetailsWithResult && !bridge?.setDeviceEnrollmentWithResult && !bridge?.setDeviceEnrollment) {
+      toast.error('Device enrollment not available')
+      return
+    }
+    try {
+      const res = await fetch('/api/native/device/enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: 'android', device_label: 'Android device' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || 'Enroll failed')
+      const deviceId = String(data?.device?.id || '')
+      const deviceKey = String(data?.device_key || '')
+      const assignedName = String(data?.assigned_user?.name || '')
+      const assignedEmail = String(data?.assigned_user?.email || '')
+      if (!deviceId || !deviceKey) throw new Error('Enroll response missing device key')
+      if (bridge.setDeviceEnrollmentDetailsWithResult) {
+        bridge.setDeviceEnrollmentDetailsWithResult(deviceId, deviceKey, assignedName, assignedEmail)
+      } else if (bridge.setDeviceEnrollmentWithResult) {
+        bridge.setDeviceEnrollmentWithResult(deviceId, deviceKey)
+      } else {
+        bridge.setDeviceEnrollment?.(deviceId, deviceKey)
+      }
+      toast.success('Device enrolled for background tracking')
+      window.dispatchEvent(new CustomEvent('nativeappevent', { detail: { type: 'CALL_TRACKING_SETUP', data: {} } }))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Device enrollment failed')
+    }
+  }
 
   const fetchData = async () => {
     const supabase = createClient()
@@ -631,7 +871,7 @@ export default function SettingsPage({ params }: PageProps) {
         {/* 4. Sidebar Menu Names (Admin only) */}
         {isAdmin && <MenuNamesManager orgSlug={orgSlug} isAdmin={isAdmin} />}
 
-        {/* 5. Call Tracking (Android app only) */}
+        {/* 5. Call Tracking (Android app only) - Simplified 3-step flow */}
         <Card>
           <CardHeader className="px-4 lg:px-6">
             <div className="flex items-center gap-2">
@@ -639,7 +879,7 @@ export default function SettingsPage({ params }: PageProps) {
               <CardTitle>Call Tracking</CardTitle>
             </div>
             <CardDescription>
-              Enable tracking for inbound and outbound calls (Android app only). You'll choose which SIM to allow.
+              Simple setup in 3 steps. Enable, select SIM, then sync.
             </CardDescription>
           </CardHeader>
           <CardContent className="px-4 lg:px-6">
@@ -648,73 +888,158 @@ export default function SettingsPage({ params }: PageProps) {
                 Call tracking is available in the Android app. Install/open the Android app to enable.
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  {callTrackingStatus?.enabled ? (
-                    <>
-                      <CheckCircle2 className="h-5 w-5 text-green-500" />
-                      <div>
-                        <p className="font-medium">Enabled</p>
-                        <p className="text-sm text-muted-foreground">
-                          {(() => {
-                            const allowedIds = callTrackingStatus.allowed_phone_account_ids || []
-                            const accounts = callTrackingStatus.available_phone_accounts || []
-
-                            if (!callTrackingStatus.configured) {
-                              return 'Not configured yet'
-                            }
-
-                            // Map allowed IDs to labels when we know them
-                            const matchedLabels = allowedIds
-                              .map(id => accounts.find(acc => acc.id === id)?.label)
-                              .filter((label): label is string => !!label)
-
-                            if (matchedLabels.length > 0) {
-                              return `Allowed SIMs: ${matchedLabels.join(', ')}`
-                            }
-
-                            if (allowedIds.length > 0) {
-                              return `Allowed SIMs: ${allowedIds.length}`
-                            }
-
-                            if (accounts.length > 0) {
-                              // No explicit filter saved, but we do see SIMs → treat as "all visible SIMs"
-                              const labels = accounts.map(acc => acc.label).join(', ')
-                              return `Tracking all visible SIMs: ${labels}`
-                            }
-
-                            // Fallback when OS doesn't expose per-SIM info
-                            return 'Tracking all calls (device does not expose per-SIM info)'
-                          })()}
-                        </p>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <XCircle className="h-5 w-5 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">Disabled</p>
-                        <p className="text-sm text-muted-foreground">
-                          Enable to track all calls from selected SIM(s)
-                        </p>
-                      </div>
-                    </>
+              <div className="space-y-5">
+                {/* Step 1: Enable + Permissions */}
+                <div className="rounded-lg border p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="font-medium">Step 1: Enable</p>
+                      <p className="text-sm text-muted-foreground">
+                        Grant permissions when prompted. You can change them anytime via Permissions.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant={(() => {
+                          const enabled = callTrackingStatus?.enabled ?? false
+                          const permsOk = callTrackingStatus?.permissions?.read_phone_state && callTrackingStatus?.permissions?.read_call_log
+                          // Blue when: disabled (show Enable), or enabled but perms not granted (incomplete setup). Passive when fully set up.
+                          const needsAction = !enabled || !permsOk
+                          return needsAction ? 'default' : 'outline'
+                        })()}
+                        disabled={isSavingCallTracking}
+                        onClick={() => {
+                          const enabled = callTrackingStatus?.enabled ?? false
+                          const permsOk = callTrackingStatus?.permissions?.read_phone_state && callTrackingStatus?.permissions?.read_call_log
+                          // If enabled but perms not ok, re-request permissions (don't toggle off)
+                          saveCallTrackingSelection(enabled && !permsOk ? true : !enabled)
+                        }}
+                      >
+                        {isSavingCallTracking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        {((callTrackingStatus?.enabled ?? false) && (callTrackingStatus?.permissions?.read_phone_state && callTrackingStatus?.permissions?.read_call_log))
+                          ? 'Disable'
+                          : 'Enable'}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => getNativeBridge()?.openAppPermissionsSettings?.()}
+                      >
+                        Permissions
+                      </Button>
+                    </div>
+                  </div>
+                  {callTrackingStatus?.enabled && (
+                    <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+                      <span>Phone: {callTrackingStatus?.permissions?.read_phone_state ? '✓' : '✗'}</span>
+                      <span>Call log: {callTrackingStatus?.permissions?.read_call_log ? '✓' : '✗'}</span>
+                      <span>Notifications: {(callTrackingStatus?.permissions?.post_notifications ?? callTrackingStatus?.permissions?.notifications_enabled) ? '✓' : '✗'}</span>
+                    </div>
                   )}
                 </div>
 
-                <Button
-                  onClick={() => {
-                    const bridge = getNativeBridge()
-                    if (!bridge?.setupCallTracking) {
-                      toast.error('Native call tracking setup not available')
-                      return
-                    }
-                    toast.info('Select SIM and grant permissions on the prompt')
-                    bridge.setupCallTracking()
-                  }}
-                >
-                  {callTrackingStatus?.enabled ? 'Manage' : 'Enable'}
-                </Button>
+                {/* Step 2: SIM selection - visible when step 1 complete */}
+                {callTrackingStatus?.enabled && callTrackingStatus?.permissions?.read_phone_state && callTrackingStatus?.permissions?.read_call_log && (
+                <div className="rounded-lg border p-4 space-y-3">
+                  <p className="font-medium">Step 2: SIM slot</p>
+                  <p className="text-sm text-muted-foreground">Track calls from All SIMs (default), SIM 1, or SIM 2.</p>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <select
+                      className="border rounded-md px-3 py-2 text-sm bg-background"
+                      value={selectedCallTrackingSim}
+                      onChange={(e) => { setSelectedCallTrackingSim(e.target.value); setSimSelectionDirty(true) }}
+                      disabled={isSavingCallTracking || !getNativeBridge()?.configureCallTracking}
+                    >
+                      <option value="ALL">All SIMs</option>
+                      {(callTrackingStatus?.available_phone_accounts?.length || 0) > 1 && (
+                        <option value="BOTH">Both SIMs</option>
+                      )}
+                      {(callTrackingStatus?.available_phone_accounts || []).map((acc, idx) => (
+                        <option key={acc.id || String(idx)} value={acc.id}>
+                          {acc.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      variant={simSelectionDirty ? 'default' : 'outline'}
+                      size="sm"
+                      disabled={isSavingCallTracking || !getNativeBridge()?.configureCallTracking || !simSelectionDirty}
+                      onClick={() => saveCallTrackingSelection(true)}
+                    >
+                      {isSavingCallTracking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                      Save SIM
+                    </Button>
+                  </div>
+                </div>
+                )}
+
+                {/* Step 3: Sync - visible when step 2 complete */}
+                {callTrackingStatus?.enabled && callTrackingStatus?.permissions?.read_phone_state && callTrackingStatus?.permissions?.read_call_log && (
+                <div className="rounded-lg border p-4 space-y-3">
+                  <p className="font-medium">Step 3: Sync</p>
+                  <p className="text-sm text-muted-foreground">Sync all available calls now, or enable auto sync. When background sync is running, a BharatCRM notification appears and calls are tracked even when the app is closed.</p>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className="text-sm text-muted-foreground">Background sync:</span>
+                      <span className="text-sm font-medium">
+                        {callTrackingStatus?.service_status?.running ? 'Running' : 'Stopped'}
+                      </span>
+                      {callTrackingStatus?.auth_state?.device_key_present ? (
+                        <span className="text-sm text-green-600 font-medium">Enrolled ✓</span>
+                      ) : (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={enrollDeviceNow}
+                        >
+                          Enroll device
+                        </Button>
+                      )}
+                      <Button
+                        variant={callTrackingStatus?.service_status?.running ? 'outline' : 'default'}
+                        size="sm"
+                        onClick={handleStartBackgroundSync}
+                      >
+                        Start background sync
+                      </Button>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isSyncingNow || !getNativeBridge()?.syncCallLogsNow}
+                        onClick={handleSyncNow}
+                      >
+                        {isSyncingNow && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        Sync now
+                      </Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="auto-sync"
+                            checked={callTrackingStatus?.auto_sync_enabled ?? true}
+                            onCheckedChange={handleAutoSyncChange}
+                          />
+                          <Label htmlFor="auto-sync" className="text-sm">Auto sync</Label>
+                        </div>
+                        <select
+                          className="border rounded-md px-2 py-1.5 text-sm bg-background w-24"
+                          value={callTrackingStatus?.sync_interval_minutes ?? 15}
+                          onChange={(e) => handleSyncIntervalChange(Number(e.target.value))}
+                          disabled={!getNativeBridge()?.setSyncIntervalMinutes}
+                        >
+                          <option value={5}>5 min</option>
+                          <option value={10}>10 min</option>
+                          <option value={15}>15 min</option>
+                          <option value={30}>30 min</option>
+                          <option value={60}>60 min</option>
+                        </select>
+                        <span className="text-xs text-muted-foreground">(fallback when app closed)</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                )}
               </div>
             )}
           </CardContent>

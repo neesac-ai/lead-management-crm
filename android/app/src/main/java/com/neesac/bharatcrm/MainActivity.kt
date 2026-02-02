@@ -2,11 +2,13 @@ package com.neesac.bharatcrm
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.appcompat.app.AlertDialog
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -14,6 +16,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
 class MainActivity : AppCompatActivity() {
@@ -69,12 +72,19 @@ class MainActivity : AppCompatActivity() {
             // SIMs chosen; wait for call-log permission to start tracking
             if (callLogGranted && simSelectionManager.isEnabled()) {
                 maybeStartDeviceCallLogMonitor()
+                // Start foreground sync for near-real-time uploads (even if app is closed)
+                maybeStartCallTrackingForegroundService("permission-granted")
                 sendCallTrackingSetupEventToJS(success = true, enabled = true)
                 pendingCallTrackingSetup = false
             }
         } else {
-            // Normal flow (e.g. outbound call tracking)
+            // Normal flow (e.g. in-settings Enable, outbound call tracking)
             maybeStartDeviceCallLogMonitor()
+            maybeStartCallTrackingForegroundService("permission-granted")
+            // Notify web to refresh so Step 2/3 appear when permissions were just granted
+            if (simSelectionManager.isEnabled()) {
+                sendCallTrackingSetupEventToJS(success = true, enabled = true)
+            }
         }
     }
 
@@ -243,6 +253,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         // Catch-up scan any time the app becomes active.
         maybeStartDeviceCallLogMonitor()
+        maybeStartCallTrackingForegroundService("resume")
     }
 
     override fun onPause() {
@@ -280,6 +291,35 @@ class MainActivity : AppCompatActivity() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun hasPostNotificationsPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= 33) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    private fun areNotificationsEnabledForApp(): Boolean {
+        return NotificationManagerCompat.from(this).areNotificationsEnabled()
+    }
+
+    private fun openAppNotificationSettings() {
+        try {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            // Fallback: open app details page
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        }
+    }
+
     private fun maybeStartDeviceCallLogMonitor() {
         if (!::simSelectionManager.isInitialized) return
         if (!simSelectionManager.isEnabled()) return
@@ -293,6 +333,76 @@ class MainActivity : AppCompatActivity() {
         deviceCallLogMonitor?.scanAndSend()
     }
 
+    fun stopDeviceCallLogMonitorNow() {
+        deviceCallLogMonitor?.stop()
+    }
+
+    fun triggerCallLogSyncNow() {
+        deviceCallLogMonitor?.scanAndSend()
+    }
+
+    fun maybeStartCallTrackingForegroundService(reason: String = "auto") {
+        // Keep old callers, but always record diagnostics.
+        tryStartCallTrackingForegroundService(reason)
+    }
+
+    fun stopCallTrackingForegroundService() {
+        CallTrackingSyncService.stop(this)
+    }
+
+    fun tryStartCallTrackingForegroundService(reason: String = "manual"): String {
+        val prefs = getSharedPreferences("bharatcrm_prefs", Context.MODE_PRIVATE)
+        val blockers = mutableListOf<String>()
+
+        if (!::simSelectionManager.isInitialized) {
+            blockers.add("simSelectionManager_not_initialized")
+        } else if (!simSelectionManager.isEnabled()) {
+            blockers.add("call_tracking_disabled")
+        }
+
+        val hasCallLog = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val hasPhoneState = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        if (!hasCallLog) blockers.add("missing_READ_CALL_LOG")
+        if (!hasPhoneState) blockers.add("missing_READ_PHONE_STATE")
+
+        val notificationsEnabled = areNotificationsEnabledForApp()
+        val postNotifGranted = hasPostNotificationsPermission()
+        if (!notificationsEnabled) blockers.add("notifications_disabled")
+        if (!postNotifGranted) blockers.add("missing_POST_NOTIFICATIONS")
+
+        val enrollmentStore = DeviceEnrollmentStore(this)
+        val hasDeviceKey = !enrollmentStore.getDeviceKey().isNullOrBlank()
+        val tokenStore = AuthTokenStore(this)
+        val hasAnyToken = !tokenStore.getRefreshToken().isNullOrBlank() || !tokenStore.getAccessToken().isNullOrBlank()
+        if (!hasDeviceKey && !hasAnyToken) blockers.add("missing_device_key_or_tokens")
+
+        val attemptAt = System.currentTimeMillis()
+        prefs.edit()
+            .putLong("call_tracking_service_last_start_attempt_at_ms", attemptAt)
+            .putString("call_tracking_service_last_start_attempt_reason", reason)
+            .putString("call_tracking_service_last_start_attempt_blockers", blockers.joinToString(","))
+            .putString("call_tracking_service_last_start_attempt_error", "")
+            .apply()
+
+        if (blockers.isNotEmpty()) {
+            return """{"started":false,"reason":"blocked","blockers":"${blockers.joinToString(",")}"}"""
+        }
+
+        return try {
+            CallTrackingSyncService.start(this, reason)
+            prefs.edit()
+                .putString("call_tracking_service_last_start_attempt_error", "")
+                .apply()
+            """{"started":true}"""
+        } catch (e: Exception) {
+            val msg = (e.message ?: e.toString()).replace("\"", "\\\"")
+            prefs.edit()
+                .putString("call_tracking_service_last_start_attempt_error", msg)
+                .apply()
+            """{"started":false,"reason":"exception","error":"$msg"}"""
+        }
+    }
+
     /**
      * Explicit call-tracking setup flow (invoked from the PWA Settings page).
      *
@@ -301,9 +411,28 @@ class MainActivity : AppCompatActivity() {
     fun showCallTrackingSetupDialog() {
         pendingCallTrackingSetup = true
 
+        // Foreground sync requires notifications; guide user to enable if blocked.
+        if (!areNotificationsEnabledForApp()) {
+            AlertDialog.Builder(this)
+                .setTitle("Enable Notifications")
+                .setMessage("Background call tracking requires notifications to be enabled for BharatCRM. Please enable notifications to allow the tracking service to run.")
+                .setPositiveButton("Open Settings") { _, _ ->
+                    openAppNotificationSettings()
+                }
+                .setNegativeButton("Cancel") { _, _ ->
+                    pendingCallTrackingSetup = false
+                }
+                .setCancelable(false)
+                .show()
+            return
+        }
+
         // Step 1: ensure we have phone permission before trying to read SIM list
         if (!hasPhonePermission()) {
-            requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE))
+            val perms = mutableListOf<String>()
+            perms.add(Manifest.permission.READ_PHONE_STATE)
+            if (Build.VERSION.SDK_INT >= 33) perms.add(Manifest.permission.POST_NOTIFICATIONS)
+            requestPermissions(perms.toTypedArray())
             return
         }
 
@@ -324,11 +453,11 @@ class MainActivity : AppCompatActivity() {
             accounts.forEachIndexed { idx, acc ->
                 val label = "SIM ${idx + 1} - ${acc.label}"
                 optionLabels.add(label)
-                optionAccountSets.add(setOf(acc.id))
+                optionAccountSets.add(acc.matchIds.toSet())
             }
             if (accounts.size > 1) {
                 optionLabels.add("Both SIMs")
-                optionAccountSets.add(accounts.map { it.id }.toSet())
+                optionAccountSets.add(accounts.flatMap { it.matchIds }.toSet())
             }
         } else {
             // Fallback when we can't enumerate accounts; allow "All SIMs" mode.

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { normalizePhone } from '@/lib/leads/duplicate-check'
 
 /**
  * POST /api/calls/log
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Validate call_direction
-        const validDirections = ['incoming', 'outgoing', 'missed', 'rejected', 'blocked']
+        const validDirections = ['incoming', 'outgoing']
         if (!validDirections.includes(call_direction)) {
             return NextResponse.json(
                 { error: `Invalid call_direction. Must be one of: ${validDirections.join(', ')}` },
@@ -58,12 +59,53 @@ export async function POST(request: NextRequest) {
         }
 
         // Validate call_status
-        const validStatuses = ['completed', 'missed', 'rejected', 'blocked', 'busy', 'failed']
+        const validStatuses = [
+            'completed',
+            'missed',
+            'rejected',
+            'blocked',
+            'busy',
+            'failed',
+            'voicemail',
+            'answered_externally',
+            'unknown',
+        ]
         if (!validStatuses.includes(call_status)) {
             return NextResponse.json(
                 { error: `Invalid call_status. Must be one of: ${validStatuses.join(', ')}` },
                 { status: 400 }
             )
+        }
+
+        // Lead mapping: if lead_id not provided, try to map by phone number within org.
+        let resolvedLeadId: string | null = lead_id || null
+        if (!resolvedLeadId && typeof phone_number === 'string') {
+            try {
+                const normalized = normalizePhone(phone_number)
+                const last10 = normalized.replace(/[^\d]/g, '').slice(-10)
+
+                // Fetch a small candidate set; then do strict normalization compare in JS.
+                const { data: candidates } = await supabase
+                    .from('leads')
+                    .select('id, phone, updated_at')
+                    .eq('org_id', profile.org_id)
+                    .not('phone', 'is', null)
+                    .ilike('phone', `%${last10}`)
+                    .order('updated_at', { ascending: false })
+                    .limit(50)
+
+                const best = (candidates || []).find((l: any) => {
+                    const leadPhone = typeof l.phone === 'string' ? l.phone : ''
+                    const leadNorm = normalizePhone(leadPhone)
+                    if (leadNorm === normalized) return true
+                    const leadLast10 = leadNorm.replace(/[^\d]/g, '').slice(-10)
+                    return leadLast10 === last10
+                })
+
+                if (best?.id) resolvedLeadId = String(best.id)
+            } catch (e) {
+                console.warn('Lead mapping failed, continuing without lead_id', e)
+            }
         }
 
         // Check for duplicate call log (same user, phone, start time within 10 seconds, and similar duration)
@@ -110,7 +152,7 @@ export async function POST(request: NextRequest) {
             .from('call_logs')
             .insert({
                 org_id: profile.org_id,
-                lead_id: lead_id || null,
+                lead_id: resolvedLeadId,
                 user_id: profile.id,
                 phone_number,
                 call_direction,
