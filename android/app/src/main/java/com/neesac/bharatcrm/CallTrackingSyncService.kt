@@ -154,14 +154,20 @@ class CallTrackingSyncService : Service() {
         phoneStateListener = null
     }
 
+    private fun setLastError(msg: String) {
+        prefs.edit().putString(KEY_SERVICE_LAST_ERROR, msg).apply()
+    }
+
     private fun syncOnce(source: String) {
         if (!simSelectionManager.isEnabled()) {
             Log.d(tag, "Call tracking disabled; stopping service")
+            setLastError("")
             stopSelf()
             return
         }
         if (!hasPermissions()) {
             Log.w(tag, "Missing permissions; cannot sync")
+            setLastError("Missing Call log / Phone permission. Grant in App settings.")
             return
         }
 
@@ -175,12 +181,24 @@ class CallTrackingSyncService : Service() {
         ensureAccessToken { token ->
             if (!useDeviceAuth && token.isNullOrBlank()) {
                 Log.w(tag, "No valid device key or access token; cannot sync")
+                setLastError("Enroll this device in Settings (Call tracking) or log in to sync.")
                 return@ensureAccessToken
             }
 
             val allowedPhoneAccountIds = simSelectionManager.getAllowedPhoneAccountIds()
             val forceFull = simSelectionManager.consumeForceFullSyncOnce()
-            val lastTs = if (forceFull) 0L else prefs.getLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, 0L)
+            val storedLastTs = if (forceFull) 0L else prefs.getLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, 0L)
+            val minRecentTs = System.currentTimeMillis() - DEFAULT_LOOKBACK_MS
+            val lastTs = if (forceFull) {
+                0L
+            } else {
+                // Avoid uploading very old history by default; keep "recent calls" responsive.
+                val clamped = if (storedLastTs <= 0L || storedLastTs < minRecentTs) minRecentTs else storedLastTs
+                if (clamped != storedLastTs) {
+                    prefs.edit().putLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, clamped).apply()
+                }
+                clamped
+            }
 
             val rows = callLogReader.getDeviceCallLogsSince(
                 sinceTimestampMsExclusive = lastTs,
@@ -190,11 +208,22 @@ class CallTrackingSyncService : Service() {
 
             if (rows.isEmpty()) {
                 Log.d(tag, "No new call log rows (source=$source)")
+                if (forceFull) {
+                    val recent = callLogReader.getRecentDeviceCallLogs(5)
+                    if (recent.isEmpty()) {
+                        setLastError("No call log access. Grant Call log permission in App settings and disable battery restriction.")
+                    } else {
+                        setLastError("No new calls to sync (last sync may be up to date).")
+                    }
+                } else {
+                    setLastError("")
+                }
                 return@ensureAccessToken
             }
 
             val maxTs = rows.maxOf { it.date }
             prefs.edit().putLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, maxTs).apply()
+            setLastError("") // clear previous error when we have rows to upload
 
             Log.d(tag, "Syncing ${rows.size} rows (source=$source) lastTs=$lastTs -> $maxTs")
 
@@ -249,12 +278,14 @@ class CallTrackingSyncService : Service() {
                     ) { success, error ->
                         if (!success) {
                             Log.e(tag, "Upload failed (device): $error")
+                            setLastError(error?.take(120) ?: "Upload failed. Try re-enrolling device in Settings.")
                         }
                     }
                 } else {
                     val accessToken = token
                     if (accessToken.isNullOrBlank()) {
                         Log.w(tag, "No access token available for token upload")
+                        setLastError("Session expired. Log in again or enroll device.")
                         return@ensureAccessToken
                     }
                     apiClient.logCallNative(
@@ -273,6 +304,7 @@ class CallTrackingSyncService : Service() {
                     ) { success, error ->
                         if (!success) {
                             Log.e(tag, "Upload failed (token): $error")
+                            setLastError(error?.take(120) ?: "Upload failed. Log in again or enroll device.")
                         }
                     }
                 }
@@ -342,6 +374,7 @@ class CallTrackingSyncService : Service() {
         private const val KEY_SERVICE_LAST_START_REASON = "call_tracking_service_last_start_reason"
 
         private const val MAX_ROWS_PER_SCAN = 50
+        private const val DEFAULT_LOOKBACK_MS = 7L * 24L * 60L * 60L * 1000L // 7 days
 
         fun start(context: Context, reason: String = "manual") {
             val intent = Intent(context, CallTrackingSyncService::class.java).apply {

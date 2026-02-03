@@ -305,7 +305,8 @@ export default function AnalyticsPage() {
         console.log('[ANALYTICS] Admin user - fetching all org leads (no filter)')
       }
 
-      const { data: leadsData, error: leadsError } = await leadsQuery
+      // Request enough rows so Total Leads matches dashboard (PostgREST default limit is 1000)
+      const { data: leadsData, error: leadsError } = await leadsQuery.limit(50000)
 
       // For managers, also filter in JavaScript to ensure we only include their team's leads
       // This handles cases where the PostgREST filter might not work as expected

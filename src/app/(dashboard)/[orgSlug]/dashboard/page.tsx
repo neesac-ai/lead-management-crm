@@ -68,20 +68,38 @@ export default async function DashboardPage({ params }: DashboardPageProps) {
   const nowISO = nowForStats.toISOString()
 
   // Build leads query based on role (skip for accountant)
-  // RLS policies will automatically include reportees' leads for managers
+  // Align with Analytics: sales = assigned_to only; manager = team (assigned_to in team OR unassigned created by team); admin = all
   let leadsQuery = supabase
     .from('leads')
     .select('id, status, subscription_type', { count: 'exact' })
     .eq('org_id', org.id)
 
   if (!isAdmin && !isAccountant && profile?.id) {
-    // For sales users (including managers), RLS will handle reportees' leads automatically
-    // But we still need to filter by assigned_to or created_by for the base query
-    leadsQuery = supabase
-      .from('leads')
-      .select('id, status, subscription_type', { count: 'exact' })
-      .eq('org_id', org.id)
-      .or(`assigned_to.eq.${profile.id},created_by.eq.${profile.id}`)
+    // Check if user is a manager (sales with reportees)
+    let accessibleUserIds: string[] = [profile.id]
+    if (profile.role === 'sales') {
+      const { data: reportees } = await supabase.rpc('get_all_reportees', { manager_user_id: profile.id } as any)
+      const reporteeIds = (reportees as Array<{ reportee_id: string }> | null)?.map((r: { reportee_id: string }) => r.reportee_id) ?? []
+      if (reporteeIds.length > 0) {
+        accessibleUserIds = [profile.id, ...reporteeIds]
+      }
+    }
+    if (accessibleUserIds.length === 1) {
+      // Sales (non-manager): only leads assigned to me
+      leadsQuery = supabase
+        .from('leads')
+        .select('id, status, subscription_type', { count: 'exact' })
+        .eq('org_id', org.id)
+        .eq('assigned_to', profile.id)
+    } else {
+      // Manager: (assigned_to in team) OR (unassigned and created_by in team) — PostgREST .or() syntax
+      const idsList = accessibleUserIds.join(',')
+      leadsQuery = supabase
+        .from('leads')
+        .select('id, status, subscription_type', { count: 'exact' })
+        .eq('org_id', org.id)
+        .or(`assigned_to.in.(${idsList}),and(assigned_to.is.null,created_by.in.(${idsList}))`)
+    }
   }
 
   // Build demos query - only future scheduled demos

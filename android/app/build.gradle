@@ -15,7 +15,19 @@ android {
         versionName "1.0.0"
     }
 
+    signingConfigs {
+        // Use default debug keystore so builds work without a custom keystore file.
+        // If you previously set a custom keystore in Android Studio (Run → Edit Configurations → Signing),
+        // clear it or point it to an existing file to avoid "Keystore file not found".
+        debug {
+            // Default: uses ~/.android/debug.keystore
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

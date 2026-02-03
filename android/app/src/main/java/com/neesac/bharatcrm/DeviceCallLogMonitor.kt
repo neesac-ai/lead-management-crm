@@ -88,7 +88,19 @@ class DeviceCallLogMonitor(
 
         val allowedPhoneAccountIds = simSelectionManager.getAllowedPhoneAccountIds()
         val forceFull = simSelectionManager.consumeForceFullSyncOnce()
-        val lastTs = if (forceFull) 0L else prefs.getLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, 0L)
+        val storedLastTs = if (forceFull) 0L else prefs.getLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, 0L)
+        val minRecentTs = System.currentTimeMillis() - DEFAULT_LOOKBACK_MS
+        val lastTs = if (forceFull) {
+            0L
+        } else {
+            // Avoid "catching up" from years of history by default.
+            // This keeps the dashboard (Today/Last 7 days) feeling responsive after enabling.
+            val clamped = if (storedLastTs <= 0L || storedLastTs < minRecentTs) minRecentTs else storedLastTs
+            if (clamped != storedLastTs) {
+                prefs.edit().putLong(KEY_LAST_SYNCED_CALLLOG_TS_MS, clamped).apply()
+            }
+            clamped
+        }
 
         // Read a conservative batch size so we don't overload the bridge / network.
         val rows = callLogReader.getDeviceCallLogsSince(
@@ -195,6 +207,7 @@ class DeviceCallLogMonitor(
 
         private const val SCAN_INTERVAL_MS = 60_000L // 1 minute while app is open
         private const val MAX_ROWS_PER_SCAN = 50
+        private const val DEFAULT_LOOKBACK_MS = 7L * 24L * 60L * 60L * 1000L // 7 days
     }
 }
 

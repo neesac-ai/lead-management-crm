@@ -66,7 +66,7 @@ export default function SettingsPage({ params }: PageProps) {
     sync_interval_minutes?: number
     auto_sync_enabled?: boolean
     permissions?: { read_phone_state: boolean; read_call_log: boolean; post_notifications?: boolean; notifications_enabled?: boolean }
-    service_status?: { running: boolean }
+    service_status?: { running: boolean; last_error?: string }
     auth_state?: { device_key_present: boolean }
     allowed_phone_account_ids: string[]
     available_phone_accounts: { id: string; label: string; match_ids?: string[] }[]
@@ -147,7 +147,9 @@ export default function SettingsPage({ params }: PageProps) {
               notifications_enabled: parsed.permissions.notifications_enabled != null ? !!parsed.permissions.notifications_enabled : undefined,
             }
             : undefined,
-          service_status: parsed.service_status ? { running: !!parsed.service_status.running } : undefined,
+          service_status: parsed.service_status
+            ? { running: !!parsed.service_status.running, last_error: typeof parsed.service_status.last_error === 'string' ? parsed.service_status.last_error : undefined }
+            : undefined,
           auth_state: parsed.auth_state ? { device_key_present: !!parsed.auth_state.device_key_present } : undefined,
           allowed_phone_account_ids: Array.isArray(parsed.allowed_phone_account_ids) ? parsed.allowed_phone_account_ids : [],
           available_phone_accounts: Array.isArray(parsed.available_phone_accounts)
@@ -940,105 +942,110 @@ export default function SettingsPage({ params }: PageProps) {
 
                 {/* Step 2: SIM selection - visible when step 1 complete */}
                 {callTrackingStatus?.enabled && callTrackingStatus?.permissions?.read_phone_state && callTrackingStatus?.permissions?.read_call_log && (
-                <div className="rounded-lg border p-4 space-y-3">
-                  <p className="font-medium">Step 2: SIM slot</p>
-                  <p className="text-sm text-muted-foreground">Track calls from All SIMs (default), SIM 1, or SIM 2.</p>
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <select
-                      className="border rounded-md px-3 py-2 text-sm bg-background"
-                      value={selectedCallTrackingSim}
-                      onChange={(e) => { setSelectedCallTrackingSim(e.target.value); setSimSelectionDirty(true) }}
-                      disabled={isSavingCallTracking || !getNativeBridge()?.configureCallTracking}
-                    >
-                      <option value="ALL">All SIMs</option>
-                      {(callTrackingStatus?.available_phone_accounts?.length || 0) > 1 && (
-                        <option value="BOTH">Both SIMs</option>
-                      )}
-                      {(callTrackingStatus?.available_phone_accounts || []).map((acc, idx) => (
-                        <option key={acc.id || String(idx)} value={acc.id}>
-                          {acc.label}
-                        </option>
-                      ))}
-                    </select>
-                    <Button
-                      variant={simSelectionDirty ? 'default' : 'outline'}
-                      size="sm"
-                      disabled={isSavingCallTracking || !getNativeBridge()?.configureCallTracking || !simSelectionDirty}
-                      onClick={() => saveCallTrackingSelection(true)}
-                    >
-                      {isSavingCallTracking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                      Save SIM
-                    </Button>
+                  <div className="rounded-lg border p-4 space-y-3">
+                    <p className="font-medium">Step 2: SIM slot</p>
+                    <p className="text-sm text-muted-foreground">Track calls from All SIMs (default), SIM 1, or SIM 2.</p>
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <select
+                        className="border rounded-md px-3 py-2 text-sm bg-background"
+                        value={selectedCallTrackingSim}
+                        onChange={(e) => { setSelectedCallTrackingSim(e.target.value); setSimSelectionDirty(true) }}
+                        disabled={isSavingCallTracking || !getNativeBridge()?.configureCallTracking}
+                      >
+                        <option value="ALL">All SIMs</option>
+                        {(callTrackingStatus?.available_phone_accounts?.length || 0) > 1 && (
+                          <option value="BOTH">Both SIMs</option>
+                        )}
+                        {(callTrackingStatus?.available_phone_accounts || []).map((acc, idx) => (
+                          <option key={acc.id || String(idx)} value={acc.id}>
+                            {acc.label}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        variant={simSelectionDirty ? 'default' : 'outline'}
+                        size="sm"
+                        disabled={isSavingCallTracking || !getNativeBridge()?.configureCallTracking || !simSelectionDirty}
+                        onClick={() => saveCallTrackingSelection(true)}
+                      >
+                        {isSavingCallTracking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        Save SIM
+                      </Button>
+                    </div>
                   </div>
-                </div>
                 )}
 
                 {/* Step 3: Sync - visible when step 2 complete */}
                 {callTrackingStatus?.enabled && callTrackingStatus?.permissions?.read_phone_state && callTrackingStatus?.permissions?.read_call_log && (
-                <div className="rounded-lg border p-4 space-y-3">
-                  <p className="font-medium">Step 3: Sync</p>
-                  <p className="text-sm text-muted-foreground">Sync all available calls now, or enable auto sync. When background sync is running, a BharatCRM notification appears and calls are tracked even when the app is closed.</p>
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-wrap gap-2 items-center">
-                      <span className="text-sm text-muted-foreground">Background sync:</span>
-                      <span className="text-sm font-medium">
-                        {callTrackingStatus?.service_status?.running ? 'Running' : 'Stopped'}
-                      </span>
-                      {callTrackingStatus?.auth_state?.device_key_present ? (
-                        <span className="text-sm text-green-600 font-medium">Enrolled ✓</span>
-                      ) : (
+                  <div className="rounded-lg border p-4 space-y-3">
+                    <p className="font-medium">Step 3: Sync</p>
+                    <p className="text-sm text-muted-foreground">Sync all available calls now, or enable auto sync. When background sync is running, a BharatCRM notification appears and calls are tracked even when the app is closed.</p>
+                    <div className="flex flex-col gap-3">
+                      <div className="flex flex-wrap gap-2 items-center">
+                        <span className="text-sm text-muted-foreground">Background sync:</span>
+                        <span className="text-sm font-medium">
+                          {callTrackingStatus?.service_status?.running ? 'Running' : 'Stopped'}
+                        </span>
+                        {callTrackingStatus?.auth_state?.device_key_present ? (
+                          <span className="text-sm text-green-600 font-medium">Enrolled ✓</span>
+                        ) : (
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={enrollDeviceNow}
+                          >
+                            Enroll device
+                          </Button>
+                        )}
                         <Button
-                          variant="default"
+                          variant={callTrackingStatus?.service_status?.running ? 'outline' : 'default'}
                           size="sm"
-                          onClick={enrollDeviceNow}
+                          onClick={handleStartBackgroundSync}
                         >
-                          Enroll device
+                          Start background sync
                         </Button>
-                      )}
-                      <Button
-                        variant={callTrackingStatus?.service_status?.running ? 'outline' : 'default'}
-                        size="sm"
-                        onClick={handleStartBackgroundSync}
-                      >
-                        Start background sync
-                      </Button>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isSyncingNow || !getNativeBridge()?.syncCallLogsNow}
-                        onClick={handleSyncNow}
-                      >
-                        {isSyncingNow && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                        Sync now
-                      </Button>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            id="auto-sync"
-                            checked={callTrackingStatus?.auto_sync_enabled ?? true}
-                            onCheckedChange={handleAutoSyncChange}
-                          />
-                          <Label htmlFor="auto-sync" className="text-sm">Auto sync</Label>
-                        </div>
-                        <select
-                          className="border rounded-md px-2 py-1.5 text-sm bg-background w-24"
-                          value={callTrackingStatus?.sync_interval_minutes ?? 15}
-                          onChange={(e) => handleSyncIntervalChange(Number(e.target.value))}
-                          disabled={!getNativeBridge()?.setSyncIntervalMinutes}
+                      </div>
+                      <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isSyncingNow || !getNativeBridge()?.syncCallLogsNow}
+                          onClick={handleSyncNow}
                         >
-                          <option value={5}>5 min</option>
-                          <option value={10}>10 min</option>
-                          <option value={15}>15 min</option>
-                          <option value={30}>30 min</option>
-                          <option value={60}>60 min</option>
-                        </select>
-                        <span className="text-xs text-muted-foreground">(fallback when app closed)</span>
+                          {isSyncingNow && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Sync now
+                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-2">
+                            <Switch
+                              id="auto-sync"
+                              checked={callTrackingStatus?.auto_sync_enabled ?? true}
+                              onCheckedChange={handleAutoSyncChange}
+                            />
+                            <Label htmlFor="auto-sync" className="text-sm">Auto sync</Label>
+                          </div>
+                          <select
+                            className="border rounded-md px-2 py-1.5 text-sm bg-background w-24"
+                            value={callTrackingStatus?.sync_interval_minutes ?? 15}
+                            onChange={(e) => handleSyncIntervalChange(Number(e.target.value))}
+                            disabled={!getNativeBridge()?.setSyncIntervalMinutes}
+                          >
+                            <option value={5}>5 min</option>
+                            <option value={10}>10 min</option>
+                            <option value={15}>15 min</option>
+                            <option value={30}>30 min</option>
+                            <option value={60}>60 min</option>
+                          </select>
+                          <span className="text-xs text-muted-foreground">(fallback when app closed)</span>
+                        </div>
+                        {callTrackingStatus?.service_status?.last_error ? (
+                          <p className="text-sm text-amber-600 dark:text-amber-500">
+                            Last sync: {callTrackingStatus.service_status.last_error}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </div>
-                </div>
                 )}
               </div>
             )}
