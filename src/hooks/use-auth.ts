@@ -66,6 +66,47 @@ export function useAuth() {
     }
 
     // Get initial session
+    const enforceOrgSubscriptionActive = async (profile: {
+      org_id: string | null
+      role: string
+    }) => {
+      // Super admins are allowed regardless of org subscription status.
+      if (!profile.org_id || profile.role === 'super_admin') return true
+
+      const { data: sub } = await supabase
+        .from('org_subscriptions')
+        .select('status, end_date')
+        .eq('org_id', profile.org_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      const allowedStatuses = ['active', 'trialing']
+      let isAllowed = false
+
+      if (sub) {
+        const status = (sub as any).status as string
+        const endDateStr = (sub as any).end_date as string | undefined
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const endDate = endDateStr ? new Date(endDateStr) : null
+        const isExpired = !!endDate && endDate < today
+
+        isAllowed = allowedStatuses.includes(status) && !isExpired
+      }
+
+      if (!isAllowed) {
+        // Org subscription is paused / cancelled / expired or missing -> force logout.
+        await supabase.auth.signOut()
+        logoutStore()
+        setUser(null)
+        router.push('/login')
+        return false
+      }
+
+      return true
+    }
+
     const getSession = async () => {
       setLoading(true)
       try {
@@ -99,6 +140,10 @@ export function useAuth() {
               is_approved: boolean
               organizations: { slug: string } | null
             }
+            // Enforce org subscription status for non-super-admin users.
+            const ok = await enforceOrgSubscriptionActive({ org_id: p.org_id, role: p.role })
+            if (!ok) return
+
             const authUserData: AuthUser = {
               id: p.id,
               email: p.email,
@@ -171,6 +216,10 @@ export function useAuth() {
               is_approved: boolean
               organizations: { slug: string } | null
             }
+            // Enforce org subscription status for non-super-admin users on sign-in.
+            const ok = await enforceOrgSubscriptionActive({ org_id: p.org_id, role: p.role })
+            if (!ok) return
+
             const authUserData: AuthUser = {
               id: p.id,
               email: p.email,
@@ -236,6 +285,28 @@ export function useAuth() {
           is_approved: boolean
           organizations: { slug: string } | null
         }
+
+        // Enforce org subscription status again on manual refresh.
+        const supabaseForEnforce = createClient()
+        const { data: sub } = await supabaseForEnforce
+          .from('org_subscriptions')
+          .select('status')
+          .eq('org_id', p.org_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        const allowedStatuses = ['active', 'trialing']
+        const isAllowed = !p.org_id || p.role === 'super_admin' || (sub && allowedStatuses.includes((sub as any).status))
+
+        if (!isAllowed) {
+          await supabaseForEnforce.auth.signOut()
+          logoutStore()
+          setUser(null)
+          router.push('/login')
+          return
+        }
+
         const authUserData: AuthUser = {
           id: p.id,
           email: p.email,

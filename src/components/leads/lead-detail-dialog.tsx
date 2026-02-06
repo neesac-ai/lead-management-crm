@@ -1409,6 +1409,7 @@ export function LeadDetailDialog({ lead, open, onOpenChange, onUpdate, canEditSt
                         <SelectContent>
                           {subscriptionType === 'trial' ? (
                             <>
+                              <SelectItem value="3">3 Days</SelectItem>
                               <SelectItem value="7">7 Days</SelectItem>
                               <SelectItem value="14">14 Days</SelectItem>
                             </>

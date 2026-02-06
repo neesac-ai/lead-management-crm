@@ -129,11 +129,11 @@ export function OrgActions({ orgId, orgName, orgCode, status }: OrgActionsProps)
       setExistingSubscription(data as ExistingSubscription)
       // Populate form with existing data
       setSubscriptionType(data.subscription_type)
-      // Map validity days - for trial it should be 7 or 14, for paid other options
+      // Map validity days - for trial it should be 3, 7 or 14, for paid other options
       let validityValue = data.validity_days.toString()
       if (data.validity_days >= 36500) {
         validityValue = 'lifetime'
-      } else if (data.subscription_type === 'trial' && ![7, 14].includes(data.validity_days)) {
+      } else if (data.subscription_type === 'trial' && ![3, 7, 14].includes(data.validity_days)) {
         validityValue = '7' // Default to 7 if invalid trial validity
       }
       setValidityDays(validityValue)
@@ -387,6 +387,7 @@ export function OrgActions({ orgId, orgName, orgCode, status }: OrgActionsProps)
           <SelectContent>
             {subscriptionType === 'trial' ? (
               <>
+                <SelectItem value="3">3 Days</SelectItem>
                 <SelectItem value="7">7 Days</SelectItem>
                 <SelectItem value="14">14 Days</SelectItem>
               </>

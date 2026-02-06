@@ -697,6 +697,7 @@ export default function SuperAdminSubscriptionsPage() {
                 <SelectContent>
                   {editForm.subscription_type === 'trial' ? (
                     <>
+                      <SelectItem value="3">3 Days</SelectItem>
                       <SelectItem value="7">7 Days</SelectItem>
                       <SelectItem value="14">14 Days</SelectItem>
                     </>

@@ -48,11 +48,6 @@ export default async function OrgDashboardLayout({
     notFound()
   }
 
-  // Check if org is active
-  if (org.status !== 'active') {
-    redirect('/org-suspended')
-  }
-
   // Verify user belongs to this org (or is super admin)
   const { data: profileData } = await adminSupabase
     .from('users')
@@ -70,6 +65,41 @@ export default async function OrgDashboardLayout({
   // Super admin can access any org
   if (profile.role !== 'super_admin' && profile.org_id !== org.id) {
     redirect('/')
+  }
+
+  // Check if org is active and has a valid subscription for non-super-admin users.
+  if (profile.role !== 'super_admin') {
+    // Hard org status guard
+    if (org.status !== 'active') {
+      redirect('/org-suspended')
+    }
+
+    // Enforce org subscription status (paused / cancelled / expired / missing → blocked)
+    const { data: orgSub } = await adminSupabase
+      .from('org_subscriptions')
+      .select('status, end_date')
+      .eq('org_id', org.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const allowedStatuses = ['active', 'trialing']
+    let isAllowed = false
+
+    if (orgSub) {
+      const status = (orgSub as any).status as string
+      const endDateStr = (orgSub as any).end_date as string | undefined
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const endDate = endDateStr ? new Date(endDateStr) : null
+      const isExpired = !!endDate && endDate < today
+
+      isAllowed = allowedStatuses.includes(status) && !isExpired
+    }
+
+    if (!isAllowed) {
+      redirect('/org-suspended')
+    }
   }
 
   if (!profile.is_approved && profile.role !== 'super_admin') {
